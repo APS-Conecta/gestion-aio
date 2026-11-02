@@ -2,7 +2,7 @@
   "aio_services_v1": [
     {
       "container_name": "nextcloud-aio-apache",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:f48f712ac6c324cd3807da914ed32073eae49056e95747c53fae79909cf9f79f",
       "documentation": "https://github.com/nextcloud/all-in-one/discussions/2105",
       "depends_on": [
         "nextcloud-aio-onlyoffice",
@@ -86,7 +86,7 @@
     },
     {
       "container_name": "nextcloud-aio-database",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:e853b71a3fde7641b23057a8f49d924e9f9573a26db57e455c6058cfd9455fab",
       "display_name": "PostgreSQL",
       "image": "ghcr.io/nextcloud-releases/aio-postgresql",
       "user": "999",
@@ -155,7 +155,7 @@
         "nextcloud-aio-docker-socket-proxy"
       ],
       "display_name": "Nextcloud",
-      "image": "ghcr.io/nextcloud-releases/aio-nextcloud",
+      "image": "ghcr.io/aps-conecta/gestion-nextcloud",
       "init": true,
       "healthcheck": {
         "start_period": "0s",
@@ -290,7 +290,7 @@
     },
     {
       "container_name": "nextcloud-aio-notify-push",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:ef6f3403e3df129792f76ac85165d5ac03bb39ddb86593b31906015d9d5ae907",
       "display_name": "Client Push",
       "image": "ghcr.io/nextcloud-releases/aio-notify-push",
       "user": "33",
@@ -331,7 +331,7 @@
     },
     {
       "container_name": "nextcloud-aio-redis",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:31ce3cada0e452aa0c16e29b93c5879d664af0f7491759f2c17c45cae2ea744e",
       "display_name": "Redis",
       "image": "ghcr.io/nextcloud-releases/aio-redis",
       "user": "999",
@@ -374,7 +374,7 @@
     },
     {
       "container_name": "nextcloud-aio-collabora",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:d996eb3fd16749aa5a8fe4e21cf175c2514c9efdd4d7ce472f4982cd69de5053",
       "documentation": "https://github.com/nextcloud/all-in-one/discussions/1358",
       "display_name": "Nextcloud Office",
       "image": "ghcr.io/nextcloud-releases/aio-collabora",
@@ -424,7 +424,7 @@
     },
     {
       "container_name": "nextcloud-aio-talk",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:ac35eb212ee178a29a68befa3d8c99ffb146bbcc958dec1fcab0c14d083eca15",
       "documentation": "https://github.com/nextcloud/all-in-one/discussions/1358",
       "display_name": "Nextcloud Talk",
       "image": "ghcr.io/nextcloud-releases/aio-talk",
@@ -494,7 +494,7 @@
     },
     {
       "container_name": "nextcloud-aio-talk-recording",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:a83764674d515d357a71b5f3e6a5b5c54b4b28c2b2d7569c38acf994049852fd",
       "display_name": "Nextcloud Talk Recording",
       "image": "ghcr.io/nextcloud-releases/aio-talk-recording",
       "user": "122",
@@ -550,7 +550,7 @@
       "container_name": "nextcloud-aio-borgbackup",
       "display_name": "Borgbackup",
       "hide_from_list": true,
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:2cdf173f937f14f27f59b5d51427598998b5d86048ad509b9aa0c15f069985c5",
       "image": "ghcr.io/nextcloud-releases/aio-borgbackup",
       "init": true,
       "environment": [
@@ -621,7 +621,7 @@
       "container_name": "nextcloud-aio-watchtower",
       "display_name": "Watchtower",
       "hide_from_list": true,
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:5d3c2877099b76a5cc726fe58a6dbc3832da4957491f7a02a33593a1b15f228e",
       "image": "ghcr.io/nextcloud-releases/aio-watchtower",
       "init": true,
       "environment": [
@@ -644,7 +644,7 @@
       "container_name": "nextcloud-aio-domaincheck",
       "display_name": "Domaincheck",
       "hide_from_list": true,
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:21dea0a813039ab9bc68fd3a292baebcb555a5b9694dd378fe34f1fab4c6b7b3",
       "image": "ghcr.io/nextcloud-releases/aio-domaincheck",
       "init": true,
       "ports": [
@@ -675,7 +675,7 @@
     },
     {
       "container_name": "nextcloud-aio-clamav",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:936e17807a3f8c212f9e7cb36ea26c588bda4833117325ee57539028e32c7816",
       "display_name": "ClamAV",
       "image": "ghcr.io/nextcloud-releases/aio-clamav",
       "user": "100",
@@ -720,7 +720,7 @@
     },
     {
       "container_name": "nextcloud-aio-onlyoffice",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:925849ae8da76612ff68a5bc1683969c479593a045f334ad59b278fecf62e178",
       "display_name": "OnlyOffice (deprecated)",
       "image": "ghcr.io/nextcloud-releases/aio-onlyoffice",
       "init": true,
@@ -764,7 +764,7 @@
     },
     {
       "container_name": "nextcloud-aio-eurooffice",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:963499aab4fd017171f0b5a8e8dc4b5a0683aca574dc55e8c8ac12f742614747",
       "display_name": "EuroOffice",
       "image": "ghcr.io/nextcloud-releases/aio-eurooffice",
       "init": true,
@@ -813,7 +813,7 @@
     },
     {
       "container_name": "nextcloud-aio-imaginary",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:d06f3c9efe1d37e7805173b24d6b75bd94439946ac0f22d2a071f33d0e2c6658",
       "display_name": "Imaginary",
       "image": "ghcr.io/nextcloud-releases/aio-imaginary",
       "user": "65534",
@@ -855,7 +855,7 @@
     },
     {
       "container_name": "nextcloud-aio-fulltextsearch",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:d0f786e85eae4370b1d4b05462c5b84a7adbc16a117e44a21f5fe7d9170a27e3",
       "documentation": "https://github.com/nextcloud/all-in-one/discussions/1709",
       "display_name": "Fulltextsearch",
       "image": "ghcr.io/nextcloud-releases/aio-fulltextsearch",
@@ -909,7 +909,7 @@
     },
     {
       "container_name": "nextcloud-aio-docker-socket-proxy",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:1f9c9a854193a539736dbbaebe938963030c1222d35ac307cb588aa6ac07d2ce",
       "display_name": "Docker Socket Proxy (deprecated)",
       "image": "ghcr.io/nextcloud-releases/aio-docker-socket-proxy",
       "init": true,
@@ -936,7 +936,7 @@
     },
     {
       "container_name": "nextcloud-aio-harp",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:b527df9aaf20df17b6f05ce16cb45bb092e2e815696972fca27026e2f873d114",
       "display_name": "HaRP",
       "image": "ghcr.io/nextcloud-releases/aio-harp",
       "init": true,
@@ -988,7 +988,7 @@
     },
     {
       "container_name": "nextcloud-aio-whiteboard",
-      "image_tag": "%AIO_CHANNEL%",
+      "image_tag": "sha256:31fc9d3ffdd3daf636caae06d907f1499e3d3c91b7e989c18a64a45be945013a",
       "display_name": "Nextcloud Whiteboard",
       "image": "ghcr.io/nextcloud-releases/aio-whiteboard",
       "user": "65534",
