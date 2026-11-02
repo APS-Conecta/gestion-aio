@@ -26,6 +26,7 @@ class Repo:
         git(self.path, "config", "user.name", "t")
         self.write(files)
         self.base = self.commit()
+        git(self.path, "tag", "v0.0.1")
 
     def write(self, files):
         for name, text in files.items():
@@ -38,19 +39,20 @@ class Repo:
 
     def commit(self):
         git(self.path, "add", "-A")
-        git(self.path, "commit", "-q", "--allow-empty", "-m", "x")
+        git(self.path, "commit", "-q", "-m", "x")
         return git(self.path, "rev-parse", "HEAD")
 
     def keep_list(self, *entries, base=None):
-        lines = [f"# base: {base or self.base} upstream fixture"] + list(entries) + ["aps/ APS layer"]
+        lines = [f"# base: {base or self.base} upstream fixture v0.0.1"] + list(entries) + ["aps/ APS layer"]
         self.write({"aps/keep-list.txt": "\n".join(lines) + "\n"})
 
     def close(self):
         self._tmp.cleanup()
 
 
-def run_gate(name, repo):
-    r = subprocess.run([sys.executable, "-I", str(GATES / name), "--repo", str(repo.path)], capture_output=True, text=True)
+def run_gate(name, repo, *extra):
+    r = subprocess.run([sys.executable, "-I", str(GATES / name), "--repo", str(repo.path), *extra],
+                       capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 
 
@@ -63,7 +65,7 @@ class ConformanceGate(unittest.TestCase):
         self.repo.write({"php/a.php": "changed\n"})
         self.repo.keep_list()
         self.repo.commit()
-        code, out = run_gate("conformance.py", self.repo)
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
         self.assertEqual(code, 1, out)
         self.assertIn("M php/a.php", out)
 
@@ -71,7 +73,7 @@ class ConformanceGate(unittest.TestCase):
         self.repo.delete("php/b.php")
         self.repo.keep_list()
         self.repo.commit()
-        code, out = run_gate("conformance.py", self.repo)
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
         self.assertEqual(code, 1, out)
         self.assertIn("D php/b.php", out)
 
@@ -80,13 +82,13 @@ class ConformanceGate(unittest.TestCase):
         self.repo.delete("php/b.php")
         self.repo.keep_list("php/ PHP rebranding", "readme.md APS front page")
         self.repo.commit()
-        code, out = run_gate("conformance.py", self.repo)
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
         self.assertEqual(code, 0, out)
 
     def test_entry_that_matches_no_difference_fails_as_stale(self):
         self.repo.keep_list("readme.md APS front page")
         self.repo.commit()
-        code, out = run_gate("conformance.py", self.repo)
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
         self.assertEqual(code, 1, out)
         self.assertIn("stale", out)
         self.assertIn("readme.md", out)
@@ -95,20 +97,29 @@ class ConformanceGate(unittest.TestCase):
         self.repo.write({"readme.md": "ours\n"})
         self.repo.keep_list("readme.md")
         self.repo.commit()
-        code, out = run_gate("conformance.py", self.repo)
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
         self.assertEqual(code, 1, out)
         self.assertIn("no reason", out)
+
+    def test_base_that_is_not_the_named_upstream_tag_fails(self):
+        self.repo.write({"php/a.php": "changed\n"})
+        fork_commit = self.repo.commit()
+        self.repo.keep_list("php/a.php PHP rebranding", base=fork_commit)
+        self.repo.commit()
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
+        self.assertEqual(code, 1, out)
+        self.assertIn("is not upstream tag v0.0.1", out)
 
     def test_keep_list_without_a_base_commit_fails(self):
         self.repo.write({"aps/keep-list.txt": "aps/ APS layer\n"})
         self.repo.commit()
-        code, out = run_gate("conformance.py", self.repo)
+        code, out = run_gate("conformance.py", self.repo, "--upstream", str(self.repo.path))
         self.assertEqual(code, 1, out)
         self.assertIn("no '# base", out)
         self.assertNotIn("Traceback", out)
 
 
-CODE = "12" + "6301"  # assembled at run time so this file never names a DEIS code itself
+CODE = "999999"
 
 
 class DeisCodeCheck(unittest.TestCase):

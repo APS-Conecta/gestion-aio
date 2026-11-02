@@ -11,8 +11,9 @@ and `docs/agents/` for the issue tracker.
 
 ## Vanilla first
 
-- Everything we add lives under `aps/` (and `docs/`). Any other path is upstream's and may differ from
-  upstream only through an entry in `aps/keep-list.txt` with a one-line reason.
+- New APS files go under `aps/` or `docs/`. Files whose location is fixed (`AGENTS.md`, `CONTEXT.md`,
+  `.github/workflows/aps-*.yml`) and any change to an upstream path need an entry in `aps/keep-list.txt`
+  with a one-line reason.
 - Prefer an upstream switch, setting or hook over changing upstream code. Switch unused upstream
   features off; never delete them.
 - Upstream's contribution policy (`AI_POLICY.md`, `CONTRIBUTING.md`) governs changes sent upstream.
@@ -43,5 +44,5 @@ and `docs/agents/` for the issue tracker.
   suitable seam.
 - `aps/gates/run.sh` runs the static gates exactly as CI does. Run it in the foreground before pushing.
 - Never weaken a gate to get green; fix the input.
-- Upstream's workflows are disabled on this fork. Only `aps-*` workflows run, and CI fails if another
-  workflow is active.
+- Upstream's workflows are disabled on this fork. Only `aps-*` workflows and the org's CodeQL default
+  setup run; CI fails if another workflow is active.

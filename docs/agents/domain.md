@@ -11,7 +11,7 @@ the codebase.
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root: the suite's vocabulary.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in.
+- **`docs/adr/`** (created with the first ADR): read ADRs that touch the area you're about to work in.
 
 This is a single-context repo: one `CONTEXT.md`, one `docs/adr/`. The `/domain-modeling`
 skill adds terms and decisions as they get resolved.
