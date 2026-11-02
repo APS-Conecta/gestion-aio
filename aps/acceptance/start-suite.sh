@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Starts the suite through the mastercontainer's own web API, the requests its interface sends: read
+# Starts the suite through the mastercontainer's own web API, the requests its interface sends (as a
+# same-origin browser would): read
 # the initial passphrase from /setup, log in, set a test domain (validation skipped, the API's own
 # switch), switch the optional containers off as upstream's initial-setup test does, and start.
 # Usage: start-suite.sh <domain>
@@ -10,7 +11,7 @@ domain=$1
 base=https://localhost:8080
 state="$(mktemp -d)"
 trap 'rm -rf "$state"' EXIT
-api() { curl -ksfS -b "$state/jar" -c "$state/jar" "$@"; }
+api() { curl -ksfS -b "$state/jar" -c "$state/jar" -H 'Sec-Fetch-Site: same-origin' "$@"; }
 
 for _ in $(seq 60); do api -o /dev/null "$base/login" && break; sleep 5; done
 api "$base/setup" | sed -n 's/.*id="initial-password"[^>]*>\([^<]*\)<.*/\1/p' | tr -d '\n' > "$state/passphrase"
