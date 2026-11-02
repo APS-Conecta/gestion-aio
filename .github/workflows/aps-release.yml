@@ -44,15 +44,14 @@ jobs:
       mastercontainer: ${{ steps.mastercontainer.outputs.pinned }}
       nextcloud: ${{ steps.nextcloud.outputs.pinned }}
     steps:
-      - name: Name the test build
+      - name: Name the test build (on a pull request, its commit is the merge preview)
         id: release
         env:
-          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          COMMIT: ${{ github.sha }}
           TAG: v0.0.0-ci.${{ github.run_number }}
         run: printf 'tag=%s\ncommit=%s\n' "$TAG" "$COMMIT" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.release.outputs.commit }}
           persist-credentials: false
       - name: Every official image is pinned by digest to upstream's set
         run: |
@@ -102,7 +101,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.images.outputs.commit }}
           persist-credentials: false
       - name: Install minisign
         run: sudo apt-get -qq update && sudo apt-get -qq install -y minisign
@@ -145,7 +143,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.images.outputs.commit }}
           persist-credentials: false
           sparse-checkout: aps/acceptance
       - name: Make the runner a clean machine (no Docker, room for the images)
