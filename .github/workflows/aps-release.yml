@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # A test build: our two images built from the release commit, the official images checked against
 # upstream's v14.4.3 set, the signed bundle and the pre-release v0.0.0-ci.<run>; then the bootstrap
-# is run from that pre-release on fresh runners.
+# is run from that pre-release on fresh runners and in the clean-machine acceptance run.
 name: APS release
 
 on:
   pull_request:
     paths:
+      - .github/workflows/aps-acceptance.yml
       - .github/workflows/aps-release.yml
       - aps/acceptance/**
       - aps/bootstrap/**
@@ -174,26 +175,10 @@ jobs:
           [ -z "$(command -v docker)" ]
       - name: Run the one command, as an operator would
         run: curl -fsSL "$RELEASE_URL/install.sh" | sudo bash
-      - name: Docker Engine came from Docker's packages and the mastercontainer runs our pinned image
-        env:
-          PINNED_MASTERCONTAINER: ${{ needs.images.outputs.mastercontainer }}
-        run: |
-          apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
-          [ "$(sudo docker inspect -f '{{.State.Running}}' nextcloud-aio-mastercontainer)" = true ]
-          [ "$(sudo docker inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer)" = "$MASTERCONTAINER:$TAG" ]
-          sudo docker image inspect -f '{{join .RepoDigests "\n"}}' "$MASTERCONTAINER:$TAG" | grep -xF "$PINNED_MASTERCONTAINER" > /dev/null
+      - name: Docker Engine came from Docker's packages
+        run: apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
       - name: Start the suite through the mastercontainer
         run: aps/acceptance/start-suite.sh example.com
-      - name: Every container the mastercontainer started runs a pinned image of the release
-        run: |
-          started="$(sudo docker ps -a --filter name=nextcloud-aio- --format '{{.Names}}' | grep -vx nextcloud-aio-mastercontainer)"
-          for name in $started; do
-            image="$(sudo docker inspect -f '{{.Config.Image}}' "$name")"
-            echo "$name $image"
-            grep -qxF "$image" /opt/aps-conecta/gestion/images.lock \
-              || { echo "::error::$name runs $image, which is not pinned by $TAG"; exit 1; }
-          done
-          echo "$started" | grep -qx nextcloud-aio-nextcloud
       - name: Nextcloud accepts more than 100 users
         run: |
           for _ in $(seq 90); do
@@ -210,6 +195,15 @@ jobs:
           sudo docker ps -a || true
           sudo docker logs nextcloud-aio-mastercontainer 2>&1 | tail -n 100 || true
           sudo docker logs nextcloud-aio-nextcloud 2>&1 | tail -n 100 || true
+
+  acceptance:
+    name: Clean-machine acceptance
+    needs: [images, release]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/aps-acceptance.yml
+    with:
+      tag: ${{ needs.images.outputs.tag }}
 
   host-checks:
     name: A machine below the minimum is refused before it is changed
