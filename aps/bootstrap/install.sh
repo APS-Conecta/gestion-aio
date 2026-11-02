@@ -10,7 +10,8 @@
 # missing; verify the bundle's signature and checksum; install Docker Engine when missing; unpack the
 # bundle; start the mastercontainer as upstream's readme does, from the digest the bundle names.
 # Everything runs inside main, so a truncated download never runs half a script.
-# GESTION_DOWNLOAD_URL points at a mirror of the release assets; the same verification applies.
+# GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
+# same verification.
 set -euo pipefail
 
 RELEASE_TAG=""
@@ -48,7 +49,7 @@ check_host() {
   [ "$cpus" -ge "$MIN_CPUS" ] || gaps+=("tiene $cpus núcleo(s) de CPU; se requieren al menos $MIN_CPUS")
   disk_dir=/var/lib/docker
   [ -d "$disk_dir" ] || disk_dir=/var/lib
-  disk_gb="$(df --output=avail -B 1000000000 "$disk_dir" | tail -n 1 | tr -dc 0-9)"
+  disk_gb="$(df --output=avail -B 1 "$disk_dir" | awk 'NR == 2 {print int($1 / 1e9)}')"
   [ "${disk_gb:-0}" -ge "$MIN_DISK_GB" ] \
     || gaps+=("tiene ${disk_gb:-0} GB libres en $disk_dir; se requieren al menos $MIN_DISK_GB GB")
   if ! command -v docker >/dev/null 2>&1; then
@@ -113,13 +114,16 @@ start_mastercontainer() {
   pinned="$(grep -m 1 "^$MASTERCONTAINER@sha256:" "$INSTALL_DIR/images.lock")" \
     || die "el paquete no indica la imagen del contenedor maestro. Infórmelo a APS Conecta."
   say "Descargando el contenedor maestro..."
-  docker pull --quiet "$pinned" >/dev/null
+  docker pull --quiet "$pinned" >/dev/null \
+    || die "no se pudo descargar el contenedor maestro. Revise la conexión a internet y vuelva a ejecutar el instalador."
   docker tag "$pinned" "$image"
   docker run --init --sig-proxy=false --name nextcloud-aio-mastercontainer --restart always --detach \
     --publish 80:80 --publish 8080:8080 --publish 8443:8443 \
     --volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config \
     --volume /var/run/docker.sock:/var/run/docker.sock:ro \
-    "$image" >/dev/null
+    "$image" >/dev/null \
+    || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
+         die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }
   say "APS Conecta Gestión $RELEASE_TAG está en marcha."
   print_address
 }

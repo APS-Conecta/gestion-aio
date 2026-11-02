@@ -56,12 +56,13 @@ jobs:
       - name: Every official image is pinned by digest to upstream's set
         run: |
           base="$(sed -n 's/^# base: \([0-9a-f]\{40\}\) .*/\1/p' aps/keep-list.txt)"
-          jq -r --arg ours "$NEXTCLOUD" '.aio_services_v1[] | select(.image != $ours) | "\(.image)@\(.image_tag)"' php/containers.json \
+          { jq -r --arg ours "$NEXTCLOUD" '.aio_services_v1[] | select(.image != $ours) | "\(.image)@\(.image_tag)"' php/containers.json
+            sed -n 's/^FROM //p' aps/images/nextcloud/Dockerfile; } \
             | while read -r pinned; do
                 case "$pinned" in *@sha256:*) ;; *) echo "::error::$pinned is not pinned by digest"; exit 1 ;; esac
                 aps/release/revision.sh "$pinned" "$base"
               done
-      - name: Log in to ghcr.io
+      - name: Log in to ghcr.io and set up buildx
         env:
           TOKEN: ${{ github.token }}
         run: |

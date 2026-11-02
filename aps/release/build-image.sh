@@ -8,6 +8,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 [ "$#" -eq 5 ] || { echo "usage: $0 <image> <dockerfile> <context> <tag> <commit>" >&2; exit 2; }
 image=$1 dockerfile=$2 context=$3 tag=$4 commit=$5
+[ "$(git rev-parse HEAD)" = "$commit" ] || { echo "::error::checkout is $(git rev-parse HEAD), not $commit" >&2; exit 1; }
 metadata="$(mktemp)"
 docker buildx build --platform linux/amd64 --file "$dockerfile" \
   --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
