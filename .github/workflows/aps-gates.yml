@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 APS Conecta
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: APS gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    name: PR title is an English Conventional Commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s' "$TITLE" | grep -qE '^(feat|fix|docs|chore|test|build|ci|refactor|perf|revert|style)(\([a-z0-9-]+\))?!?: [ -~]+$' \
+            || { echo "::error::'$TITLE' is not an English (ASCII) Conventional Commit title"; exit 1; }
+
+  gates:
+    name: Static gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the conformance gate diffs against the upstream base commit
+          persist-credentials: false
+      - run: aps/gates/run.sh
+
+  workflows:
+    name: Only APS workflows are active
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: List active workflows outside .github/workflows/aps-*
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          active=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate \
+            --jq '.workflows[] | select(.state == "active") | .path' \
+            | grep -vE '^(\.github/workflows/aps-[^/]+\.ya?ml|dynamic/.+)$' || true)
+          [ -z "$active" ] || { printf '::error::upstream workflows are active on the fork:\n%s\n' "$active"; exit 1; }

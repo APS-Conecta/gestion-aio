@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 APS Conecta
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# base: 9774b360eef1c5f15adaa097182908895e496dca upstream nextcloud/all-in-one v14.4.3
+#
+# Every path where this repo differs from upstream, one per line: `<path> <reason>`. A path ending
+# in `/` covers everything under it. The conformance gate fails on an undeclared difference and on
+# an entry that no longer differs.
+aps/ APS layer: everything we add lives here
+docs/ APS agent docs and ADRs
+AGENTS.md APS agent steering replaces upstream's contributor steering
+CONTEXT.md APS domain glossary
+.github/workflows/aps-gates.yml APS static gates and PR-title check
