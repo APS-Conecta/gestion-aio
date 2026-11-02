@@ -90,7 +90,7 @@ for _ in $(seq 60); do "$MACHINE" true 2> /dev/null && break; sleep 5; done
 
 stage="the one command"
 echo "$COMMAND"
-"$MACHINE" "$COMMAND" 2>&1 | tee "$CONSOLE"
+timeout 15m "$MACHINE" "$COMMAND" 2>&1 | tee "$CONSOLE"
 
 stage=""
 failed=()
@@ -99,7 +99,7 @@ for check in aps/acceptance/checks/*; do
   export EVIDENCE="$work/evidence/$name"
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
-  if "$check" < /dev/null; then
+  if timeout 15m "$check" < /dev/null; then
     echo "::endgroup::"
     echo "passed: $name"
   else

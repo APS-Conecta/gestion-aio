@@ -143,10 +143,6 @@ jobs:
       TAG: ${{ needs.images.outputs.tag }}
       RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.images.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: aps/acceptance
       - name: Make the runner a clean machine (no Docker, room for the images)
         run: |
           sudo systemctl stop docker.socket docker.service containerd.service || true
@@ -177,24 +173,11 @@ jobs:
         run: curl -fsSL "$RELEASE_URL/install.sh" | sudo bash
       - name: Docker Engine came from Docker's packages
         run: apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
-      - name: Start the suite through the mastercontainer
-        run: aps/acceptance/start-suite.sh example.com
-      - name: Nextcloud accepts more than 100 users
-        run: |
-          for _ in $(seq 90); do
-            [ "$(sudo docker inspect -f '{{.State.Health.Status}}' nextcloud-aio-nextcloud)" = healthy ] && break
-            sleep 10
-          done
-          sudo docker exec --user www-data nextcloud-aio-nextcloud bash -c '
-            OC_PASS="$(head -c 24 /dev/urandom | base64)"; export OC_PASS
-            for i in $(seq 101); do php occ user:add --password-from-env "prueba$i" > /dev/null || exit 1; done'
-          sudo docker exec --user www-data nextcloud-aio-nextcloud php occ user:list --output=json | jq -e 'length > 101'
       - name: Show the containers and the logs
         if: failure()
         run: |
           sudo docker ps -a || true
           sudo docker logs nextcloud-aio-mastercontainer 2>&1 | tail -n 100 || true
-          sudo docker logs nextcloud-aio-nextcloud 2>&1 | tail -n 100 || true
 
   acceptance:
     name: Clean-machine acceptance

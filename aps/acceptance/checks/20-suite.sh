@@ -6,7 +6,7 @@
 set -euo pipefail
 "$MACHINE" bash -s example.com < aps/acceptance/start-suite.sh
 lock="$("$MACHINE" cat /opt/aps-conecta/gestion/images.lock)"
-started="$("$MACHINE" "sudo docker ps --all --filter name=nextcloud-aio- --format '{{.Names}}'" | { grep -vx nextcloud-aio-mastercontainer || true; })"
+started="$("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" | { grep -vx nextcloud-aio-mastercontainer || true; })"
 for name in $started; do
   image="$("$MACHINE" "sudo docker inspect -f '{{.Config.Image}}' $name")"
   echo "$name $image"
