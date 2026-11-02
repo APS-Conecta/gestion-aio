@@ -1,0 +1,247 @@
+# SPDX-FileCopyrightText: 2026 APS Conecta
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A test build: our two images built from the release commit, the official images checked against
+# upstream's v14.4.3 set, the signed bundle and the pre-release v0.0.0-ci.<run>; then the bootstrap
+# is run from that pre-release on fresh runners.
+name: APS release
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/aps-release.yml
+      - aps/acceptance/**
+      - aps/bootstrap/**
+      - aps/images/**
+      - aps/release/**
+      - Containers/mastercontainer/**
+      - php/**
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
+concurrency:
+  group: aps-release-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  MASTERCONTAINER: ghcr.io/aps-conecta/gestion-mastercontainer
+  NEXTCLOUD: ghcr.io/aps-conecta/gestion-nextcloud
+
+jobs:
+  images:
+    name: Build our images from the release commit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+      mastercontainer: ${{ steps.mastercontainer.outputs.pinned }}
+      nextcloud: ${{ steps.nextcloud.outputs.pinned }}
+    steps:
+      - name: Name the test build (on a pull request, its commit is the merge preview)
+        id: release
+        env:
+          COMMIT: ${{ github.sha }}
+          TAG: v0.0.0-ci.${{ github.run_number }}
+        run: printf 'tag=%s\ncommit=%s\n' "$TAG" "$COMMIT" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Every official image is pinned by digest to upstream's set
+        run: |
+          base="$(sed -n 's/^# base: \([0-9a-f]\{40\}\) .*/\1/p' aps/keep-list.txt)"
+          jq -r --arg ours "$NEXTCLOUD" '.aio_services_v1[] | select(.image != $ours) | "\(.image)@\(.image_tag)"' php/containers.json \
+            | while read -r pinned; do
+                case "$pinned" in *@sha256:*) ;; *) echo "::error::$pinned is not pinned by digest"; exit 1 ;; esac
+                aps/release/revision.sh "$pinned" "$base"
+              done
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --use
+      - name: Build the thin Nextcloud image
+        id: nextcloud
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          pinned="$(aps/release/build-image.sh "$NEXTCLOUD" aps/images/nextcloud/Dockerfile aps/images/nextcloud "$TAG" "$COMMIT")"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+      - name: Build the mastercontainer with the Nextcloud image pinned
+        id: mastercontainer
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+          PINNED_NEXTCLOUD: ${{ steps.nextcloud.outputs.pinned }}
+        run: |
+          jq --arg image "$NEXTCLOUD" --arg digest "${PINNED_NEXTCLOUD#*@}" \
+            '(.aio_services_v1[] | select(.image == $image) | .image_tag) = $digest' php/containers.json > "$RUNNER_TEMP/containers.json"
+          mv "$RUNNER_TEMP/containers.json" php/containers.json
+          [ "$(jq -r --arg image "$NEXTCLOUD" '[.aio_services_v1[] | select(.image == $image) | .image_tag] | join(" ")' php/containers.json)" = "${PINNED_NEXTCLOUD#*@}" ]
+          pinned="$(aps/release/build-image.sh "$MASTERCONTAINER" Containers/mastercontainer/Dockerfile . "$TAG" "$COMMIT")"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Sign and publish the pre-release
+    needs: images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.images.outputs.tag }}
+      COMMIT: ${{ needs.images.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install minisign
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y minisign
+      - name: "TEMPORARY: throwaway signing key while BUNDLE_SIGNING_KEY is unset"
+        env:
+          SIGNING_KEY: ${{ secrets.BUNDLE_SIGNING_KEY }}
+        run: |
+          [ -z "$SIGNING_KEY" ] || exit 0
+          minisign -G -f -W -p aps/release/bundle.pub -s "$RUNNER_TEMP/throwaway.key" < /dev/null
+          echo "THROWAWAY_KEY=$RUNNER_TEMP/throwaway.key" >> "$GITHUB_ENV"
+      - name: Assemble the bundle, install.sh and SHA256SUMS
+        env:
+          PINNED_MASTERCONTAINER: ${{ needs.images.outputs.mastercontainer }}
+          PINNED_NEXTCLOUD: ${{ needs.images.outputs.nextcloud }}
+        run: aps/release/package.sh "$TAG" "$PINNED_MASTERCONTAINER" "$PINNED_NEXTCLOUD" dist
+      - name: Sign SHA256SUMS with the bundle key and check it against the committed public key
+        env:
+          SIGNING_KEY: ${{ secrets.BUNDLE_SIGNING_KEY }}
+        run: |
+          SIGNING_KEY="${SIGNING_KEY:-$(cat "${THROWAWAY_KEY:-/dev/null}")}"
+          [ -n "$SIGNING_KEY" ] || { echo "::error::the repository secret BUNDLE_SIGNING_KEY is not set"; exit 1; }
+          key="$RUNNER_TEMP/bundle.key"
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key")
+          minisign -S -s "$key" -m dist/SHA256SUMS -t "gestion-aio $TAG" < /dev/null
+          rm -f "$key"
+          minisign -V -p aps/release/bundle.pub -m dist/SHA256SUMS
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$COMMIT" --prerelease --latest=false \
+            --title "APS Conecta Gestión $TAG (prueba)" \
+            --notes "Versión de prueba, no apta para establecimientos. Instalación: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
+          [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = true ]
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          [ "$latest" != "$TAG" ] || { echo "::error::$TAG became Latest"; exit 1; }
+
+  bootstrap:
+    name: The one command on a fresh runner
+    needs: [images, release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.images.outputs.tag }}
+      RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.images.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: aps/acceptance
+      - name: Make the runner a clean machine (no Docker, room for the images)
+        run: |
+          sudo systemctl stop docker.socket docker.service containerd.service || true
+          packages="$(dpkg-query -W -f '${db:Status-Abbrev} ${Package}\n' 'docker*' 'moby-*' 'containerd*' 2>/dev/null || true)"
+          printf '%s\n' "$packages" | awk '/^ii/ {print $2}' | xargs --no-run-if-empty sudo apt-get -qq purge -y
+          { grep -rlF download.docker.com /etc/apt/sources.list.d || true; } | xargs --no-run-if-empty sudo rm -f
+          sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker /etc/apt/keyrings/docker* \
+            /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache
+          [ -z "$(command -v docker)" ]
+          df -h /
+      - name: A tampered bundle is refused before anything is unpacked
+        run: |
+          mkdir mirror
+          for f in "gestion-aio-$TAG.tar.gz" SHA256SUMS SHA256SUMS.minisig; do curl -fsSL --retry 5 -o "mirror/$f" "$RELEASE_URL/$f"; done
+          printf 'x' >> "mirror/gestion-aio-$TAG.tar.gz"
+          python3 -m http.server 8099 --bind 127.0.0.1 --directory mirror > /dev/null 2>&1 &
+          server=$!
+          sleep 2
+          rc=0
+          curl -fsSL "$RELEASE_URL/install.sh" | sudo env GESTION_DOWNLOAD_URL=http://127.0.0.1:8099 bash 2> refused.log || rc=$?
+          kill "$server"
+          cat refused.log
+          [ "$rc" -ne 0 ]
+          grep -q 'no coincide con su suma de verificación' refused.log
+          [ ! -e /opt/aps-conecta ]
+          [ -z "$(command -v docker)" ]
+      - name: Run the one command, as an operator would
+        run: curl -fsSL "$RELEASE_URL/install.sh" | sudo bash
+      - name: Docker Engine came from Docker's packages and the mastercontainer runs our pinned image
+        env:
+          PINNED_MASTERCONTAINER: ${{ needs.images.outputs.mastercontainer }}
+        run: |
+          apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
+          [ "$(sudo docker inspect -f '{{.State.Running}}' nextcloud-aio-mastercontainer)" = true ]
+          [ "$(sudo docker inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer)" = "$MASTERCONTAINER:$TAG" ]
+          sudo docker image inspect -f '{{join .RepoDigests "\n"}}' "$MASTERCONTAINER:$TAG" | grep -xF "$PINNED_MASTERCONTAINER" > /dev/null
+      - name: Start the suite through the mastercontainer
+        run: aps/acceptance/start-suite.sh example.com
+      - name: Every container the mastercontainer started runs a pinned image of the release
+        run: |
+          started="$(sudo docker ps -a --filter name=nextcloud-aio- --format '{{.Names}}' | grep -vx nextcloud-aio-mastercontainer)"
+          for name in $started; do
+            image="$(sudo docker inspect -f '{{.Config.Image}}' "$name")"
+            echo "$name $image"
+            grep -qxF "$image" /opt/aps-conecta/gestion/images.lock \
+              || { echo "::error::$name runs $image, which is not pinned by $TAG"; exit 1; }
+          done
+          echo "$started" | grep -qx nextcloud-aio-nextcloud
+      - name: Nextcloud accepts more than 100 users
+        run: |
+          for _ in $(seq 90); do
+            [ "$(sudo docker inspect -f '{{.State.Health.Status}}' nextcloud-aio-nextcloud)" = healthy ] && break
+            sleep 10
+          done
+          sudo docker exec --user www-data nextcloud-aio-nextcloud bash -c '
+            OC_PASS="$(head -c 24 /dev/urandom | base64)"; export OC_PASS
+            for i in $(seq 101); do php occ user:add --password-from-env "prueba$i" > /dev/null || exit 1; done'
+          sudo docker exec --user www-data nextcloud-aio-nextcloud php occ user:list --output=json | jq -e 'length > 101'
+      - name: Show the containers and the logs
+        if: failure()
+        run: |
+          sudo docker ps -a || true
+          sudo docker logs nextcloud-aio-mastercontainer 2>&1 | tail -n 100 || true
+          sudo docker logs nextcloud-aio-nextcloud 2>&1 | tail -n 100 || true
+
+  host-checks:
+    name: A machine below the minimum is refused before it is changed
+    needs: [images, release]
+    runs-on: ubuntu-24.04-arm
+    permissions: {}
+    env:
+      RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.images.outputs.tag }}
+    steps:
+      - name: An arm64 machine with 1 CPU, 2 GiB of memory and 1 GB of disk
+        run: |
+          curl -fsSL --retry 5 -o install.sh "$RELEASE_URL/install.sh"
+          printf 'MemTotal:        2097152 kB\n' > meminfo
+          rc=0
+          docker run --rm --cpuset-cpus 0 --tmpfs /var/lib:size=1g \
+            --volume "$PWD/meminfo:/proc/meminfo:ro" --volume "$PWD/install.sh:/install.sh:ro" \
+            ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 \
+            bash -c 'bash /install.sh; rc=$?
+              [ ! -e /opt/aps-conecta ] && [ ! -e /etc/apt/sources.list.d/docker.sources ] && ! command -v minisign \
+                || { echo "the host was changed" >&2; exit 99; }
+              exit "$rc"' > refused.log 2>&1 || rc=$?
+          cat refused.log
+          [ "$rc" -eq 1 ]
+          grep -q 'No se modificó nada' refused.log
+          grep -q 'la arquitectura del procesador es aarch64; se requiere x86_64' refused.log
+          grep -q 'tiene 2 GiB de memoria; se requieren al menos 6 GiB' refused.log
+          grep -q 'tiene 1 núcleo(s) de CPU; se requieren al menos 2' refused.log
+          grep -q 'GB libres en /var/lib; se requieren al menos 20 GB' refused.log
