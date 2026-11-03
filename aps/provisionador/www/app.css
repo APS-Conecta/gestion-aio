@@ -40,6 +40,9 @@ code { font-size: .8rem; overflow-wrap: anywhere; }
 .navigation ol { list-style: none; margin: 0; padding: 0; }
 .navigation li { display: flex; align-items: center; gap: .6rem; padding: .5rem .75rem; border-radius: var(--radius); color: var(--aps-muted); }
 .navigation li[aria-current] { background: var(--aps-violet-tint); color: var(--aps-violet-dark); font-weight: 700; }
+.step-link { all: unset; display: flex; align-items: center; gap: .6rem; cursor: pointer; }
+.step-link:disabled { cursor: default; }
+.step-link:focus-visible { outline: 2px solid var(--aps-violet); outline-offset: 2px; }
 .step { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1px solid currentColor; font-size: .85rem; }
 .fingerprint { margin: auto 0 0; padding: .75rem; font-size: .8rem; color: var(--aps-muted); }
 .fingerprint code { display: block; margin-top: .25rem; }
@@ -66,6 +69,9 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-v
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
 .message { margin: .75rem 0 0; }
 .message.error { color: var(--aps-error-text); }
+
+/* «Dirección»: the name, which the operator reads but does not edit. */
+.address { font: 600 1.2rem var(--aps-font-display); overflow-wrap: anywhere; margin: 0; }
 
 /* Simple buttons: one primary action, the rest secondary. */
 button { font: 600 1rem var(--aps-font-body); padding: .55rem 1.1rem; border-radius: var(--radius); border: 1px solid var(--aps-border); background: #fff; color: var(--aps-ink); cursor: pointer; }

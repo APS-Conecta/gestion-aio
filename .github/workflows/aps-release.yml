@@ -18,6 +18,7 @@ on:
       - aps/name-service/**
       - aps/provisionador/**
       - aps/release/**
+      - community-containers/caddy/**
       - Containers/mastercontainer/**
       - php/**
   workflow_dispatch:
@@ -97,17 +98,22 @@ jobs:
         run: |
           pinned="$(aps/release/build-image.sh "$CADDY" aps/images/caddy/Dockerfile aps/images/caddy "$TAG" "$COMMIT")"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
-      - name: Build the mastercontainer with the Nextcloud image pinned
+      - name: Build the mastercontainer with our Nextcloud and Caddy images pinned
         id: mastercontainer
         env:
           TAG: ${{ steps.release.outputs.tag }}
           COMMIT: ${{ steps.release.outputs.commit }}
           PINNED_NEXTCLOUD: ${{ steps.nextcloud.outputs.pinned }}
+          PINNED_CADDY: ${{ steps.caddy.outputs.pinned }}
         run: |
-          jq --arg image "$NEXTCLOUD" --arg digest "${PINNED_NEXTCLOUD#*@}" \
-            '(.aio_services_v1[] | select(.image == $image) | .image_tag) = $digest' php/containers.json > "$RUNNER_TEMP/containers.json"
-          mv "$RUNNER_TEMP/containers.json" php/containers.json
-          [ "$(jq -r --arg image "$NEXTCLOUD" '[.aio_services_v1[] | select(.image == $image) | .image_tag] | join(" ")' php/containers.json)" = "${PINNED_NEXTCLOUD#*@}" ]
+          pin() { # <containers file> <image@digest>: the image's image_tag becomes its digest
+            jq --arg image "${2%@*}" --arg digest "${2#*@}" \
+              '(.aio_services_v1[] | select(.image == $image) | .image_tag) = $digest' "$1" > "$RUNNER_TEMP/pinned.json"
+            mv "$RUNNER_TEMP/pinned.json" "$1"
+            [ "$(jq -r --arg image "${2%@*}" '[.aio_services_v1[] | select(.image == $image) | .image_tag] | join(" ")' "$1")" = "${2#*@}" ]
+          }
+          pin php/containers.json "$PINNED_NEXTCLOUD"
+          pin community-containers/caddy/caddy.json "$PINNED_CADDY"
           pinned="$(aps/release/build-image.sh "$MASTERCONTAINER" Containers/mastercontainer/Dockerfile . "$TAG" "$COMMIT")"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
 
@@ -243,6 +249,8 @@ jobs:
     uses: ./.github/workflows/aps-acceptance.yml
     with:
       tag: ${{ needs.images.outputs.tag }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
   host-checks:
     name: A machine below the minimum is refused before it is changed
