@@ -342,6 +342,15 @@ class Suite:
         except OSError:
             return False
 
+    def eurooffice_answers(self):
+        """Whether Euro-Office answers Nextcloud, by its connector's own check: Euro-Office converts a file it fetches
+        from Nextcloud."""
+        try:
+            self.occ("eurooffice:documentserver", "--check")
+            return True
+        except Unreachable:
+            return False
+
 
 class FakeSuite:
     """The in-memory suite of the wizard-API tests, with the name service it claims from."""
@@ -401,6 +410,9 @@ class FakeSuite:
     def answers(self, name, address):
         return self.answering and name == self.domain
 
+    def eurooffice_answers(self):
+        return not self.down & {"nextcloud", "eurooffice"} and self.apps.get("eurooffice", {}).get("enabled") == "yes"
+
     def _outage_guard(self, part="aio"):
         if part in self.down:
             raise Unreachable(NEXTCLOUD_DOWN if part == "nextcloud" else SUITE_DOWN)
@@ -449,10 +461,6 @@ class FakeSuite:
             if args[1] not in self.apps:
                 raise Unreachable(OCC_FAILED.format(" ".join(args)))
             self.apps[args[1]]["enabled"] = "yes"
-            return ""
-        if args == ("eurooffice:documentserver", "--check"):
-            if "eurooffice" in self.down or self.apps.get("eurooffice", {}).get("enabled") != "yes":
-                raise Unreachable(OCC_FAILED.format(" ".join(args)))
             return ""
         raise AssertionError(f"the fake suite runs no occ {args}")
 

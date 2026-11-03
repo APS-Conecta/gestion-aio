@@ -129,7 +129,7 @@ with chromium() as browser:
             page.get_by_role("button", name="Crear", exact=True).click()
         if not created.value.ok:
             sys.exit(f"the Office entry did not create {FILE}: HTTP {created.value.status}")
-        editor(context)[0].screenshot(path=evidence / "creado.png")
+        editor(context)[0].screenshot(path=evidence / "created.png")
         edit(context, first)
         saved(first)
 
@@ -145,14 +145,14 @@ with chromium() as browser:
         search.press("Enter")
         until(lambda: frame.locator("#search-bar-results").inner_text().rsplit("/", 1)[-1].strip() not in ("", "0"),
               30, f"the reopened document does not show {first}")
-        page.screenshot(path=evidence / "reabierto.png")
+        page.screenshot(path=evidence / "reopened.png")
         search.press("Escape")
         edit(context, second)
         saved(first, second)
     except BaseException:
         for n, opened in enumerate(context.pages):
             with contextlib.suppress(Error):
-                opened.screenshot(path=evidence / f"fallo-{n}.png")
+                opened.screenshot(path=evidence / f"failed-{n}.png")
         raise
 print(f"{USER} created {FILE} from the Office entry, edited it in Euro-Office, reopened it showing the saved line and "
       "saved a second one")

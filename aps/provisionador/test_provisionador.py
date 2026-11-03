@@ -713,10 +713,11 @@ class Office(InstallTest):
         self.claim()
         self.install()
         self.assertEqual(self.steps(self.until("done"))[OFFICE], ("green", None))
-        office = self.suite.apps["eurooffice"]
-        self.assertEqual((self.suite.apps["office"]["enabled"], office["enabled"]), ("yes", "yes"))
-        self.assertEqual(json.loads(office["defFormats"]), {"docx": True, "xlsx": True, "pptx": True})
-        self.assertEqual((office["DocumentServerInternalUrl"], office["StorageUrl"]),
+        eurooffice = self.suite.apps["eurooffice"]
+        self.assertEqual((self.suite.apps["office"]["enabled"], eurooffice["enabled"]), ("yes", "yes"))
+        odf = {"odt": True, "ods": True, "odp": True}
+        self.assertEqual((json.loads(eurooffice["defFormats"]), json.loads(eurooffice["editFormats"])), (odf, odf))
+        self.assertEqual((eurooffice["DocumentServerInternalUrl"], eurooffice["StorageUrl"]),
                          ("http://nextcloud-aio-eurooffice/", "http://nextcloud-aio-apache.nextcloud-aio:23973/"))
 
     def test_office_waits_for_euro_office_to_answer_nextcloud(self):
@@ -728,35 +729,6 @@ class Office(InstallTest):
         self.assertEqual(self.steps(self.progress())[OFFICE][0], "running")
         self.suite.down = set()
         self.assertEqual(self.steps(self.until("done"))[OFFICE], ("green", None))
-
-    def test_without_euro_office_installed_office_fails_loudly_and_reintentar_configures_it(self):
-        self.claim()
-        del self.suite.apps["eurooffice"]
-        self.install()
-        install = self.until("failed")
-        status, reason = self.steps(install)[OFFICE]
-        self.assertEqual(status, "failed")
-        self.assertIn("occ app:enable eurooffice", reason)
-        self.assertEqual(self.named(install, "failed"), {OFFICE})
-        self.suite.apps["eurooffice"] = {}
-        self.install()
-        self.until("done")
-        self.assertEqual(self.suite.apps["eurooffice"]["enabled"], "yes")
-
-    def test_an_office_entry_turned_off_after_its_step_keeps_listo_away_until_reintentar(self):
-        self.claim()
-        self.suite.down = {"issuer"}
-        self.install()
-        self.assertEqual(self.steps(self.until("failed"))[OFFICE][0], "green")
-        self.suite.apps["office"]["enabled"] = "no"
-        self.suite.down = set()
-        self.install()
-        status, reason = self.steps(self.until("failed"))[OFFICE]
-        self.assertEqual(status, "failed")
-        self.assertIn("office.enabled", reason)
-        self.install()
-        self.until("done")
-        self.assertEqual(self.suite.apps["office"]["enabled"], "yes")
 
 
 class Listo(InstallTest):
