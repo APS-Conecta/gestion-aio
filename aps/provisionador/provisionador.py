@@ -29,7 +29,9 @@ import socket
 import ssl
 import subprocess
 import sys
+import threading
 import time
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -60,6 +62,15 @@ NO_CENTRE = "Elija primero el centro: la dirección es la de su nombre."
 IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este establecimiento ya tenía una instalación, "
           "APS Conecta puede liberarla; después presione «Reintentar».")
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
+NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
+UNEXPECTED = ("La instalación se detuvo por un error inesperado. Presione «Reintentar»; si vuelve a ocurrir, "
+              "contacte a APS Conecta e indique el registro del servidor: journalctl -u aps-provisionador")
+
+# The optional containers the suite runs, by AIO's switch, with the name «Revisar» shows. Every other one stays off.
+COMPONENTS = {"talk": "Talk", "eurooffice": "Euro-Office", "imaginary": "Imaginary", "clamav": "ClamAV (antivirus)",
+              "fulltextsearch": "Búsqueda de texto completo", "harp": "HaRP (servidor de aplicaciones externas)"}
+BACKUP_FOLDER = "/var/backups/aps-conecta"  # the backup folder: AIO's nightly backup keeps its repository here
+BACKUP_TIME = "06:00"  # UTC, as AIO's clock runs: 02:00 or 03:00 in continental Chile
 
 
 def digest(value):
@@ -149,6 +160,8 @@ class Provisionador:
         self.slugs = deis.slugs(self.register.rows)
         self.suite = suite
         self.fingerprint = None
+        self.install_lock = threading.Lock()
+        self.worker = None  # the install running in the background, if any
 
     def server(self, address=("0.0.0.0", PORT)):
         """Bind the wizard, make its certificate and record where it answers, for `link`."""
@@ -193,7 +206,9 @@ class Provisionador:
 
     def get_state(self, query, body):
         state = self.state.read()
-        return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state)}
+        return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
+                     "components": list(COMPONENTS.values()), "backup_folder": BACKUP_FOLDER,
+                     "install": self.progress(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -240,12 +255,64 @@ class Provisionador:
                 s["address"] = {"name": claimed}
         return 200, {"address": self.address(self.state.read())}
 
+    def busy(self):
+        return self.worker is not None and self.worker.is_alive()
+
+    def progress(self, state):
+        """None before «Instalar»; a failure's Spanish reason; otherwise each container as AIO reports it, a component's
+        under its «Revisar» name, «done» once AIO started them and every one runs. A reading that fails says why, and
+        the next one asks again."""
+        install = state.get("install")
+        if not (install or self.busy()):
+            return None
+        if install and "error" in install:
+            return {"status": "failed", "error": install["error"]}
+        try:
+            containers = self.suite.containers()
+        except Unreachable as outage:
+            return {"status": "installing", "containers": [], "error": str(outage)}
+        done = bool(install) and all(c["state"] == "running" for c in containers)
+        named = [{"name": COMPONENTS.get(c["id"].removeprefix("nextcloud-aio-"), c["name"]), "state": c["state"]}
+                 for c in containers]
+        return {"status": "done" if done else "installing", "containers": named}
+
+    def post_install(self, query, body):
+        """POST /api/install, «Instalar»: the install runs in the background and GET /api/state shows its progress.
+        While it runs, or once AIO started the suite, pressing it again starts nothing more; after a failure it runs
+        again («Reintentar»)."""
+        with self.install_lock:
+            state = self.state.read()
+            if not state.get("address"):
+                return 409, {"error": NO_ADDRESS}
+            if not (self.busy() or state.get("install", {}).get("started")):
+                with self.state.change() as s:
+                    s.pop("install", None)
+                self.worker = threading.Thread(target=self.install, daemon=True)
+                self.worker.start()
+        return 202, {"install": self.progress(self.state.read())}
+
+    def install(self):
+        """Through the suite port: AIO's optional containers, its nightly backup, then its start."""
+        try:
+            self.suite.switch(COMPONENTS)
+            self.suite.back_up(BACKUP_FOLDER, BACKUP_TIME)
+            self.suite.start()
+            outcome = {"started": True}
+        except Unreachable as failure:
+            outcome = {"error": str(failure)}
+        except Exception:  # a defect: the journal gets the traceback, the operator a reason
+            traceback.print_exc()
+            outcome = {"error": UNEXPECTED}
+        with self.state.change() as s:
+            s["install"] = outcome
+
     ROUTES = {
         ("GET", "/api/state"): get_state,
         ("GET", "/api/register"): get_register,
         ("GET", "/api/establishments"): get_establishments,
         ("POST", "/api/centre"): post_centre,
         ("POST", "/api/address"): post_address,
+        ("POST", "/api/install"): post_install,
     }
 
     def call(self, method, path, query, body):

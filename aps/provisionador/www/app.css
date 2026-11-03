@@ -72,6 +72,17 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-v
 
 /* «Dirección»: the name, which the operator reads but does not edit. */
 .address { font: 600 1.2rem var(--aps-font-display); overflow-wrap: anywhere; margin: 0; }
+.address a { color: var(--aps-violet-dark); }
+
+/* «Revisar»: the summary, then each container's progress. */
+.summary { display: grid; grid-template-columns: max-content 1fr; gap: .5rem 1.5rem; max-width: 60rem; margin: 0; }
+.summary dt { font-weight: 700; }
+.summary dd { margin: 0; }
+.summary ul { margin: 0; padding-left: 1.1rem; }
+.progress { list-style: none; max-width: 40rem; margin: 1rem 0 0; padding: 0; }
+.progress li { display: flex; justify-content: space-between; gap: 1rem; padding: .4rem 0; border-bottom: 1px solid var(--aps-border); }
+.progress li span { color: var(--aps-muted); }
+.progress li[data-state="running"] span { color: var(--aps-violet-dark); font-weight: 700; }
 
 /* Simple buttons: one primary action, the rest secondary. */
 button { font: 600 1rem var(--aps-font-body); padding: .55rem 1.1rem; border-radius: var(--radius); border: 1px solid var(--aps-border); background: #fff; color: var(--aps-ink); cursor: pointer; }
