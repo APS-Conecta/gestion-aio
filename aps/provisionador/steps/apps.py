@@ -10,6 +10,8 @@ folder, at the version its tag names. The lock file then records its tag, and an
 at that tag, never a newer one. A store app comes from Nextcloud's open app store, as in vanilla Nextcloud.
 
 An app that fails is named with its reason while every other app installs; «Reintentar» installs the ones that failed.
+A step that configures an app gets it through `ensure`, not by needing this step, so another app's failure never holds
+it back.
 """
 
 import base64
@@ -27,6 +29,7 @@ from suite import Unreachable, write_root_only
 NAME = "Aplicaciones"
 NEEDS = ("start",)
 MANIFEST = json.loads((Path(__file__).resolve().parents[1] / "apps.json").read_text(encoding="utf-8"))
+BY_ID = {app["id"]: app for app in MANIFEST}
 OPTIONAL = {app["id"] for app in MANIFEST if app.get("optional")}
 LOCK = "apps.lock.json"  # in the Provisionador's folder: each installed own or fork app's tag
 ED25519 = bytes.fromhex("302a300506032b6570032100")  # the DER prefix of an Ed25519 public key
@@ -151,19 +154,31 @@ def install(context, app, lock, major):
     write_root_only(context.folder / LOCK, json.dumps(lock, indent=1))
 
 
-def run(context):
+def install_missing(context, wanted):
+    """Install each of the wanted apps that is not installed yet; the «name»: reason of each that failed."""
     suite, lock = context.suite, read_lock(context)
     on = enabled(suite)
+    missing = [app for app in wanted if not installed(app, on, lock)]
+    if not missing:
+        return []
     major = int(json.loads(suite.occ("status", "--output=json"))["version"].split(".")[0])
     reasons = []
-    for app in chosen(context):
-        if installed(app, on, lock):
-            continue
+    for app in missing:
         try:
             install(context, app, lock, major)
         except (Refused, Unreachable) as failure:
             reasons.append(FAILED.format(app["name"], failure))
     return reasons
+
+
+def ensure(context, *ids):
+    """For a step that configures apps: the manifest's apps with these ids, installed as this step installs them if
+    they are missing; the «name»: reason of each that failed, none when they are installed."""
+    return install_missing(context, [BY_ID[app] for app in ids])
+
+
+def run(context):
+    return install_missing(context, chosen(context))
 
 
 def check(context):

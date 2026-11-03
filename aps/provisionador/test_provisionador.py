@@ -23,6 +23,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
 
 import provisionador
@@ -748,6 +749,10 @@ class Apps(InstallTest):
         repo = app["repo"]
         self.suite.app_releases[repo] = dict([app_release(app["id"], **release), *self.suite.app_releases[repo].items()])
 
+    def context(self):
+        """What a step that configures an app gets, as the Provisionador's install gives it."""
+        return SimpleNamespace(suite=self.suite, folder=self.state, optional=frozenset())
+
     def test_revisar_lists_the_default_apps_and_offers_the_optional_ones_off(self):
         self.claim()
         state = self.browser.get("/api/state")[1]
@@ -864,6 +869,31 @@ class Apps(InstallTest):
         self.install()
         self.until("done")
         self.assertLessEqual(DEFAULT_APPS, self.enabled())
+
+    def test_a_step_that_configures_an_app_ensures_it_and_ensuring_it_again_installs_nothing(self):
+        app = RELEASED[0]
+        self.assertEqual(apps.ensure(self.context(), app["id"]), [])
+        self.assertIn(app["id"], self.enabled())
+        self.assertEqual(self.lock(), {app["id"]: self.newest(app)})
+        unpacked, commands = len(self.suite.unpacked), len(self.suite.commands)
+        self.assertEqual(apps.ensure(self.context(), app["id"]), [])
+        self.assertEqual(len(self.suite.unpacked), unpacked)
+        self.assertNotIn("app:enable", {command[0] for command in self.suite.commands[commands:]})
+
+    def test_ensure_names_only_its_own_apps_failure_while_the_apps_step_names_every_failure(self):
+        ensured, other = [app for app in RELEASED if not app.get("optional")][:2]
+        for app in (ensured, other):
+            tag, assets = next(iter(self.suite.app_releases[app["repo"]].items()))
+            package = f"{app['id']}.tar.gz"
+            self.suite.app_releases[app["repo"]] = {tag: {**assets, package: assets[package] + b"\0"}}
+        reasons = apps.ensure(self.context(), ensured["id"])
+        self.assertEqual(len(reasons), 1)
+        self.assertRegex(reasons[0], f"^«{ensured['name']}»: [^«]*suma de verificación")
+        self.claim()
+        self.install()
+        reason = self.steps(self.until("failed"))[APPS_STEP][1]
+        for app in (ensured, other):
+            self.assertIn(f"«{app['name']}»: ", reason)
 
     def test_the_end_of_install_check_finds_a_disabled_app_and_reintentar_enables_its_locked_release_again(self):
         app = RELEASED[0]
