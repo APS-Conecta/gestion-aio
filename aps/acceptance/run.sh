@@ -17,8 +17,9 @@
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log (the name's
-# credential blanked out) and the disk usage, and the workflow attaches it to the run. The check that has the
-# wizard claim a CI name writes its DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it.
+# credential and AIO's passphrase blanked out) and the disk usage, and the workflow attaches it to the run. The
+# check that has the wizard claim a CI name writes its DEIS code as code= to $GITHUB_OUTPUT first, and the workflow
+# releases it.
 # Usage: run.sh <tag>
 set -euo pipefail
 [[ "$#" -eq 1 && "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "usage: $0 <tag>" >&2; exit 2; }
@@ -29,21 +30,26 @@ mkdir -p "$work/evidence"
 export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt"
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
 
-password=""
-mask_credential() { # once «Dirección» claimed the name, its credential is masked in the log, on a line of its own
-  [ -z "$password" ] || return 0
-  password="$("$MACHINE" 'sudo cat /var/lib/aps-conecta/name-service.json' 2> /dev/null | jq -r '.password // empty' 2> /dev/null || true)"
-  [ -z "$password" ] || printf '\n::add-mask::%s\n' "$password"
+password="" passphrase=""
+secret() { # <variable> <command>: the password in the JSON the command prints on the machine, masked in the log once found
+  [ -z "${!1}" ] || return 0
+  printf -v "$1" '%s' "$("$MACHINE" "$2" 2> /dev/null | jq -r '.password // empty' 2> /dev/null || true)"
+  [ -z "${!1}" ] || printf '\n::add-mask::%s\n' "${!1}"
 }
-collect() { # <dir>: every container's log, without the name's credential, and the disk usage
+mask_secrets() { # once «Dirección» claimed the name: its credential and AIO's passphrase, each on a line of its own
+  secret password 'sudo cat /var/lib/aps-conecta/name-service.json'
+  secret passphrase 'sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
+}
+collect() { # <dir>: every container's log, without the name's credential and AIO's passphrase, and the disk usage
   local name log
   mkdir -p "$1"
   df -h > "$1/runner-disk.txt"
   "$MACHINE" 'df -h; sudo docker system df; sudo docker ps --all' > "$1/machine.txt" 2>&1 || true
-  mask_credential
+  mask_secrets
   for name in $("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" 2> /dev/null || true); do
     log="$("$MACHINE" "sudo docker logs --timestamps $name" 2>&1 || true)"
     [ -z "$password" ] || log="${log//"$password"/[credential]}"
+    [ -z "$passphrase" ] || log="${log//"$passphrase"/[passphrase]}"
     printf '%s\n' "$log" > "$1/$name.log"
   done
 }
@@ -77,7 +83,7 @@ printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$work/key.pub")" 
 printf 'instance-id: gestion-acceptance\nlocal-hostname: gestion\n' > "$work/meta-data"
 cloud-localds "$work/seed.img" "$work/user-data" "$work/meta-data"
 : > "$work/evidence/serial.log" # the runner's own file, so the evidence upload can read it
-sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m 10G \
+sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m 12G \
   -drive "file=$work/disk.qcow2,if=virtio,format=qcow2" -drive "file=$work/seed.img,if=virtio,format=raw" \
   -netdev tap,id=lan,ifname=aps0,script=no,downscript=no -device virtio-net-pci,netdev=lan \
   -display none -serial "file:$work/evidence/serial.log" -daemonize
@@ -113,7 +119,7 @@ for check in aps/acceptance/checks/*; do
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
   if timeout 15m "$check" < /dev/null; then
-    mask_credential
+    mask_secrets
     echo "::endgroup::"
     echo "passed: $name"
   else

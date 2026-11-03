@@ -4,8 +4,8 @@
 """Our Caddy image gets the suite's certificate through the name service's DNS challenge with no inbound port: the
 machine sits behind the runner's NAT, out of the internet's reach, and the test build points the proxy at Let's
 Encrypt's staging service (its DNS has no answer for the production one). A browser that adds trust for the staging
-roots alone opens the suite at its name. The wizard's browser-side check then says this computer opens the name
-and, behind a resolver that drops the answer, shows the router change in Spanish."""
+roots alone opens the suite at its name. The wizard, which opens on «Listo», then says on «Dirección» that this
+computer opens the name and, behind a resolver that drops the answer, shows the router change in Spanish."""
 
 import json
 import os
@@ -54,6 +54,7 @@ with chromium() as browser:
     print(f"https://{name}/login: {response.status}")
     if not response.ok:
         sys.exit(f"https://{name}/login answers {response.status}")
+    expect(page.locator("input[type=password]")).to_be_visible()
 
 # The wizard on «Dirección», in a browser on a network whose resolver answers the name and in one whose resolver
 # drops the answer.
@@ -66,6 +67,8 @@ for case, args, shown in (
     with chromium(pinned=[verified(url.hostname, url.port, printed)], args=args) as browser:
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         page.goto(link)
+        expect(page.get_by_role("heading", name="Listo")).to_be_visible()
+        page.click('.step-link[data-step="direccion"]')
         expect(page.locator("#reach")).to_contain_text(shown, timeout=60_000)
         page.screenshot(path=evidence / f"{case}.png")
         print(f"{case}: {page.inner_text('#reach')}")

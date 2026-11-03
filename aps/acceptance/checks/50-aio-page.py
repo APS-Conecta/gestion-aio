@@ -3,15 +3,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """AIO's page, opened as an administrator later opens it for backups (the suite's login link, then the
 passphrase), says «APS Conecta Gestión» in Spanish: brand in the title and heading, Spanish text and
-controls, the source-code link, and no «Nextcloud» in what it shows."""
+controls, the source-code link, and no «Nextcloud» in what it shows. Its backups go to the backup folder."""
 
 import json
 import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
 from browser import chromium, machine  # noqa: E402
+from provisionador import BACKUP_FOLDER  # noqa: E402
 
 aio = f"https://{os.environ['ADDRESS']}:8080"
 evidence = Path(os.environ["EVIDENCE"])
@@ -45,4 +46,5 @@ with chromium(pinned=[certificate]) as browser:
     page.wait_for_url("**/containers", timeout=60_000)
     page.wait_for_selector("h1")
     check_page(page, "containers", ["APS Conecta Gestión AIO v", "Cerrar sesión", "Contenedores", "Servidor de aplicaciones", "En ejecución",
-                                    "Detener contenedores", "Copias de seguridad y restauración", "Enviar la ubicación de la copia de seguridad"])
+                                    "Detener contenedores", "Copias de seguridad y restauración", "Crear copia de seguridad",
+                                    f"se crearán en el siguiente directorio del servidor: {BACKUP_FOLDER}/borg"])
