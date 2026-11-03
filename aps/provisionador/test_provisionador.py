@@ -23,6 +23,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
 
 import brand
@@ -1030,8 +1031,8 @@ class Branding(InstallTest):
 
 
 class CustomMenu(InstallTest):
-    """The custom menu, which the apps step installs, wears the brand's dark violet; without its app, the apps step
-    fails naming it and the menu waits."""
+    """The custom menu wears the brand's dark violet once its step ensured its app; without the app, its step and the
+    apps step fail naming it, and nothing else waits for it."""
 
     def test_the_custom_menu_takes_the_brand_token_files_dark_violet(self):
         self.claim()
@@ -1040,14 +1041,14 @@ class CustomMenu(InstallTest):
         menu = self.suite.apps["side_menu"]
         self.assertEqual((menu["background-color"], menu["background-color-to"]), (TOKENS["--aps-violet-dark"],) * 2)
 
-    def test_without_its_app_the_apps_step_fails_naming_the_menu_which_waits_and_every_other_step_goes_on(self):
+    def test_without_its_app_the_menu_and_the_apps_step_fail_naming_it_and_every_other_step_goes_on(self):
         self.suite.store.remove("side_menu")
         self.claim()
         self.install()
         steps = self.steps(install := self.until("failed"))
-        self.assertEqual(steps[APPS_STEP][0], "failed")
-        self.assertIn(f"«{MENU}»", steps[APPS_STEP][1])
-        self.assertEqual(steps[MENU], ("waiting", f"Espera a que se complete: «{APPS_STEP}»."))
+        for step in (APPS_STEP, MENU):
+            self.assertEqual(steps[step][0], "failed", step)
+            self.assertIn(f"«{apps.BY_ID['side_menu']['name']}»: ", steps[step][1], step)
         self.assertEqual(self.named(install, "green"), set(steps) - {APPS_STEP, MENU})
         self.assertNotIn("side_menu", self.suite.apps, "nothing configures an app that is not there")
 
