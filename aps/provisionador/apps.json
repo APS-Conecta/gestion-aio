@@ -3,6 +3,7 @@
   {"id": "epidemiologia", "name": "Epidemiología", "source": "own", "repo": "APS-Conecta/epidemiologia"},
   {"id": "territorio", "name": "Territorio", "source": "own", "repo": "APS-Conecta/territorio"},
   {"id": "files_upload_guard", "name": "Protección de cargas de archivos", "source": "own", "repo": "APS-Conecta/files-upload-guard"},
+  {"id": "files_fulltextsearch", "name": "Búsqueda en archivos", "source": "fork", "repo": "APS-Conecta/files-fulltextsearch"},
   {"id": "groupfolders", "name": "Carpetas de equipo", "source": "store"},
   {"id": "calendar", "name": "Calendario", "source": "store"},
   {"id": "contacts", "name": "Contactos", "source": "store"},
