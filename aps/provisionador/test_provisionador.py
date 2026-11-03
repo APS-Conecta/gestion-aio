@@ -329,7 +329,7 @@ class Direccion(WizardTest):
     def test_the_claim_asks_nothing_sets_the_suite_to_the_name_and_publishes_the_inside_address(self):
         self.choose()
         status, body = self.claim()
-        self.assertEqual((status, body), (200, {"address": {"name": NAME, "claimed": True, "answers": False}}))
+        self.assertEqual((status, body), (200, {"address": {"name": NAME, "claimed": True}}))
         self.assertEqual((self.suite.claims, self.suite.domain), (["999001"], NAME))
         self.assertEqual(self.suite.published, [provisionador.lan_ip()])
         self.assertEqual(self.address(), body["address"])
@@ -400,28 +400,32 @@ class Direccion(WizardTest):
         status, body = self.claim()
         self.assertEqual((status, body["address"]["name"], self.suite.domain), (200, NAME, NAME))
 
-    def test_the_state_says_when_the_suite_answers_at_its_name(self):
-        self.choose()
-        self.claim()
-        self.assertIs(self.address()["answers"], False)
-        self.suite.answering = True
-        self.assertIs(self.address()["answers"], True)
-
 
 COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch", "harp"}
+STEPS = ["Componentes", "Copias de seguridad", "Inicio de la suite", "Archivo de contraseñas", "Certificado del ISP",
+         "Dirección de la suite", "Idioma y formato regional", "Sesiones y registro de auditoría",
+         "Tareas en segundo plano", "Zona horaria"]
+NEEDS_NEXTCLOUD = {"Certificado del ISP", "Idioma y formato regional", "Sesiones y registro de auditoría",
+                   "Tareas en segundo plano", "Zona horaria"}
 
 
-class Instalar(WizardTest):
-    """«Revisar» and «Instalar»: one summary, then the suite port switches AIO's components, sets its nightly backup and
-    starts the containers; the progress shows each container as AIO reports it, and «Listo» the suite's address."""
+class InstallTest(WizardTest):
+    """A wizard whose operator has a session, with what «Revisar» and «Instalar» need."""
 
     def setUp(self):
         super().setUp()
-        self.addCleanup(self.suite.release.set)
+        self.addCleanup(self.settle)
         self.browser = self.operator()
 
-    def claim(self):
-        self.browser.request("POST", "/api/centre", {"code": "999001"})
+    def settle(self):
+        """Let an install still running finish before its state directory goes."""
+        self.suite.release.set()
+        self.suite.answering, self.suite.down = True, set()
+        if self.server and self.server.app.worker:
+            self.server.app.worker.join(10)
+
+    def claim(self, code="999001"):
+        self.browser.request("POST", "/api/centre", {"code": code})
         self.assertEqual(self.browser.request("POST", "/api/address", {})[0], 200)
 
     def install(self):
@@ -438,6 +442,24 @@ class Instalar(WizardTest):
             time.sleep(0.02)
         return install
 
+    def until_step(self, name, status):
+        deadline = time.monotonic() + 10
+        while self.steps(install := self.progress())[name][0] != status:
+            self.assertLess(time.monotonic(), deadline, install)
+            time.sleep(0.02)
+        return install
+
+    @staticmethod
+    def steps(install):
+        """Each step's status and reason, by its Spanish name."""
+        return {s["name"]: (s["status"], s.get("reason")) for s in install["steps"]}
+
+
+class Instalar(InstallTest):
+    """«Revisar» and «Instalar»: one summary, then the install's steps, each once the steps it needs are green; the
+    progress shows them and, once AIO runs only our components, each container as AIO reports it. «Listo» needs every
+    step green and a clean end-of-install check."""
+
     def test_revisar_summarises_the_centre_the_address_the_components_and_the_backups(self):
         self.claim()
         state = self.browser.get("/api/state")[1]
@@ -446,7 +468,7 @@ class Instalar(WizardTest):
         self.assertEqual(state["components"], [
             "Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo",
             "HaRP (servidor de aplicaciones externas)"])
-        self.assertEqual(state["backup_folder"], provisionador.BACKUP_FOLDER)
+        self.assertEqual(state["backup_folder"], "/var/backups/aps-conecta")
 
     def test_there_is_no_install_before_the_address_is_claimed(self):
         self.browser.request("POST", "/api/centre", {"code": "999001"})
@@ -455,16 +477,25 @@ class Instalar(WizardTest):
         self.assertIn("«Dirección»", body["error"])
         self.assertEqual((self.suite.switched, self.suite.backup, self.suite.starts), (None, None, 0))
 
-    def test_instalar_switches_our_components_on_and_every_other_off_sets_nightly_backups_and_starts(self):
-        self.claim()
+    def test_instalar_runs_every_step_and_listo_follows_a_clean_end_of_install_check(self):
+        self.claim("999002")
         status, body = self.install()
         self.assertEqual((status, body["install"]["status"]), (202, "installing"))
-        self.until("done")
+        install = self.until("done")
+        self.assertEqual(self.steps(install), {name: ("green", None) for name in STEPS})
         self.assertEqual(self.suite.switched, COMPONENTS)
-        self.assertEqual(self.suite.backup, (provisionador.BACKUP_FOLDER, provisionador.BACKUP_TIME))
+        self.assertEqual(self.suite.backup, ("/var/backups/aps-conecta", "06:00"))
         self.assertEqual(self.suite.starts, 1)
+        self.assertLessEqual({
+            "default_language": "es", "force_language": "es", "default_locale": "es_CL", "default_phone_region": "CL",
+            "default_timezone": "America/Punta_Arenas", "logtimezone": "America/Punta_Arenas",
+            "remember_login_cookie_lifetime": 0, "session_lifetime": 900, "session_keepalive": False,
+            "maintenance_window_start": 5}.items(), self.suite.system.items())
+        self.assertEqual((self.suite.apps["admin_audit"]["enabled"], self.suite.apps["core"]["backgroundjobs_mode"]),
+                         ("yes", "cron"))
+        self.assertEqual(self.suite.issuers, ["www.ispch.gob.cl"])
 
-    def test_progress_shows_each_container_as_aio_reports_it_and_listo_needs_every_one_running(self):
+    def test_progress_shows_each_container_as_aio_reports_it(self):
         """A component's container goes by its «Revisar» name; every other one keeps AIO's."""
         self.claim()
         self.suite.release.clear()
@@ -472,54 +503,229 @@ class Instalar(WizardTest):
                              "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
                              "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
         self.install()
+        install = self.until_step("Inicio de la suite", "running")
         names = ["PostgreSQL", "Servidor de aplicaciones", "Búsqueda de texto completo"]
-        self.assertEqual(self.progress(), {"status": "installing", "containers": [
-            {"name": name, "state": state} for name, state in zip(names, ("running", "starting", "stopped"))]})
+        self.assertEqual((install["status"], install["containers"]), ("installing", [
+            {"name": name, "state": state} for name, state in zip(names, ("running", "starting", "stopped"))]))
         self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
         self.assertEqual(self.progress()["containers"][2], {"name": "Búsqueda de texto completo", "state": "starting"})
-        self.suite.states = {id_: (name, "running") for id_, (name, _) in self.suite.states.items()}
-        self.assertEqual(self.progress()["status"], "installing", "AIO is still starting containers")
         self.suite.release.set()
         self.assertEqual(self.until("done")["containers"], [{"name": name, "state": "running"} for name in names])
-        self.assertEqual(self.browser.get("/api/state")[1]["address"]["name"], NAME)
-        self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
-        self.assertEqual(self.progress()["status"], "installing", "«Listo» needs every container running")
 
-    def test_an_aio_outage_fails_in_spanish_and_reintentar_installs(self):
+    def test_container_progress_shows_only_once_aio_runs_our_components(self):
+        """Before the components step, AIO's own list still holds what it runs by default, such as Collabora."""
         self.claim()
+        self.suite.states = {"nextcloud-aio-collabora": ("Collabora", "stopped")}
         self.suite.down = {"aio"}
         self.install()
         install = self.until("failed")
-        self.assertIn("contenedor maestro", install["error"])
-        self.assertIn("Reintentar", install["error"])
-        self.assertEqual(self.suite.starts, 0)
+        self.assertEqual(self.steps(install)["Componentes"][0], "failed")
+        self.assertNotIn("containers", install)
         self.suite.down = set()
-        self.assertEqual(self.install()[0], 202)
-        self.until("done")
-        self.assertEqual((self.suite.switched, self.suite.starts), (COMPONENTS, 1))
+        self.suite.states = {"nextcloud-aio-talk": ("Talk", "stopped")}
+        self.install()
+        self.assertEqual(self.until("done")["containers"], [{"name": "Talk", "state": "running"}])
 
     def test_a_reading_of_the_containers_that_fails_says_why_and_the_progress_goes_on(self):
         self.claim()
         self.suite.release.clear()
         self.suite.states = {"nextcloud-aio-talk": ("Talk", "starting")}
         self.install()
+        self.until_step("Inicio de la suite", "running")
         self.suite.down = {"aio"}
         install = self.progress()
         self.assertEqual((install["status"], install["containers"]), ("installing", []))
         self.assertIn("contenedor maestro", install["error"])
         self.suite.down = set()
-        self.assertEqual(self.progress(),
-                         {"status": "installing", "containers": [{"name": "Talk", "state": "starting"}]})
+        install = self.progress()
+        self.assertEqual((install["containers"], "error" in install), ([{"name": "Talk", "state": "starting"}], False))
 
-    def test_instalar_again_while_installing_or_once_started_starts_nothing_more(self):
+    def test_instalar_again_while_installing_or_once_listo_starts_nothing_more(self):
         self.claim()
         self.suite.release.clear()
         self.install()
         self.assertEqual(self.install()[1]["install"]["status"], "installing")
         self.suite.release.set()
         self.until("done")
+        commands = len(self.suite.commands)
         self.assertEqual(self.install()[1]["install"]["status"], "done")
+        self.assertEqual((self.suite.starts, len(self.suite.commands)), (1, commands))
+
+
+class Pasos(InstallTest):
+    """The step runner: a failed step never stops the steps that do not need it, its dependents wait, each red step
+    says why, and «Reintentar» reruns only those."""
+
+    def test_an_aio_outage_fails_the_steps_that_need_aio_and_their_dependents_wait_with_a_reason(self):
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        steps = self.steps(self.until("failed"))
+        for name in ("Componentes", "Copias de seguridad"):
+            self.assertEqual(steps[name][0], "failed")
+            self.assertIn("contenedor maestro", steps[name][1])
+            self.assertIn("Reintentar", steps[name][1])
+        self.assertEqual(steps["Inicio de la suite"],
+                         ("waiting", "Espera a que se complete: «Componentes», «Copias de seguridad»."))
+        for name in set(STEPS) - {"Componentes", "Copias de seguridad", "Inicio de la suite"}:
+            self.assertEqual(steps[name], ("waiting", "Espera a que se complete: «Inicio de la suite»."), name)
+        self.assertEqual((self.suite.starts, self.suite.commands), (0, []))
+        self.suite.down = set()
+        self.assertEqual(self.install()[0], 202)
+        self.until("done")
+        self.assertEqual((self.suite.switched, self.suite.starts), (COMPONENTS, 1))
+
+    def test_a_missing_app_fails_its_step_loudly_and_every_step_that_does_not_need_it_goes_on(self):
+        self.claim()
+        del self.suite.apps["admin_audit"]
+        self.install()
+        steps = self.steps(self.until("failed"))
+        status, reason = steps["Sesiones y registro de auditoría"]
+        self.assertEqual(status, "failed")
+        self.assertIn("occ app:enable admin_audit", reason)
+        self.assertEqual({name for name, (status, _) in steps.items() if status != "green"},
+                         {"Sesiones y registro de auditoría"})
+        self.assertNotIn("session_lifetime", self.suite.system, "no setting of a failed step is reported as made")
+
+    def test_reintentar_reruns_only_the_failed_and_waiting_steps(self):
+        self.claim()
+        del self.suite.apps["admin_audit"]
+        self.install()
+        self.until("failed")
+        done, starts = len(self.suite.commands), self.suite.starts
+        self.suite.apps["admin_audit"] = {}
+        self.install()
+        self.assertEqual(self.steps(self.until("done"))["Sesiones y registro de auditoría"], ("green", None))
+        changes = [c for c in self.suite.commands[done:] if c != ("config:list",)]
+        self.assertEqual(changes, [("app:enable", "admin_audit"), ("config:import",)])
+        self.assertEqual((self.suite.starts, self.suite.system["session_lifetime"]), (starts, 900))
+
+    def test_a_nextcloud_that_does_not_answer_fails_every_step_that_needs_it(self):
+        self.claim()
+        self.suite.down = {"nextcloud"}
+        self.install()
+        steps = self.steps(self.until("failed"))
+        for name in NEEDS_NEXTCLOUD:
+            self.assertEqual(steps[name][0], "failed", name)
+            self.assertIn("contenedor de Nextcloud no responde", steps[name][1])
+        self.assertEqual({name for name, (status, _) in steps.items() if status == "green"},
+                         set(STEPS) - NEEDS_NEXTCLOUD)
+        self.assertEqual((self.suite.system, self.suite.issuers), ({}, []))
+
+    def test_listo_waits_until_the_suite_answers_at_its_name(self):
+        self.claim()
+        self.suite.answering = False
+        self.install()
+        self.assertEqual(self.until_step("Dirección de la suite", "running")["status"], "installing")
+        self.suite.answering = True
+        self.until("done")
+
+    def test_the_end_of_install_check_finds_what_changed_after_its_step_and_reintentar_sets_it_again(self):
+        """A setting that changed once its step went green keeps «Listo» away until «Reintentar» reruns that step."""
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        steps = self.steps(self.until("failed"))
+        self.assertEqual(steps["Certificado del ISP"][0], "failed")
+        self.assertIn("www.ispch.gob.cl", steps["Certificado del ISP"][1])
+        self.assertEqual(steps["Sesiones y registro de auditoría"][0], "green")
+        self.suite.system["session_lifetime"] = 86400
+        self.suite.down = set()
+        self.install()
+        steps = self.steps(self.until("failed"))
+        status, reason = steps["Sesiones y registro de auditoría"]
+        self.assertEqual(status, "failed")
+        self.assertIn("session_lifetime", reason)
+        self.assertEqual({name for name, (status, _) in steps.items() if status != "green"},
+                         {"Sesiones y registro de auditoría"})
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
+
+
+class Reanudar(InstallTest):
+    """An install that a Provisionador restart cut short resumes by itself, from AIO's own state."""
+
+    def restart(self):
+        """The Provisionador dies while AIO starts the suite, as systemd restarts it; AIO goes on."""
+        port, worker = self.server.server_address[1], self.server.app.worker
+        self.stop()
+        self.suite.dies = True
+        self.suite.release.set()
+        worker.join(5)
+        self.suite.dies = False
+        self.start(port)
+
+    def interrupted_start(self, states):
+        self.claim()
+        self.suite.release.clear()
+        self.suite.states = states
+        self.install()
+        self.until_step("Inicio de la suite", "running")
         self.assertEqual(self.suite.starts, 1)
+
+    def test_a_restart_while_aio_starts_waits_for_it_and_never_sends_its_start_again(self):
+        self.interrupted_start({"nextcloud-aio-database": ("PostgreSQL", "running"),
+                                "nextcloud-aio-apache": ("Apache", "stopped")})
+        self.restart()
+        self.assertEqual(self.until_step("Inicio de la suite", "running")["status"], "installing")
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-apache": ("Apache", "running")}
+        self.until("done")
+        self.assertEqual(self.suite.starts, 1)
+
+    def test_a_suite_aio_started_while_the_provisionador_was_down_counts_as_started(self):
+        """Once Apache runs, AIO's login is closed: nothing is asked of AIO's page again."""
+        self.interrupted_start({"nextcloud-aio-apache": ("Apache", "stopped")})
+        self.suite.states = {"nextcloud-aio-apache": ("Apache", "running")}
+        self.restart()
+        self.assertEqual(self.steps(self.until("done"))["Inicio de la suite"], ("green", None))
+        self.assertEqual(self.suite.starts, 1)
+
+
+class Listo(InstallTest):
+    """«Listo» hands over the passwords file, kept root-only on the server, and the wizard closes: the link and every
+    session stop working and the Provisionador stops."""
+
+    def command(self, *args):
+        r = subprocess.run([sys.executable, "-B", str(HERE / "provisionador.py"), *args, "--state", str(self.state)],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout
+
+    def test_the_passwords_file_is_handed_over_only_at_listo(self):
+        self.claim()
+        self.suite.answering = False
+        self.install()
+        self.until_step("Dirección de la suite", "running")
+        status, body = self.browser.request("POST", "/api/close", {})
+        self.assertEqual(status, 409)
+        self.assertIn("«Listo»", body["error"])
+        self.assertEqual(self.browser.get("/api/state")[0], 200)
+
+    def test_listo_hands_over_the_passwords_file_and_the_wizard_closes(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        status, body = self.browser.request("POST", "/api/close", {})
+        self.assertEqual(status, 200)
+        passwords = body["passwords"]
+        for text in (f"https://{NAME}", "admin", FakeSuite.ADMINISTRATOR, FakeSuite.PASSPHRASE):
+            self.assertIn(text, passwords)
+        kept = self.state / "contrasenas.txt"
+        self.assertEqual((kept.read_text(encoding="utf-8"), kept.stat().st_mode & 0o777), (passwords, 0o600))
+        self.thread.join(5)
+        self.assertFalse(self.thread.is_alive(), "the Provisionador stops")
+
+        port = self.server.server_address[1]
+        self.stop()
+        self.start(port)
+        self.assertEqual(self.browser.get("/api/state")[0], 401)
+        printed = self.command("link")
+        self.assertIn(f"https://{NAME}", printed)
+        self.assertIn(str(kept), printed)
+        self.assertNotIn("#", printed)
+        self.assertIn("se cerró", self.command("serve"))
 
 
 class Resume(WizardTest):

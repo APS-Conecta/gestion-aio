@@ -57,6 +57,10 @@ One idempotent unit of the install, with the steps it depends on.
 **End-of-install check**:
 The comparison of the running suite with what the Provisionador declared. «Listo» needs it clean.
 
+**Passwords file** (archivo de contraseñas):
+The root-only file on the server with each person's first password, the administrator's and AIO's passphrase. «Listo»
+hands it over; then the wizard closes.
+
 **Component** (componente):
 An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
 full-text search and the app server (HaRP). Every other optional container stays off.
