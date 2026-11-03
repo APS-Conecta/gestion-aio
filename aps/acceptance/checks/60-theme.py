@@ -38,6 +38,9 @@ THEMED = """async () => {
     establishment: headline ? getComputedStyle(headline, '::before').content : null,
   };
 }""" % THEME
+# In-page requests, so they go through Chromium's own TLS (which trusts the staging roots) and the page's session.
+TEXT = "url => fetch(url, {cache: 'no-store'}).then(r => r.text())"
+STATUS = "url => fetch(url, {cache: 'no-store'}).then(r => r.ok ? r.json() : {})"
 
 tokens = brand.tokens()
 evidence = Path(os.environ["EVIDENCE"])
@@ -102,18 +105,19 @@ with chromium() as browser:
         problems.append("the personal settings do not link the source code")
     if not page.locator('a[href="https://www.gnu.org/licenses/agpl-3.0.html"]').is_visible():
         problems.append("the personal settings do not link the licence")
-    menu = page.context.request.get(f"{suite}/apps/side_menu/css/stylesheet").text()
+    menu = page.evaluate(TEXT, f"{suite}/apps/side_menu/css/stylesheet")
     if f"--side-menu-background-color: {tokens['--aps-violet-dark']}" not in menu:
         problems.append("the custom menu's stylesheet does not paint it in the token file's dark violet")
 
+    page.goto(f"{suite}/status.php")  # a page with no script of its own to reload it while Nextcloud restarts
     machine("sudo docker restart nextcloud-aio-nextcloud")
     deadline = time.monotonic() + 10 * 60
     while True:
         try:
-            status = page.context.request.get(f"{suite}/status.php").json()
+            status = page.evaluate(STATUS, f"{suite}/status.php")
             if status.get("installed") and not status.get("maintenance"):
                 break
-        except (Error, ValueError):
+        except Error:
             pass
         if time.monotonic() > deadline:
             sys.exit("Nextcloud did not answer within 10 minutes of its container's restart")
