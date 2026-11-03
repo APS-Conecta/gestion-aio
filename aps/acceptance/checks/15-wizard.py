@@ -3,25 +3,45 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The one-time link the one command printed opens the wizard in a browser that trusts the wizard's certificate
 because its fingerprint is the printed one. The operator reaches «Centro», chooses the centre and reaches
-«Dirección», which suggests the centre's name folded and hyphenated. The fixed test address is registered there
-with the APS deSEC test account through the wizard's API on the machine, the account's email and password on
-stdin only, and the page shows the address registered."""
+«Dirección», which suggests the centre's name folded and hyphenated. The APS deSEC test account's fixed address is
+registered there through the wizard's API on the machine, the account's email and password on stdin only, and the
+page shows the address registered. deSEC lets an account hold one dedyn.io name, so the fixed name is the one the
+account holds (on a fresh account, the one it then keeps)."""
 
 import json
 import os
 import re
 import sys
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import TEST_NAME, chromium, machine, verified, wizard_link  # noqa: E402
+from browser import chromium, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 
 missing = [name for name in ("DESEC_TEST_EMAIL", "DESEC_TEST_PASSWORD") if not os.environ.get(name)]
 if missing:
-    sys.exit(f"the repository secret {' and '.join(missing)} is not set: the APS deSEC test account cannot "
-             f"register {TEST_NAME}.dedyn.io")
+    sys.exit(f"the repository secret {' and '.join(missing)} is not set: the APS deSEC test account cannot register "
+             "its address")
+
+
+def desec(path, body=None, token=None):
+    """deSEC's API from the runner; the account's credentials and token are never printed."""
+    request = urllib.request.Request(f"https://desec.io/api/v1/{path}", data=None if body is None else json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json",
+                                              **({"Authorization": f"Token {token}"} if token else {})})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read() or "null")
+
+
+token = desec("auth/login/", {"email": os.environ["DESEC_TEST_EMAIL"],
+                              "password": os.environ["DESEC_TEST_PASSWORD"]})["token"]
+print(f"::add-mask::{token}", flush=True)
+held = [d["name"][:-len(".dedyn.io")] for d in desec("domains/", token=token) if d["name"].endswith(".dedyn.io")]
+desec("auth/logout/", {}, token)
+TEST_NAME = held[0] if held else "aps-gestion-aio-ci"
+print(f"the APS deSEC test account holds {', '.join(held) or 'no dedyn.io name'}; CI registers {TEST_NAME}.dedyn.io")
 link, printed = wizard_link(Path(os.environ["CONSOLE"]).read_text(encoding="utf-8"))
 url = urlsplit(link)
 if url.hostname != os.environ["ADDRESS"]:

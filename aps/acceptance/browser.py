@@ -22,7 +22,6 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
-TEST_NAME = "aps-gestion-aio-ci"  # the fixed dedyn.io name the APS deSEC test account holds for CI
 
 
 def machine(command, stdin=""):

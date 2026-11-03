@@ -6,7 +6,8 @@
 # deSEC's own nameserver answers it. From inside the suite's containers, HTTPS to the domain reaches the suite even
 # while the host drops what its containers send it.
 set -euo pipefail
-domain="$("$MACHINE" 'sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json' | jq -r .domain)"
+domain="$("$MACHINE" 'sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json' | jq -r '.domain // empty')"
+[ -n "$domain" ] || { echo "the suite has no free domain: «Dirección» registered none" >&2; exit 1; }
 moved=192.168.77.11
 record() { # <address>: deSEC's nameserver answers it for the domain within two minutes
   local answer

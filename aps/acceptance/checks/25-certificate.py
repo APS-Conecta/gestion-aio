@@ -22,7 +22,9 @@ from playwright.sync_api import Error, expect  # noqa: E402
 address = os.environ["ADDRESS"]
 evidence = Path(os.environ["EVIDENCE"])
 domain = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
-                            "/mnt/docker-aio-config/data/configuration.json"))["domain"]
+                            "/mnt/docker-aio-config/data/configuration.json")).get("domain")
+if not domain:
+    sys.exit("the suite has no free domain: «Dirección» registered none")
 
 # Once the proxy runs, its Caddyfile names the staging service and the proxy reloads it.
 machine("sudo bash -s", r"""set -euo pipefail
