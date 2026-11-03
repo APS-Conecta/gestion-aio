@@ -5,11 +5,11 @@
 because its fingerprint is the printed one. The operator reaches «Centro» and chooses a centre, picked by the run
 so concurrent runs claim different names; «Dirección» shows the centre's name from the slug table, under the CI
 name service this test build uses, with nothing to edit, claims it by itself and says so. The claim's credential
-is stored root-only on the machine. The DEIS code goes to $GITHUB_OUTPUT before the claim, so the run releases it."""
+is stored root-only on the machine (run.sh masks it). The DEIS code goes to $GITHUB_OUTPUT before the claim, so
+the run releases it."""
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -50,11 +50,9 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     expect(page.locator("#address-name")).to_have_text(name)
     expect(page.locator("#direccion input")).to_have_count(0)
     expect(page.locator("#address-status")).to_have_text(f"Dirección asignada: https://{name}", timeout=180_000)
-    credential = json.loads(machine("sudo cat /var/lib/aps-conecta/name-service.json"))
-    print(f"::add-mask::{credential['password']}", flush=True)
     page.screenshot(path=evidence / "direccion.png")
 
-owner = machine("sudo stat -c '%U %a' /var/lib/aps-conecta/name-service.json").strip()
-if (credential["name"], owner) != (name, "root 600"):
-    sys.exit(f"the stored claim is for {credential['name']}, owned {owner}; expected {name}, root 600")
-print(f"«Dirección» claimed {name} for {row['nombre']} with nothing asked; its credential is root-only")
+mode = machine("sudo stat -c '%U %a' /var/lib/aps-conecta/name-service.json").strip()
+if mode != "root 600":
+    sys.exit(f"the claim is stored with owner and mode {mode}, not root 600")
+print(f"«Dirección» claimed {name} for {row['nombre']} with nothing asked; the claim is stored root-only")

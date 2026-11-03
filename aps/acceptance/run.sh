@@ -29,13 +29,17 @@ mkdir -p "$work/evidence"
 export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt"
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
 
+password=""
+mask_credential() { # once «Dirección» claimed the name, its credential is masked in the log
+  password="$("$MACHINE" 'sudo cat /var/lib/aps-conecta/name-service.json' 2> /dev/null | jq -r '.password // empty' 2> /dev/null || true)"
+  [ -z "$password" ] || echo "::add-mask::$password"
+}
 collect() { # <dir>: every container's log, without the name's credential, and the disk usage
-  local name log password
+  local name log
   mkdir -p "$1"
   df -h > "$1/runner-disk.txt"
   "$MACHINE" 'df -h; sudo docker system df; sudo docker ps --all' > "$1/machine.txt" 2>&1 || true
-  password="$("$MACHINE" 'sudo cat /var/lib/aps-conecta/name-service.json' 2> /dev/null | jq -r '.password // empty' 2> /dev/null || true)"
-  [ -z "$password" ] || echo "::add-mask::$password"
+  mask_credential
   for name in $("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" 2> /dev/null || true); do
     log="$("$MACHINE" "sudo docker logs --timestamps $name" 2>&1 || true)"
     [ -z "$password" ] || log="${log//"$password"/[credential]}"
@@ -108,6 +112,7 @@ for check in aps/acceptance/checks/*; do
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
   if timeout 15m "$check" < /dev/null; then
+    mask_credential
     echo "::endgroup::"
     echo "passed: $name"
   else
