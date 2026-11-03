@@ -1001,6 +1001,11 @@ readonly class DockerActionManager {
         // If a reverse-proxy is relying on container name as hostname this allows it to operate as usual and still validate the domain
         // The domaincheck container and apache container are never supposed to be active at the same time because they use the same APACHE_PORT anyway, so this doesn't add any new constraints.
         $alias = ($container->identifier === 'nextcloud-aio-domaincheck') ? 'nextcloud-aio-apache' : '';
+        // APS: inside the suite the domain resolves to its reverse proxy, so server-side calls never depend on the
+        // host's firewall.
+        if ($container->identifier === 'nextcloud-aio-caddy') {
+            $alias = $this->configurationManager->domain;
+        }
 
         $this->ConnectContainerIdToNetwork($container->identifier, $container->internalPorts, alias: $alias);
 
