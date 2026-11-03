@@ -7,8 +7,9 @@ AIO runs our components, each container's progress live until «Listo» shows th
 over the passwords file, the same as the root-only copy on the machine, with the administrator's first password and
 AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's answer, the router
 change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after «Instalar»). AIO
-reports our components on, every other optional one off and nightly backups to the backup folder. AIO's passphrase
-reaches the browser only in the passwords file, and on the machine only root reads the file AIO keeps it in."""
+reports our components on, every other optional one off (Talk recording follows the hardware: 70-talk checks it) and
+nightly backups to the backup folder. AIO's passphrase reaches the browser only in the passwords file, and on the
+machine only root reads the file AIO keeps it in."""
 
 import json
 import os
@@ -20,15 +21,15 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import chromium, machine, verified, wizard_link  # noqa: E402
+from browser import chromium, hardware, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
-from steps.components import COMPONENTS  # noqa: E402
+from steps.components import chosen  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 
-CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
+CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
-            "isFulltextsearchEnabled": True, "isHarpEnabled": True, "isTalkRecordingEnabled": False,
+            "isFulltextsearchEnabled": True, "isHarpEnabled": True,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 AIO_DATA = "/mnt/docker-aio-config/data"

@@ -1,15 +1,18 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Behaviour of the static gates, driven through their command lines against throwaway repos."""
+"""Behaviour of the static gates and the release bundle, driven through their command lines."""
 
 import json
+import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
 GATES = Path(__file__).resolve().parent
+REPO = GATES.parents[1]
 
 
 def git(repo, *args):
@@ -214,6 +217,42 @@ class SlugTable(unittest.TestCase):
         self.assertIn("999001", err)
         self.assertIn("999002", err)
         self.assertEqual(out, "")
+
+
+class ReleaseBundle(unittest.TestCase):
+    """aps/release/package.sh: only a test build's bundle carries Let's Encrypt's staging roots, one per file, for the
+    server to trust; a release's bundle carries what it always did, with production's services alone."""
+
+    PINS = [f"ghcr.io/aps-conecta/{image}@sha256:{n * 64}"
+            for image, n in (("gestion-mastercontainer", "0"), ("gestion-nextcloud", "1"), ("gestion-caddy", "2"))]
+    ROOTS = re.findall(rb"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n",
+                       (REPO / "aps" / "acceptance" / "letsencrypt-staging-roots.pem").read_bytes(), re.S)
+
+    def bundle(self, tag):
+        """Each file of the bundle package.sh makes for the tag, by its path, with its bytes."""
+        out = tempfile.TemporaryDirectory()
+        self.addCleanup(out.cleanup)
+        subprocess.run([str(REPO / "aps" / "release" / "package.sh"), tag, *self.PINS, out.name], cwd=REPO,
+                       check=True, capture_output=True)
+        with tarfile.open(Path(out.name) / f"gestion-aio-{tag}.tar.gz") as tar:
+            return {m.name: tar.extractfile(m).read() for m in tar.getmembers() if m.isfile()}
+
+    def test_a_release_carries_no_staging_root_and_names_production_alone(self):
+        files = self.bundle("v1.0.0")
+        self.assertEqual({name.split("/")[0] for name in files},
+                         {"VERSION", "images.lock", "services.json", "provisionador", "deis"})
+        self.assertFalse([r for r in self.ROOTS for t in files.values() if r in t])
+        self.assertEqual(json.loads(files["services.json"]), {
+            "url": "https://gestion-nombres.apsconecta.workers.dev", "suffix": "gestion.apsconecta.cl",
+            "acme_ca": "https://acme-v02.api.letsencrypt.org/directory"})
+
+    def test_a_test_build_carries_each_staging_root_the_test_browser_trusts_in_a_file_of_its_own(self):
+        files = self.bundle("v0.0.0-ci.1")
+        trusted = {name: text for name, text in files.items() if name.startswith("trusted-cacerts/")}
+        self.assertEqual(len(self.ROOTS), 4)
+        self.assertTrue(all(name.endswith(".crt") for name in trusted), trusted.keys())
+        self.assertEqual(sorted(trusted.values()), sorted(self.ROOTS))
+        self.assertIn(b"acme-staging-v02", files["services.json"])
 
 
 if __name__ == "__main__":
