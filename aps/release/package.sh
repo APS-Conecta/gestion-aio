@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Assembles a release's assets in <out-dir>:
-#   gestion-aio-<tag>.tar.gz          the bundle: VERSION, images.lock (every image the release runs, by digest),
+#   gestion-aio-<tag>.tar.gz          the bundle: VERSION, images.lock (every image the release runs, by digest,
+#                                     the free domain's reverse proxy and local DNS included),
 #                                     the Provisionador and the DEIS register
 #   install.sh                        the stable-name bootstrap, with the tag and bundle checksum filled in
 #   gestion-aio-<tag>-install.sh      the same bootstrap under its versioned name
@@ -19,7 +20,8 @@ trap 'rm -rf "$stage"' EXIT
 printf '%s\n' "$tag" > "$stage/VERSION"
 {
   printf '%s\n' "$mastercontainer" "$nextcloud"
-  jq -r '.aio_services_v1[] | select(.image_tag | startswith("sha256:")) | "\(.image)@\(.image_tag)"' php/containers.json
+  jq -r '.aio_services_v1[] | select(.image_tag | startswith("sha256:")) | "\(.image)@\(.image_tag)"' php/containers.json \
+    community-containers/caddy/caddy.json community-containers/dnsmasq/dnsmasq.json
 } > "$stage/images.lock"
 
 mkdir -p "$out"

@@ -12,6 +12,8 @@ CONTEXT.md APS domain glossary
 .github/workflows/aps-gates.yml APS static gates and PR-title check
 .github/workflows/aps-acceptance.yml APS clean-machine acceptance run on a fresh Debian 12 VM
 .github/workflows/aps-release.yml APS release pipeline: our two images, the bundle, test pre-releases and the bootstrap proof
+community-containers/caddy/caddy.json upstream's reverse proxy for the free domain (deSEC DNS challenge), pinned by digest
+community-containers/dnsmasq/dnsmasq.json upstream's local DNS for the free domain, pinned by digest
 php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image; Spanish display names
 php/containers-schema.json an image_tag may be a sha256 digest pin
 php/public/click-handlers.js Spanish «APS Conecta Gestión» text on AIO's page
@@ -30,7 +32,8 @@ php/src/Cron/CheckFreeDiskSpace.php AIO's notifications in Spanish, naming «APS
 php/src/Cron/OutdatedNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
 php/src/Cron/UpdateNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
 php/src/Data/ConfigurationManager.php Spanish «APS Conecta Gestión» text on AIO's page
-php/src/Docker/DockerActionManager.php an image_tag that is a sha256 digest is requested as image@digest; Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Desec/DesecManager.php the free-domain updater publishes the server's inside address
+php/src/Docker/DockerActionManager.php an image_tag that is a sha256 digest is requested as image@digest; Spanish «APS Conecta Gestión» text on AIO's page; inside the suite the free domain resolves to its reverse proxy
 php/templates/already-installed.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/components/container-state.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/containers.twig Spanish «APS Conecta Gestión» text on AIO's page; upstream's switch for the unused Nextcloud major upgrade turned off
