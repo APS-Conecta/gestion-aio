@@ -81,15 +81,16 @@ test("storage keeps only a hash of the credential", async () => {
   assert.ok(!JSON.stringify([...names.storage.data]).includes(password));
 });
 
-test("the address update accepts any valid address: IPv4 sets the A record, IPv6 the AAAA", async () => {
+test("the address update accepts any valid address: IPv4 goes in the A record, IPv6 in the AAAA", async () => {
   const names = deployment();
   const castanos = names.as((await names.claim("999001")).body);
-  for (const [address, type] of [["192.168.1.10", "A"], ["203.0.113.7", "A"], ["fd00::A:10", "AAAA"]]) {
+  for (const [address, type, record] of [["192.168.1.10", "A", "192.168.1.10"], ["203.0.113.7", "A", "203.0.113.7"],
+                                         ["fd00::A:10", "AAAA", "fd00::a:10"]]) {
     const { status, body } = await names.post("/address", { address }, castanos);
     assert.equal(status, 200, address);
-    assert.deepEqual(body, { name: CASTANOS, type, address: address.toLowerCase() });
+    assert.deepEqual(body, { name: CASTANOS, type, address: record });
+    assert.deepEqual(names.cloudflare.records(), [`${type} ${CASTANOS} ${record}`], "the name follows the latest address only");
   }
-  assert.deepEqual(names.cloudflare.records(), [`A ${CASTANOS} 203.0.113.7`, `AAAA ${CASTANOS} fd00::a:10`]);
 });
 
 test("an unchanged address makes no Cloudflare call", async () => {
@@ -157,6 +158,7 @@ test("an update that is not an ACME challenge value is refused", async () => {
   const names = deployment();
   const castanos = (await names.claim("999001")).body;
   for (const body of [{ subdomain: castanos.subdomain, txt: "v=spf1 -all" }, { subdomain: castanos.subdomain, txt: "x".repeat(44) },
+                      { subdomain: castanos.subdomain, txt: [CHALLENGE(1)] },
                       { subdomain: castanos.subdomain, txt: CHALLENGE(1), type: "CNAME" }, { subdomain: castanos.subdomain }]) {
     assert.equal((await names.post("/update", body, names.as(castanos))).status, 400, JSON.stringify(body));
   }
@@ -167,16 +169,14 @@ test("APS releases a code's name with its records; the old credential dies and t
   const names = deployment();
   const castanos = (await names.claim("999001")).body;
   const estrecho = (await names.claim("999002")).body;
-  for (const credential of [castanos, estrecho]) {
-    await names.post("/address", { address: "10.0.0.9" }, names.as(credential));
-    await names.post("/address", { address: "fd00::9" }, names.as(credential));
+  for (const [credential, address] of [[castanos, "10.0.0.9"], [estrecho, "fd00::9"]]) {
+    await names.post("/address", { address }, names.as(credential));
     await names.post("/update", { subdomain: credential.subdomain, txt: CHALLENGE(1) }, names.as(credential));
   }
   const { status, body } = await names.release("999001");
   assert.equal(status, 200);
   assert.deepEqual(body, { name: CASTANOS });
-  assert.ok(names.cloudflare.records().every((r) => r.includes(ESTRECHO)), names.cloudflare.records().join("\n"));
-  assert.equal(names.cloudflare.records().length, 3);
+  assert.deepEqual(names.cloudflare.records(), [`AAAA ${ESTRECHO} fd00::9`, `TXT _acme-challenge.${ESTRECHO} ${CHALLENGE(1)}`]);
   assert.equal((await names.post("/address", { address: "10.0.0.9" }, names.as(castanos))).status, 401);
   assert.equal((await names.claim("999001")).status, 201);
 });

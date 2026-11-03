@@ -32,6 +32,7 @@ mkdir -p "$work/nextcloud/admin/files/nextcloud-aio-caddy"
 touch "$work/nextcloud/admin/files/nextcloud-aio-caddy/allowed-countries.txt"
 docker run --rm --entrypoint cat "$caddy" /Caddyfile \
   | awk -v dir="$staging" '{ print } /issuer acme \{/ { print "            dir " dir }' > "$work/Caddyfile"
+grep -qF "dir $staging" "$work/Caddyfile" || { echo "::error::the image's Caddyfile has no 'issuer acme' block for staging"; exit 1; }
 chmod 666 "$work/Caddyfile"
 docker network create aps-certificate > /dev/null
 docker run -d --name nextcloud-aio-nextcloud --network aps-certificate --entrypoint nc "$caddy" -lk 9001 > /dev/null

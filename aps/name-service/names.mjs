@@ -29,10 +29,10 @@ function addressRecord(value) {
   }
 }
 
-/** Equal hex digests, compared in constant time. */
-function same(a, b) {
-  let difference = a.length ^ b.length;
-  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i % b.length);
+/** Two SHA-256 hex digests compared in constant time. */
+function equalDigests(a, b) {
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return difference === 0;
 }
 
@@ -45,6 +45,9 @@ async function sha256(text) {
 const shaped = (body, ...keys) =>
   body !== null && typeof body === "object" && !Array.isArray(body) &&
   Object.keys(body).length === keys.length && keys.every((k) => Object.hasOwn(body, k));
+
+/** The DEIS code a claim or a release names, or null when the body is not {"code": "<code>"}. */
+const codeIn = (body) => (shaped(body, "code") && typeof body.code === "string" ? body.code : null);
 
 /** Runs tasks with the same key one after another, so a read, its Cloudflare calls and its write never interleave. */
 function serializer() {
@@ -67,13 +70,13 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs }) {
 
   /** A code takes its name once: neither the code nor the name may be held already. */
   async function claim(request, body) {
-    if (!shaped(body, "code") || typeof body.code !== "string") return answer(400, { error: 'a claim is {"code": "<DEIS code>"}' });
-    const { code } = body;
+    const code = codeIn(body);
+    if (code === null) return answer(400, { error: 'a claim is {"code": "<DEIS code>"}' });
     if (!Object.hasOwn(slugs, code)) return answer(404, { error: `${code} is not a DEIS code of the register` });
+    const slug = slugs[code];
     return exclusive("claims", async () => {
-      const held = (await storage.get(codeKey(code)))?.slug ?? (await storage.get(nameKey(slugs[code])) && slugs[code]);
+      const held = (await storage.get(codeKey(code)))?.slug ?? ((await storage.get(nameKey(slug))) && slug);
       if (held) return answer(409, { error: `${fqdn(held)} is already claimed; APS Conecta can release it` });
-      const slug = slugs[code];
       const password = secret();
       await storage.put({ [codeKey(code)]: { slug, hash: await sha256(password), txt: [], A: null, AAAA: null },
                           [nameKey(slug)]: code });
@@ -88,28 +91,29 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs }) {
     return exclusive(codeKey(code), async () => {
       const record = await storage.get(codeKey(code));
       const presented = await sha256(request.headers.get("X-Api-Key") ?? "");
-      if (!record || !same(presented, record.hash)) return answer(401, { error: "unknown credential" });
+      if (!record || !equalDigests(presented, record.hash)) return answer(401, { error: "unknown credential" });
       return change(code, record);
     });
   }
 
-  /** The server reports its address: IPv4 goes in the name's A record, IPv6 in its AAAA. */
+  /** The server reports its address and the name points there only: IPv4 in the A record, IPv6 in the AAAA. */
   function address(request, body) {
     return withCredential(request, async (code, record) => {
-      const set = shaped(body, "address") && addressRecord(body.address);
-      if (!set) return answer(400, { error: 'an address update is {"address": "<IPv4 or IPv6 address>"}' });
-      if (record[set.type] !== set.content) {
-        await dns.set(fqdn(record.slug), set.type, [set.content]);
-        await storage.put({ [codeKey(code)]: { ...record, [set.type]: set.content } });
+      const reported = shaped(body, "address") && addressRecord(body.address);
+      if (!reported) return answer(400, { error: 'an address update is {"address": "<IPv4 or IPv6 address>"}' });
+      const addresses = { A: null, AAAA: null, [reported.type]: reported.content };
+      for (const type of ["A", "AAAA"].filter((t) => record[t] !== addresses[t])) {
+        await dns.set(fqdn(record.slug), type, addresses[type] ? [addresses[type]] : []);
+        await storage.put({ [codeKey(code)]: (record = { ...record, [type]: addresses[type] }) });
       }
-      return answer(200, { name: fqdn(record.slug), type: set.type, address: set.content });
+      return answer(200, { name: fqdn(record.slug), type: reported.type, address: reported.content });
     });
   }
 
   /** acme-dns's update: a challenge value for the name's _acme-challenge TXT record. */
   function update(request, body) {
     return withCredential(request, async (code, record) => {
-      if (!shaped(body, "subdomain", "txt") || !CHALLENGE.test(body.txt)) {
+      if (!shaped(body, "subdomain", "txt") || typeof body.txt !== "string" || !CHALLENGE.test(body.txt)) {
         return answer(400, { error: 'an update is {"subdomain": "<slug>", "txt": "<ACME challenge value>"}' });
       }
       if (body.subdomain !== record.slug) return answer(403, { error: `this credential changes only ${fqdn(record.slug)}` });
@@ -123,22 +127,24 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs }) {
   /** APS frees a code's name: its records go, then the claim, so the code can claim again. */
   async function release(request, body) {
     const bearer = (request.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
-    if (!token || !same(await sha256(bearer), await sha256(token))) return answer(401, { error: "release needs APS's token" });
-    if (!shaped(body, "code") || typeof body.code !== "string") return answer(400, { error: 'a release is {"code": "<DEIS code>"}' });
-    return exclusive(codeKey(body.code), async () => {
-      const record = await storage.get(codeKey(body.code));
-      if (!record) return answer(404, { error: `${body.code} holds no name` });
+    if (!token || !equalDigests(await sha256(bearer), await sha256(token))) return answer(401, { error: "release needs APS's token" });
+    const code = codeIn(body);
+    if (code === null) return answer(400, { error: 'a release is {"code": "<DEIS code>"}' });
+    return exclusive(codeKey(code), async () => {
+      const record = await storage.get(codeKey(code));
+      if (!record) return answer(404, { error: `${code} holds no name` });
       const name = fqdn(record.slug);
       for (const type of ["A", "AAAA"]) await dns.set(name, type, []);
       await dns.set(`_acme-challenge.${name}`, "TXT", []);
-      await storage.delete([codeKey(body.code), nameKey(record.slug)]);
+      await storage.delete([codeKey(code), nameKey(record.slug)]);
       return answer(200, { name });
     });
   }
 
   const routes = { "/claim": claim, "/address": address, "/update": update, "/release": release };
   return async (request) => {
-    const route = Object.hasOwn(routes, new URL(request.url).pathname) && routes[new URL(request.url).pathname];
+    const { pathname } = new URL(request.url);
+    const route = Object.hasOwn(routes, pathname) && routes[pathname];
     if (!route) return answer(404, { error: "no such endpoint" });
     if (request.method !== "POST") return answer(405, { error: "only POST" });
     let body;

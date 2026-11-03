@@ -69,10 +69,12 @@ jobs:
                 case "$pinned" in *@sha256:*) ;; *) echo "::error::$pinned is not pinned by digest"; exit 1 ;; esac
                 aps/release/revision.sh "$pinned" "$base"
               done
-      - name: The thin Caddy image's bases are pinned by digest
+      - name: Every base of our images is pinned by digest
         run: |
-          awk '/^FROM / { if (!($2 in stages) && $2 !~ /@sha256:[0-9a-f]{64}$/) bad = bad " " $2; if (toupper($3) == "AS") stages[$4] }
-               END { if (bad) { print "::error::not pinned by digest:" bad; exit 1 } }' aps/images/caddy/Dockerfile
+          for dockerfile in aps/images/*/Dockerfile; do
+            awk '/^FROM / { if (!($2 in stages) && $2 !~ /@sha256:[0-9a-f]{64}$/) bad = bad " " $2; if (toupper($3) == "AS") stages[$4] }
+                 END { if (bad) { print "::error::" FILENAME " has bases not pinned by digest:" bad; exit 1 } }' "$dockerfile"
+          done
       - name: Log in to ghcr.io and set up buildx
         env:
           TOKEN: ${{ github.token }}
@@ -186,23 +188,9 @@ jobs:
           sudo docker ps -a || true
           sudo docker logs nextcloud-aio-mastercontainer 2>&1 | tail -n 100 || true
 
-  name-service:
-    name: Deploy the name service's CI deployment from this commit
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Deploy nombres-ci.apsconecta.cl
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: aps/name-service/deploy.sh ci
-
   certificate:
     name: A staging certificate through the name service, with no open port
-    needs: [images, name-service]
+    needs: images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -212,6 +200,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Right before the proof, so another PR's deployment has the least time to replace it.
+      - name: Deploy the name service's CI deployment, nombres-ci.apsconecta.cl, from this commit
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: aps/name-service/deploy.sh ci
       - name: Log in to ghcr.io
         env:
           TOKEN: ${{ github.token }}
@@ -230,8 +223,13 @@ jobs:
         run: |
           aps/name-service/names.sh ci release "$CODE"
           ns="$(dig +short NS apsconecta.cl | head -n 1)"
-          left="$(dig +short TXT "_acme-challenge.$NAME" "@$ns")"
-          [ -z "$left" ] || { echo "::error::_acme-challenge.$NAME outlived the release: $left"; exit 1; }
+          for _ in $(seq 12); do
+            left="$(dig +short TXT "_acme-challenge.$NAME" "@$ns")"
+            [ -z "$left" ] && exit 0
+            sleep 5
+          done
+          echo "::error::_acme-challenge.$NAME outlived the release: $left"
+          exit 1
 
   acceptance:
     name: Clean-machine acceptance

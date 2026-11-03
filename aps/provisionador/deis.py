@@ -55,12 +55,16 @@ def slugs(rows):
     raise ValueError."""
     base = {r["codigo"]: hyphenated(short_name(r)) for r in rows}
     shared = Counter(base.values())
-    table = {r["codigo"]: (base[r["codigo"]] + ("-" + hyphenated(r["comuna"]) if shared[base[r["codigo"]]] > 1 else ""))
-             [:63].rstrip("-") for r in rows}
+
+    def slug(row):
+        name = base[row["codigo"]]
+        return (f"{name}-{hyphenated(row['comuna'])}" if shared[name] > 1 else name)[:63].rstrip("-")
+
+    table = {r["codigo"]: slug(r) for r in rows}
     codes = {}
-    for code, slug in sorted(table.items()):
-        codes.setdefault(slug, []).append(code)
-    clashes = [f"{slug}: {', '.join(c)}" for slug, c in codes.items() if len(c) > 1]
+    for code, label in sorted(table.items()):
+        codes.setdefault(label, []).append(code)
+    clashes = [f"{label}: {', '.join(c)}" for label, c in codes.items() if len(c) > 1]
     if clashes:
         raise ValueError("codes sharing a slug:\n  " + "\n  ".join(clashes))
     return table
