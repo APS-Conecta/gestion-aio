@@ -17,11 +17,13 @@ AIO keeps on this server: its optional-containers form, its backup settings and 
 login once Apache runs. The passphrase leaves this process only in the passwords file. The containers' progress is
 AIO's own reading of their state, as its page lists them. Every later install step runs occ in the Nextcloud
 container. The apps step downloads App releases from GitHub, without a token, and unpacks the ones it verified into
-Nextcloud's custom_apps.
+Nextcloud's custom_apps; the theme step places the theme folder in Nextcloud's themes folder, which upstream's updates
+keep.
 """
 
 import base64
 import http.client
+import io
 import json
 import os
 import re
@@ -29,6 +31,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tarfile
 import threading
 import urllib.error
 import urllib.parse
@@ -56,6 +59,8 @@ GITHUB_LIMITED = ("GitHub limitó las consultas de este servidor al pedir {}. Pr
                   "vuelve a ocurrir, contacte a APS Conecta.")
 UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de la aplicación. Presione «Reintentar»; si vuelve a ocurrir, "
                  "contacte a APS Conecta.")
+THEME_FAILED = ("No se pudo instalar el tema de APS Conecta Gestión en el servidor de aplicaciones. Presione "
+                "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
                  "servidor y presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
@@ -148,6 +153,20 @@ php /var/www/html/occ security:certificates:import "$dir/$name"
 UNPACK = """set -eu
 rm -rf "/var/www/html/custom_apps/${1:?}"
 base64 -d | tar -xzf - -C /var/www/html/custom_apps"""
+
+
+# In the Nextcloud container, the theme folder named $1 in Nextcloud's themes folder (upstream's updates keep it,
+# Containers/nextcloud/upgrade.exclude), replaced whole by the tar archive that arrives on stdin in base64.
+THEME = r"""
+set -eu
+cd /var/www/html/themes
+rm -rf ".$1.new" ".$1.old"
+mkdir ".$1.new"
+base64 -d | tar -x -C ".$1.new"
+if [ -e "$1" ]; then mv "$1" ".$1.old"; fi
+mv ".$1.new" "$1"
+rm -rf ".$1.old"
+"""
 
 
 def write_root_only(path, text):
@@ -291,6 +310,17 @@ class Suite:
         """What Nextcloud's command line printed."""
         return self.execute(NEXTCLOUD, ("sh", "-c", OCC, "sh", *args), stdin, OCC_FAILED.format(" ".join(args)))
 
+    def theme(self, name, files):
+        """The theme folder `name` in Nextcloud's themes folder holds the files, by their path in it, and no other."""
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            for path, data in sorted(files.items()):
+                info = tarfile.TarInfo(path)
+                info.size, info.mode = len(data), 0o644
+                tar.addfile(info, io.BytesIO(data))
+        self.execute(NEXTCLOUD, ("sh", "-c", THEME, "sh", name), base64.b64encode(archive.getvalue()).decode(),
+                     THEME_FAILED)
+
     def trust_issuer(self, host):
         """Nextcloud's own requests verify a host that serves only its leaf certificate: the CA that issued it is among
         Nextcloud's trusted certificates."""
@@ -423,7 +453,10 @@ class FakeSuite:
         self.release.set()
         self.dies = False  # the Provisionador dies while AIO's start runs; AIO goes on
         self.system = {}  # Nextcloud's system settings
-        self.apps = {"core": {}, "admin_audit": {}}  # each installed app's settings
+        # Each installed app's settings, as Nextcloud ships them: Nextcloud's own voice on.
+        self.apps = {"core": {}, "admin_audit": {}, "theming": {},
+                     **{app: {"enabled": "yes"} for app in ("nextcloud_announcements", "firstrunwizard",
+                                                            "survey_client", "support")}}
         self.commands = []  # every occ command, by its arguments
         self.imports = []  # the settings each config:import brought
         self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
@@ -432,6 +465,7 @@ class FakeSuite:
         self.store = set()  # the ids of the apps the open app store offers
         self.unpacked = []  # each app id and tarball unpacked into custom_apps, in turn
         self.api_calls = 0  # the calls to GitHub's API
+        self.themes = {}  # each theme folder in Nextcloud's themes folder: its files by their path in it
 
     def claim(self, code, name):
         if self.credential is None:
@@ -510,6 +544,12 @@ class FakeSuite:
                 raise Unreachable(OCC_FAILED.format(" ".join(args)))
             self.apps.setdefault(args[1], {})["enabled"] = "yes"
             return ""
+        if args[0] == "app:disable" and len(args) == 2:
+            if args[1] in self.apps:
+                self.apps[args[1]]["enabled"] = "no"
+            return ""
+        if args[0] == "theming:config" and len(args) == 3:
+            return self._theming(*args[1:])
         raise AssertionError(f"the fake suite runs no occ {args}")
 
     def latest(self, repo):
@@ -529,6 +569,23 @@ class FakeSuite:
         self._outage_guard("nextcloud")
         self.unpacked.append((app, tarball))
         self.apps.setdefault(app, {})
+    def _theming(self, key, value):
+        """Theming's settings as occ theming:config stores them; an image is a file of a placed theme folder."""
+        theming = self.apps["theming"]
+        if key == "background" and value == "backgroundColor":
+            theming["backgroundMime"] = value
+        elif key in ("logo", "logoheader", "favicon", "background"):
+            name, _, path = value.removeprefix("/var/www/html/themes/").partition("/")
+            if path not in self.themes.get(name, {}):
+                raise Unreachable(OCC_FAILED.format(f"theming:config {key} {value}"))
+            theming[f"{key}Mime"] = "image/svg+xml"
+        else:
+            theming[key] = value in ("1", "true", "yes", "on") if key == "disable-user-theming" else value
+        return ""
+
+    def theme(self, name, files):
+        self._outage_guard("nextcloud")
+        self.themes[name] = dict(files)
 
     def trust_issuer(self, host):
         self._outage_guard("nextcloud")
