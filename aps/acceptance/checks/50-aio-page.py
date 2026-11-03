@@ -7,18 +7,18 @@ controls, the source-code link, and no «Nextcloud» in what it shows."""
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from browser import chromium, machine  # noqa: E402
 
 aio = f"https://{os.environ['ADDRESS']}:8080"
 evidence = Path(os.environ["EVIDENCE"])
 # The token behind the suite's login link and the passphrase stay in memory: never printed.
-config = json.loads(subprocess.run(
-    [os.environ["MACHINE"], "sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json"],
-    check=True, capture_output=True, text=True).stdout)
+config = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json"))
+# AIO's own :8080 certificate, as the machine serves it to itself.
+certificate = machine("openssl s_client -connect 127.0.0.1:8080 -noservername < /dev/null 2> /dev/null | openssl x509")
 
 
 def check_page(page, name, texts):
@@ -33,8 +33,8 @@ def check_page(page, name, texts):
         sys.exit(f"AIO's {name} page is not the Spanish «APS Conecta Gestión» one")
 
 
-with sync_playwright() as playwright:
-    page = playwright.chromium.launch().new_page(ignore_https_errors=True, viewport={"width": 1280, "height": 2400})
+with chromium(pinned=[certificate]) as browser:
+    page = browser.new_page(viewport={"width": 1280, "height": 2400})
     try:
         page.goto(f"{aio}/api/auth/getlogin?token={config['AIO_TOKEN']}")
     except Exception:  # its message would carry the token
