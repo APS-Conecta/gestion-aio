@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Assembles a release's assets in <out-dir>:
 #   gestion-aio-<tag>.tar.gz          the bundle: VERSION, images.lock (every image the release runs, by digest),
-#                                     services.json, the Provisionador and the DEIS register
+#                                     services.json, the Provisionador, the DEIS register, the brand and the theme
 #   install.sh                        the stable-name bootstrap, with the tag and bundle checksum filled in
 #   gestion-aio-<tag>-install.sh      the same bootstrap under its versioned name
 #   SHA256SUMS                        checksums of the three
@@ -33,7 +33,7 @@ jq -n --arg url "$url" --arg suffix "$suffix" --arg acme_ca "$acme_ca" '{$url, $
 
 mkdir -p "$out"
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 --exclude='test_*.py' -czf "$out/$bundle" \
-  -C "$stage" VERSION images.lock services.json -C "$PWD/aps" provisionador deis
+  -C "$stage" VERSION images.lock services.json -C "$PWD/aps" provisionador deis brand theme
 sha="$(sha256sum "$out/$bundle" | cut -d ' ' -f 1)"
 sed -e "s|^RELEASE_TAG=\"\"$|RELEASE_TAG=\"$tag\"|" \
     -e "s|^BUNDLE_SHA256=\"\"$|BUNDLE_SHA256=\"$sha\"|" aps/bootstrap/install.sh > "$out/install.sh"

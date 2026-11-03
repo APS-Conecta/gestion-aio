@@ -15,16 +15,16 @@ CONTEXT.md APS domain glossary
 .github/workflows/aps-name-service.yml APS name service: the production deployment, from main only
 .github/workflows/aps-name-release.yml APS name release: frees a DEIS code's name and its records
 community-containers/caddy/caddy.json the reverse proxy is our thin Caddy image, pinned per release, with the name service's acme-dns credential and the ACME directory; Spanish display name
+Containers/mastercontainer/headers.Caddyfile AIO's page serves its own fonts: its CSP allows fonts from itself
 php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image; Spanish display names
 php/containers-schema.json an image_tag may be a sha256 digest pin
 php/public/click-handlers.js Spanish «APS Conecta Gestión» text on AIO's page
 php/public/containers-form-submit.js Spanish «APS Conecta Gestión» text on AIO's page
 php/public/forms.js Spanish «APS Conecta Gestión» text on AIO's page
-php/public/img/favicon.svg APS Conecta Gestión favicon for AIO's page
-php/public/img/nextcloud-logo.svg APS Conecta Gestión logo under upstream's file name and symbol ids
+php/public/img/nextcloud-logo.svg APS Conecta Gestión logo under upstream's file name and symbol ids, coloured from the brand token file
 php/public/log-load.js Spanish «APS Conecta Gestión» text on AIO's page
 php/public/second-tab-warning.js Spanish «APS Conecta Gestión» text on AIO's page
-php/public/style.css APS palette, Nunito Sans and the source-code link on AIO's page
+php/public/style.css the palette and Nunito Sans from the brand token file, and the source-code link, on AIO's page
 php/src/Auth/AuthManager.php Spanish «APS Conecta Gestión» text on AIO's page
 php/src/Controller/DockerController.php Spanish «APS Conecta Gestión» text on AIO's page
 php/src/Controller/LoginController.php Spanish «APS Conecta Gestión» text on AIO's page
