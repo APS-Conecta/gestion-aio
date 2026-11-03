@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The establishment's teams and what the install declares from them, in one place: the groups, the group folders with
-each group's permissions, and the cargo accounts, whose usernames are reserved.
+each group's permissions, and the cargo accounts.
 
 A team is a sector or a program the operator types on «Equipos». «Norte», «Sector Norte» and «sector norte» are one
 team, Sector Norte: its group is sector-norte and its folder Sectores/Sector Norte. «Cardiovascular» and «Programa
-Cardiovascular» are Programa Cardiovascular, prog-cardiovascular, in Programas/Cardiovascular. Group ids are English and
-their names Spanish. Groups do not nest: an account is in the staff-wide group, its role's category, its role and its
+Cardiovascular» are Programa Cardiovascular, prog-cardiovascular, in Programas/Cardiovascular. Group ids are old
+gestion's; their names are Spanish, and a name that names the kind of establishment names the centre's DEIS type
+(Director/a de SAPU). Groups do not nest: an account is in the staff-wide group, its role's category, its role and its
 teams, and each folder grants groups.
 """
 
@@ -19,9 +20,9 @@ STAFF = "all-staff"
 JEFATURAS = "cat-jefaturas"
 CATEGORIES = {JEFATURAS: "Jefaturas", "cat-clinicos": "Clínicos", "cat-tecnicos": "Técnicos",
               "cat-administrativos": "Administrativos"}
-# The roles every establishment shares, each with the category its holders also join.
+# The roles every establishment shares, each with the category its holders also join; {type} is the centre's DEIS type.
 ROLES = {
-    "role-director-cesfam": ("Director/a de CESFAM", JEFATURAS),
+    "role-director-cesfam": ("Director/a de {type}", JEFATURAS),
     "role-subdirector-jefe-tecnico": ("Subdirector/a Médico o Jefe Técnico", JEFATURAS),
     "role-jefe-sector-mais": ("Jefe/a de Sector (Gestión MAIS)", JEFATURAS),
     "role-medico": ("Médico General / de Familia", "cat-clinicos"),
@@ -49,19 +50,19 @@ ROLES = {
 KINDS = {"sector": ("sector-", "Sector", "Sectores"), "program": ("prog-", "Programa", "Programas")}
 LONGEST = 60  # characters in a typed name
 # Groupfolders' permission words: «read» alone reads; managing also writes, deletes and shares.
-READ, READ_SHARE, MANAGE = ("read",), ("read", "share"), ("read", "write", "delete", "share")
+READ, READ_SHARE, EDIT, MANAGE = ("read",), ("read", "share"), ("read", "write"), ("read", "write", "delete", "share")
 BITS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # each word's permissions, as Groupfolders lists them
 TRANSVERSAL = "Transversal"
 SUBFOLDERS = ("Protocolos", "Flujogramas", "Documentación", "Registro de redes", "Actas de reuniones")
 UNITS = {"SOME": ("role-administrativo-some",), "Farmacia": ("role-quimico-farmaceutico", "role-tens-farmacia"),
          "Dental": ("role-dentista", "role-tons"), "OIRS": ("role-oirs",),
          "Estadística-REM": ("role-estadistica-rem",), "Dirección": ()}  # each with the roles that manage it
+INTRANET = {STAFF: READ, JEFATURAS: EDIT, "role-oirs": EDIT}  # the welcome page's folder: staff read it, these edit it
 # The positions every establishment has: username, name and role.
-POSITIONS = (("director", "Director/a de CESFAM", "role-director-cesfam"),
+POSITIONS = (("director", "Director/a de {type}", "role-director-cesfam"),
              ("subdirector", "Subdirector/a Médico o Jefe Técnico", "role-subdirector-jefe-tecnico"),
              ("jefe.farmacia", "Jefe/a de Farmacia (Químico/a Farmacéutico/a)", "role-quimico-farmaceutico"),
              ("jefe.some", "Jefe/a de SOME", "role-jefe-some"))
-ADMINISTRATOR = "admin"  # the suite administrator's account, AIO's
 NOT_NAMES = "Escriba los sectores y los programas como listas de nombres."
 NOT_TEXT = "«{}» tiene caracteres que no son texto."
 TOO_LONG = "«{}» es demasiado largo: use a lo más {} caracteres."
@@ -98,10 +99,11 @@ def declare(sectors, programs):
     return list(found.values())
 
 
-def groups(teams):
+def groups(teams, centre_type):
     """Every group the install creates, by id, with its name: the staff-wide group, the categories, the roles and one
     per team."""
-    return {STAFF: "Todo el personal", **CATEGORIES, **{role: name for role, (name, _) in ROLES.items()},
+    return {STAFF: "Todo el personal", **CATEGORIES,
+            **{role: name.format(type=centre_type) for role, (name, _) in ROLES.items()},
             **{team["id"]: team["name"] for team in teams}}
 
 
@@ -121,19 +123,17 @@ def folders(teams):
     return declared
 
 
-def cargo_accounts(teams):
+def cargo_accounts(teams, centre_type):
     """The cargo accounts, each with its username, name and groups: one per position every establishment has and a
-    jefatura per sector, in its sector's team too. A sector's jefatura is jefe.<the sector>."""
-    accounts = {user: {"user": user, "name": name, "groups": [role, JEFATURAS, STAFF]}
+    jefatura per sector, in its sector's team too. A sector's jefatura is jefe.<the sector> (jefe.norte), or
+    jefe.<its group> (jefe.sector-farmacia) when a position holds that username."""
+    accounts = {user: {"user": user, "name": name.format(type=centre_type), "groups": [role, JEFATURAS, STAFF]}
                 for user, name, role in POSITIONS}
     for team in teams:
         if team["kind"] == "sector":
             user = "jefe." + team["id"].removeprefix(KINDS["sector"][0])
-            accounts.setdefault(user, {"user": user, "name": f"Jefe/a de {team['name']}",
-                                       "groups": ["role-jefe-sector-mais", team["id"], JEFATURAS, STAFF]})
+            if user in accounts:
+                user = "jefe." + team["id"]
+            accounts[user] = {"user": user, "name": f"Jefe/a de {team['name']}",
+                              "groups": ["role-jefe-sector-mais", team["id"], JEFATURAS, STAFF]}
     return list(accounts.values())
-
-
-def reserved(teams):
-    """The usernames no person may take: the suite administrator's and every cargo account's."""
-    return {ADMINISTRATOR, *(account["user"] for account in cargo_accounts(teams))}

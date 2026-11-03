@@ -5,7 +5,7 @@ account the install creates, kept on the server readable by root alone and hande
 accounts asks `first` for their passwords, which the file then lists."""
 
 import json
-from secrets import token_urlsafe
+from secrets import token_hex
 
 from suite import write_root_only
 
@@ -26,7 +26,7 @@ def first(context, named):
     """The first password of each account in `named`, {username: the name the file shows}: made the first time an
     account is named and kept from then on, so a rerun never changes it. The passwords file lists it at once."""
     kept = accounts(context)
-    new = {user: {"name": name, "password": token_urlsafe(15)} for user, name in named.items() if user not in kept}
+    new = {user: {"name": name, "password": token_hex(12)} for user, name in named.items() if user not in kept}
     if new:
         kept.update(new)
         write_root_only(context.folder / ACCOUNTS, json.dumps(kept, ensure_ascii=False, indent=1))

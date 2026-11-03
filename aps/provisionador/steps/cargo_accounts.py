@@ -14,7 +14,7 @@ MISSING = ("Estas cuentas de cargo no existen o no están en sus grupos: {}. Pre
 
 
 def run(context):
-    suite, accounts = context.suite, teams.cargo_accounts(context.teams)
+    suite, accounts = context.suite, teams.cargo_accounts(context.teams, context.centre["type"])
     first = passwords.first(context, {account["user"]: account["name"] for account in accounts})
     held = members(suite)
     for account in accounts:
@@ -27,6 +27,6 @@ def run(context):
 
 def check(context):
     held = members(context.suite)
-    missing = [account["user"] for account in teams.cargo_accounts(context.teams)
+    missing = [account["user"] for account in teams.cargo_accounts(context.teams, context.centre["type"])
                if any(account["user"] not in held.get(group, ()) for group in account["groups"])]
     return [MISSING.format(", ".join(missing))] if missing else []

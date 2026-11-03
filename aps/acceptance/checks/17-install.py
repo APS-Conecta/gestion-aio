@@ -37,13 +37,15 @@ SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnab
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 AIO_DATA = "/mnt/docker-aio-config/data"
-KEPT = f"/var/lib/aps-conecta/provisionador/{FILE}"  # the passwords file's root-only copy
+FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the passwords file's root-only copy
+KEPT = f"{FOLDER}/{FILE}"
 
 
 def aio(file):
     return machine(f"sudo docker exec nextcloud-aio-mastercontainer cat {AIO_DATA}/{file}")
 
 
+centre = json.loads(machine(f"sudo cat {FOLDER}/state.json"))["centre"]  # as 15-wizard chose it
 config = json.loads(aio("configuration.json"))
 passphrase, name = config.get("password"), config["domain"]
 if not passphrase:  # it stays in memory: run.sh masks it in the log
@@ -72,7 +74,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     expect(page.locator("#summary-address")).to_have_text(f"https://{name}")
     expect(page.locator("#summary-teams li")).to_have_text([team["name"] for team in DECLARED])
     expect(page.locator("#summary-cargo li")).to_have_text(
-        [f"{account['name']} ({account['user']})" for account in teams.cargo_accounts(DECLARED)])
+        [f"{account['name']} ({account['user']})" for account in teams.cargo_accounts(DECLARED, centre["type"])])
     expect(page.locator("#summary-components li")).to_have_text(CHOSEN)
     expect(page.locator("#summary-backups")).to_contain_text(BACKUP_FOLDER)
     page.screenshot(path=evidence / "revisar.png")

@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The group folders, in Groupfolders (a default store app): Transversal with its subfolders, one folder per unit and
-one per team, each with the permissions teams.py declares for its groups and none for any other group."""
+"""The group folders, in Groupfolders (a default store app, which the step ensures): Transversal with its subfolders,
+one folder per unit and one per team, each with the permissions teams.py declares for its groups and none for any other
+group."""
 
 import json
 
 import teams
+from steps import apps
 
 NAME = "Carpetas de equipo y permisos"
-NEEDS = ("apps", "groups")
+NEEDS = ("groups",)
 MISSING = "Faltan estas carpetas de equipo: {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta."
 WRONG = ("Estas carpetas de equipo no tienen los permisos declarados: {}. Presione «Reintentar»; si vuelve a ocurrir, "
          "contacte a APS Conecta.")
@@ -29,6 +31,8 @@ def grant(suite, folder, declared):
 
 
 def run(context):
+    if failed := apps.ensure(context, "groupfolders"):
+        return failed
     suite, held = context.suite, listed(context.suite)
     for mount, declared in teams.folders(context.teams).items():
         if mount not in held:

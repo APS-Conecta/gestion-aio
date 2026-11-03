@@ -824,7 +824,8 @@ class Apps(InstallTest):
         self.assertFalse({outside["id"], republished["id"]} & {app for app, _ in self.suite.unpacked})
 
     def test_a_bad_signature_or_checksum_refuses_that_app_with_its_reason_and_reintentar_installs_it(self):
-        signed, tampered = [app for app in RELEASED if not app.get("optional")][:2]
+        # Apps no other step configures: the welcome page ensures IntraVox, and would fail with it.
+        signed, tampered = [app for app in RELEASED if not app.get("optional") and app["id"] != "intravox"][:2]
         good = {app["repo"]: dict(self.suite.app_releases[app["repo"]]) for app in (signed, tampered)}
         tag, assets = next(iter(good[signed["repo"]].items()))
         forger = AppKey()
@@ -926,6 +927,7 @@ DECLARED = [
 CARGO = {"director", "subdirector", "jefe.farmacia", "jefe.some", "jefe.norte", "jefe.sur"}
 READ, READ_SHARE, EDIT, MANAGE = 1, 17, 7, 31  # Groupfolders' permission bits
 FOLDERS_STEP = "Carpetas de equipo y permisos"
+WELCOME_STEP = "Página de bienvenida"
 
 
 class Equipos(InstallTest):
@@ -1043,16 +1045,43 @@ class Equipos(InstallTest):
         self.assertEqual(north["groups"], {"sector-norte": MANAGE, "cat-jefaturas": MANAGE})
         self.assertEqual({user: self.suite.users[user]["password"] for user in CARGO}, first)
 
-    def test_the_folder_and_welcome_steps_wait_for_the_apps_that_hold_them(self):
+    def test_a_failed_optional_app_leaves_the_folders_and_the_welcome_page_green(self):
+        optional = next(app for app in RELEASED if app.get("optional"))
+        self.suite.app_releases[optional["repo"]] = {}
         self.claim()
+        self.install(optional=[optional["id"]])
+        steps = self.steps(self.until("failed"))
+        self.assertEqual(steps[APPS_STEP][0], "failed")
+        self.assertIn(f"«{optional['name']}»", steps[APPS_STEP][1])
+        for name in (FOLDERS_STEP, WELCOME_STEP, "Grupos y equipos", "Cuentas de cargo"):
+            self.assertEqual(steps[name], ("green", None), name)
+        self.assertIn("Intranet", self.folders())
+
+    def test_without_groupfolders_the_folders_and_the_welcome_page_fail_naming_it(self):
         self.suite.store.remove("groupfolders")
+        self.claim()
         self.install()
         steps = self.steps(self.until("failed"))
-        for name in (FOLDERS_STEP, "Página de bienvenida"):
-            self.assertEqual(steps[name], ("waiting", "Espera a que se complete: «Aplicaciones»."), name)
+        for name in (FOLDERS_STEP, WELCOME_STEP):
+            self.assertEqual(steps[name][0], "failed", name)
+            self.assertIn("«Carpetas de equipo»", steps[name][1], name)
         self.assertEqual((steps["Grupos y equipos"][0], steps["Cuentas de cargo"][0]), ("green", "green"))
         self.assertEqual(self.suite.group_folders, {})
 
+    def test_a_sector_named_as_a_position_gets_its_own_jefatura(self):
+        self.claim()
+        self.teams(sectors=["Farmacia", "SOME"])
+        accounts = {a["user"]: a["name"] for a in self.browser.get("/api/state")[1]["cargo_accounts"]}
+        self.assertLessEqual({"jefe.farmacia": "Jefe/a de Farmacia (Químico/a Farmacéutico/a)",
+                              "jefe.sector-farmacia": "Jefe/a de Sector Farmacia", "jefe.some": "Jefe/a de SOME",
+                              "jefe.sector-some": "Jefe/a de Sector SOME"}.items(), accounts.items())
+        self.assertEqual(len(accounts), 6)
+
+    def test_the_names_that_name_the_kind_of_establishment_follow_the_centres_type(self):
+        self.claim("999003")
+        state = self.browser.get("/api/state")[1]
+        self.assertIn({"user": "director", "name": "Director/a de SAPU"}, state["cargo_accounts"])
+        self.assertNotIn("CESFAM", json.dumps(state["cargo_accounts"], ensure_ascii=False))
 
 class InterruptedInstall(InstallTest):
     """An install that a Provisionador restart cut short resumes by itself, from AIO's own state."""

@@ -539,11 +539,12 @@ class FakeSuite:
         return [{"id": id_, "name": name, "state": state} for id_, (name, state) in self.states.items()]
 
     def occ(self, *args, stdin=""):
-        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on."""
+        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on, and
+        the teams' groups, folders and welcome page."""
         self._outage_guard("nextcloud")
         self.commands.append(args)
         if args[0].split(":")[0] in ("group", "groupfolders", "intravox"):
-            return self._equipos(*args)
+            return self._teams(*args)
         if args == ("config:list",):
             return json.dumps({"system": self.system, "apps": self.apps})
         if args == ("config:import",):
@@ -591,7 +592,7 @@ class FakeSuite:
         self._outage_guard()
         return {"passphrase": self.PASSPHRASE, "administrator": self.ADMINISTRATOR}
 
-    def _equipos(self, command, *args):
+    def _teams(self, command, *args):
         """occ's groups, Groupfolders' folders and IntraVox's setup, as the «Equipos» steps run them. An app's commands
         fail while it is not enabled, as occ does not know them then."""
         failed = Unreachable(OCC_FAILED.format(" ".join((command, *args))))

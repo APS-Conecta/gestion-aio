@@ -75,10 +75,12 @@ CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gest
           "El archivo de contraseñas quedó en este servidor, legible solo por root: {}")
 
 
-def plan(declared):
-    """The teams «Equipos» declared and the cargo accounts they bring, as «Equipos» and «Revisar» show them."""
+def plan(declared, centre):
+    """The teams «Equipos» declared and, once the centre is chosen, the cargo accounts they bring, named for its type,
+    as «Equipos» and «Revisar» show them."""
     return {"teams": declared, "cargo_accounts": [{"user": account["user"], "name": account["name"]}
-                                                  for account in teams.cargo_accounts(declared)]}
+                                                  for account in teams.cargo_accounts(declared, centre["type"])]
+            if centre else []}
 
 
 def digest(value):
@@ -224,7 +226,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
-                     **plan(state.get("teams", [])), "install": self.progress(state)}
+                     **plan(state.get("teams", []), state.get("centre")), "install": self.progress(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -273,8 +275,8 @@ class Provisionador:
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its group and its
-        folder, and the cargo accounts they bring. «Revisar» and «Instalar» follow the last ones posted; once «Instalar»
-        was pressed they stay."""
+        folder, and the cargo accounts they bring once the centre is chosen. «Revisar» and «Instalar» follow the last
+        ones posted; once «Instalar» was pressed they stay."""
         try:
             declared = teams.declare(body.get("sectors", []), body.get("programs", []))
         except ValueError as refusal:
@@ -283,7 +285,8 @@ class Provisionador:
             if s.get("install"):
                 return 409, {"error": TEAMS_KEPT}
             s["teams"] = declared
-        return 200, plan(declared)
+            centre = s.get("centre")
+        return 200, plan(declared, centre)
 
     def busy(self):
         return self.worker is not None and self.worker.is_alive()

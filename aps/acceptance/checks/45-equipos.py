@@ -24,11 +24,12 @@ def occ(*args):
     return machine("sudo docker exec --user www-data nextcloud-aio-nextcloud php occ --no-ansi " + shlex.join(args))
 
 
-declared = json.loads(machine(f"sudo cat {FOLDER}/state.json")).get("teams", [])
+state = json.loads(machine(f"sudo cat {FOLDER}/state.json"))
+declared, centre_type = state.get("teams", []), state["centre"]["type"]
 print("teams: " + ", ".join(team["name"] for team in declared))
 if {team["kind"] for team in declared} != {"sector", "program"}:
     sys.exit("«Equipos» did not declare both a sector and a program")
-wrong = [f"group {group} is missing" for group in teams.groups(declared)
+wrong = [f"group {group} is missing" for group in teams.groups(declared, centre_type)
          if group not in json.loads(occ("group:list", "--output=json"))]
 
 held = {f["mountPoint"]: f.get("groups_list") or {} for f in json.loads(occ("groupfolders:list", "--output=json"))}
@@ -39,7 +40,7 @@ for mount, grants in teams.folders(declared).items():
         wrong.append(f"{mount} grants {held.get(mount)}, not {wanted}")
 
 passwords = machine(f"sudo cat {FOLDER}/{FILE}")  # never printed
-accounts = teams.cargo_accounts(declared)
+accounts = teams.cargo_accounts(declared, centre_type)
 for account in accounts:
     info = json.loads(occ("user:info", account["user"], "--output=json"))
     print(f"{account['user']}: {info['display_name']}, enabled {info['enabled']}, in {sorted(info['groups'])}")

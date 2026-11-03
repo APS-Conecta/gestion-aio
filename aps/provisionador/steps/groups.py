@@ -19,7 +19,7 @@ def members(suite):
 
 def run(context):
     held = members(context.suite)
-    for group, name in teams.groups(context.teams).items():
+    for group, name in teams.groups(context.teams, context.centre["type"]).items():
         if group not in held:
             context.suite.occ("group:add", f"--display-name={name}", group)
     return check(context)
@@ -27,5 +27,5 @@ def run(context):
 
 def check(context):
     held = members(context.suite)
-    missing = [name for group, name in teams.groups(context.teams).items() if group not in held]
+    missing = [name for group, name in teams.groups(context.teams, context.centre["type"]).items() if group not in held]
     return [MISSING.format(", ".join(missing))] if missing else []

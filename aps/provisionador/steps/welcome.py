@@ -1,21 +1,20 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The welcome page: every staff member lands on IntraVox («Inicio», a default fork app), whose home page names the
-establishment and says where its shared folders are. IntraVox keeps its pages in the group folder Intranet, which the
-staff read and the Jefaturas and OIRS edit; a page that is already there stays as staff left it."""
+establishment and says where its shared folders are. IntraVox keeps its pages in the group folder Intranet, whose grants
+teams.INTRANET declares; a page that is already there stays as staff left it. The step ensures IntraVox and
+Groupfolders."""
 
 import json
 
 import teams
-from steps import differences
+from steps import apps, differences
 from steps.folders import grant, listed
 
 NAME = "Página de bienvenida"
-NEEDS = ("apps", "groups")
+NEEDS = ("groups",)
 APP = "intravox"
 MOUNT = "Intranet"  # the group folder's name, as staff see it in Files
-EDIT = ("read", "write")
-READERS = {teams.STAFF: teams.READ, teams.JEFATURAS: EDIT, "role-oirs": EDIT}
 SETTINGS = {"system": {"defaultapp": APP}, "apps": {APP: {"groupfolder_name": MOUNT}}}
 HOME = "page-aps-00000001-0000-4000-8000-000000000001"
 LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folder"),
@@ -55,13 +54,15 @@ def pages(centre):
 
 
 def run(context):
+    if failed := apps.ensure(context, "groupfolders", APP):
+        return failed
     suite = context.suite
     suite.occ("config:import", stdin=json.dumps(SETTINGS))  # IntraVox names its folder before it makes it
     suite.occ("intravox:setup", "--skip-demo")
     intranet = listed(suite).get(MOUNT)
     if intranet is None:
         return [UNREADABLE]
-    grant(suite, intranet, READERS)
+    grant(suite, intranet, teams.INTRANET)
     suite.seed(intranet["id"], pages(context.centre))
     suite.occ("intravox:reindex")
     return check(context)
@@ -69,5 +70,6 @@ def run(context):
 
 def check(context):
     intranet = listed(context.suite).get(MOUNT)
-    read = intranet and all(intranet["groups"].get(group) == teams.bits(words) for group, words in READERS.items())
+    read = intranet and all(intranet["groups"].get(group) == teams.bits(words)
+                            for group, words in teams.INTRANET.items())
     return differences(context.suite, SETTINGS) + ([] if read else [UNREADABLE])
