@@ -1,0 +1,43 @@
+/* SPDX-FileCopyrightText: 2026 APS Conecta
+   SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* The brand token file: the APS Conecta palette and font pairing, the only place a brand colour is written (the brand
+   gate, aps/gates/brand.py, holds every other file to it). Every page of the suite loads it beside its own stylesheet:
+   the Provisionador, AIO's page and the Nextcloud theme. SVG art names a token as var(--aps-…) and the suite renders it
+   with the value (aps/provisionador/brand.py). Light theme only, but for AIO's page, which keeps upstream's dark one. */
+:root {
+  --aps-violet: #7f21fe;           /* primary: buttons, links, Nextcloud's primary colour */
+  --aps-violet-dark: #5315a8;      /* backdrop, header, custom menu: Nextcloud's background colour */
+  --aps-violet-hover: #6b01fa;
+  --aps-violet-tint: #f0eaff;      /* the selected state's wash behind violet text */
+  --aps-violet-tint-hover: #e4dcf7;
+  --aps-violet-wash: #faf8fe;      /* a navigation's background */
+  --aps-logo-gold: #f28f36;        /* the logo's star and wave */
+  --aps-ink: #101828;              /* text */
+  --aps-muted: #485363;            /* secondary text */
+  --aps-error-text: #b4002e;
+  --aps-border: #dcd6e8;
+  --aps-paper: white;              /* a surface, and text on violet */
+
+  /* AIO page's dark theme */
+  --aps-night-violet: #a66bff;
+  --aps-night-violet-hover: #b585ff;
+  --aps-night-tint: #241638;
+  --aps-night-tint-hover: #2e1d47;
+  --aps-night-tint-text: #d4bfff;
+  --aps-night-backdrop: #3b0f7a;
+  --aps-night-backdrop-end: #1a0638;
+
+  --aps-font-display: "Fraunces", Georgia, serif;  /* h1 to h3 and the top bar */
+  --aps-font-body: "Nunito Sans", system-ui, -apple-system, sans-serif;
+}
+
+/* The fonts sit beside this file wherever it is served. */
+@font-face {
+  font-family: "Fraunces"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("fraunces.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Nunito Sans"; font-style: normal; font-weight: 200 1000; font-display: swap;
+  src: url("nunito-sans.woff2") format("woff2");
+}
