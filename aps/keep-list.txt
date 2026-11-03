@@ -40,7 +40,6 @@ php/templates/containers.twig Spanish «APS Conecta Gestión» text on AIO's pag
 php/templates/includes/aio-config.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/includes/backup-dirs.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/includes/community-containers.twig Spanish «APS Conecta Gestión» text on AIO's page
-php/templates/includes/desec-domain-notice.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/includes/optional-containers.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/layout.twig Spanish «APS Conecta Gestión» text on AIO's page, favicon and AGPL source-code link
 php/templates/log.twig Spanish «APS Conecta Gestión» text on AIO's page
