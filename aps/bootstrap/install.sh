@@ -8,7 +8,9 @@
 # The release pipeline fills RELEASE_TAG and BUNDLE_SHA256 (aps/release/package.sh); the committed copy
 # refuses to run. Order: check the host without changing it; verify the bundle's checksum; install
 # Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
-# from the digest the bundle names.
+# from the digest the bundle names; start the Provisionador and print its one-time link. A rerun once
+# the mastercontainer exists changes nothing else: it makes sure the Provisionador runs and prints a
+# fresh link to the same wizard state.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.
@@ -95,12 +97,6 @@ unpack() {
   mv "$INSTALL_DIR.new" "$INSTALL_DIR"
 }
 
-print_address() {
-  local ip
-  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  say "Abra https://${ip:-<dirección IP del servidor>}:8080 en su navegador para continuar."
-}
-
 # The pinned digest runs under the release tag: upstream takes its channel from the image's tag.
 start_mastercontainer() {
   local pinned image="$MASTERCONTAINER:$RELEASE_TAG"
@@ -118,7 +114,35 @@ start_mastercontainer() {
     || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
          die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }
   say "APS Conecta Gestión $RELEASE_TAG está en marcha."
-  print_address
+}
+
+# The Provisionador is a systemd service on the host, with the host's Python: no third image of ours.
+start_provisionador() {
+  local missing=() c
+  for c in python3 openssl qrencode; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
+  [ "${#missing[@]}" -eq 0 ] || apt_install "${missing[@]}"
+  cat > /etc/systemd/system/aps-provisionador.service <<EOF
+[Unit]
+Description=APS Conecta Gestión: Provisionador
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 $INSTALL_DIR/provisionador/provisionador.py serve
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now aps-provisionador.service >/dev/null 2>&1 \
+    || die "no se pudo iniciar el Provisionador. Revise su registro con: journalctl -u aps-provisionador"
+}
+
+# The link carries the wizard's secret: it goes to this console only.
+print_link() {
+  say ""
+  python3 "$INSTALL_DIR/provisionador/provisionador.py" link
 }
 
 main() {
@@ -128,8 +152,8 @@ main() {
     die "este archivo es la copia del repositorio y no trae la suma del paquete. Use el instalador publicado en $REPO_URL/releases"
   fi
   if command -v docker >/dev/null 2>&1 && docker container inspect nextcloud-aio-mastercontainer >/dev/null 2>&1; then
-    say "APS Conecta Gestión ya está instalada en este servidor; no se cambió nada."
-    print_address
+    start_provisionador
+    print_link
     return 0
   fi
   check_host
@@ -139,6 +163,8 @@ main() {
   command -v docker >/dev/null 2>&1 || install_docker
   unpack
   start_mastercontainer
+  start_provisionador
+  print_link
 }
 
 main "$@"

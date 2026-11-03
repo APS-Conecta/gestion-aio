@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Assembles a release's assets in <out-dir>:
-#   gestion-aio-<tag>.tar.gz          the bundle: VERSION and images.lock (every image the release runs, by digest)
+#   gestion-aio-<tag>.tar.gz          the bundle: VERSION, images.lock (every image the release runs, by digest),
+#                                     the Provisionador and the DEIS register
 #   install.sh                        the stable-name bootstrap, with the tag and bundle checksum filled in
 #   gestion-aio-<tag>-install.sh      the same bootstrap under its versioned name
 #   SHA256SUMS                        checksums of the three
@@ -22,7 +23,8 @@ printf '%s\n' "$tag" > "$stage/VERSION"
 } > "$stage/images.lock"
 
 mkdir -p "$out"
-tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -czf "$out/$bundle" -C "$stage" VERSION images.lock
+tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 --exclude='test_*.py' -czf "$out/$bundle" \
+  -C "$stage" VERSION images.lock -C "$PWD/aps" provisionador deis
 sha="$(sha256sum "$out/$bundle" | cut -d ' ' -f 1)"
 sed -e "s|^RELEASE_TAG=\"\"$|RELEASE_TAG=\"$tag\"|" \
     -e "s|^BUNDLE_SHA256=\"\"$|BUNDLE_SHA256=\"$sha\"|" aps/bootstrap/install.sh > "$out/install.sh"
