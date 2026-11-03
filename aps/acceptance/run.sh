@@ -30,9 +30,10 @@ export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/con
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
 
 password=""
-mask_credential() { # once «Dirección» claimed the name, its credential is masked in the log
+mask_credential() { # once «Dirección» claimed the name, its credential is masked in the log, on a line of its own
+  [ -z "$password" ] || return 0
   password="$("$MACHINE" 'sudo cat /var/lib/aps-conecta/name-service.json' 2> /dev/null | jq -r '.password // empty' 2> /dev/null || true)"
-  [ -z "$password" ] || echo "::add-mask::$password"
+  [ -z "$password" ] || printf '\n::add-mask::%s\n' "$password"
 }
 collect() { # <dir>: every container's log, without the name's credential, and the disk usage
   local name log
