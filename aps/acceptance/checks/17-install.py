@@ -21,13 +21,13 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import chromium, machine, verified, wizard_link  # noqa: E402
+from browser import chromium, hardware, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
-from steps.components import COMPONENTS  # noqa: E402
+from steps.components import chosen  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 
-CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
+CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": True,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",

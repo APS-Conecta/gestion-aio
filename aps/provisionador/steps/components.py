@@ -16,10 +16,11 @@ RECORDING_THRESHOLD = {"cpus": 4, "memory_gib": 8}
 
 
 def chosen(hardware):
-    """AIO's switches to turn on for a server with this hardware: the components, and recording if it passes the
-    threshold."""
-    records = all(hardware[key] >= least for key, least in RECORDING_THRESHOLD.items())
-    return [*COMPONENTS, *([RECORDING] if records else [])]
+    """The components to turn on for a server with this hardware, by AIO's switch, with the name «Revisar» shows:
+    recording too if the server passes the threshold."""
+    if all(hardware[key] >= least for key, least in RECORDING_THRESHOLD.items()):
+        return {**COMPONENTS, RECORDING: "Grabador de Talk"}
+    return COMPONENTS
 
 
 def named(container):

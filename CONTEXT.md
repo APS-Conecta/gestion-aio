@@ -38,7 +38,7 @@ The link the bootstrap prints. Its secret opens a Provisionador session until th
 
 **Suite port**:
 The one adapter through which the Provisionador talks to AIO, the name service and Nextcloud's command
-line. It has a real implementation and a fake one for tests.
+line, and reads the server's cores and memory. It has a real implementation and a fake one for tests.
 
 **Name service** (servicio de nombres):
 APS's Cloudflare Worker at `gestion-nombres.apsconecta.workers.dev`. Installs never hold APS's Cloudflare

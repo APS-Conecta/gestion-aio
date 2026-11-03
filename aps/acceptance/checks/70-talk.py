@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import STAGING_ROOTS, chromium, machine  # noqa: E402
+from browser import STAGING_ROOTS, chromium, hardware, machine  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 from steps.components import RECORDING, chosen  # noqa: E402
 
@@ -121,11 +121,10 @@ if not name:
 suite = f"https://{name}"
 evidence = Path(os.environ["EVIDENCE"])
 
-cpus, memory = machine("nproc; awk '/^MemTotal:/ {print $2}' /proc/meminfo").split()
-hardware = {"cpus": int(cpus), "memory_gib": (int(memory) + 524288) // 1048576}  # kB, rounded as the bootstrap does
+server = hardware()
 recording = config.get("isTalkRecordingEnabled", False)
-print(f"the machine has {hardware['cpus']} cores and {hardware['memory_gib']} GiB; AIO's Talk recording: {recording}")
-if recording != (RECORDING in chosen(hardware)):
+print(f"the machine has {server['cpus']} cores and {server['memory_gib']} GiB; AIO's Talk recording: {recording}")
+if recording != (RECORDING in chosen(server)):
     sys.exit("Talk recording is not on exactly when the machine passes the recording threshold")
 if recording and "nextcloud-aio-talk-recording:1234" not in occ("config:app:get spreed recording_servers"):
     sys.exit("AIO runs Talk's recording server, but Talk does not hold it")

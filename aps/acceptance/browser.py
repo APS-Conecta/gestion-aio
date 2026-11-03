@@ -40,6 +40,12 @@ def machine(command, stdin=""):
     return run.stdout
 
 
+def hardware():
+    """The machine's CPU cores and memory, the memory in GiB rounded as the bootstrap rounds it."""
+    cpus, memory = machine("nproc; awk '/^MemTotal:/ {print $2}' /proc/meminfo").split()
+    return {"cpus": int(cpus), "memory_gib": (int(memory) + 524288) // 1048576}
+
+
 def fingerprint(pem):
     h = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
     return ":".join(h[i:i + 2] for i in range(0, len(h), 2))

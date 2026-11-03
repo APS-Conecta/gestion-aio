@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Behaviour of the static gates, driven through their command lines against throwaway repos."""
+"""Behaviour of the static gates and the release bundle, driven through their command lines."""
 
 import json
 import re
@@ -225,6 +225,8 @@ class ReleaseBundle(unittest.TestCase):
 
     PINS = [f"ghcr.io/aps-conecta/{image}@sha256:{n * 64}"
             for image, n in (("gestion-mastercontainer", "0"), ("gestion-nextcloud", "1"), ("gestion-caddy", "2"))]
+    ROOTS = re.findall(rb"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n",
+                       (REPO / "aps" / "acceptance" / "letsencrypt-staging-roots.pem").read_bytes(), re.S)
 
     def bundle(self, tag):
         """Each file of the bundle package.sh makes for the tag, by its path, with its bytes."""
@@ -239,19 +241,17 @@ class ReleaseBundle(unittest.TestCase):
         files = self.bundle("v1.0.0")
         self.assertEqual({name.split("/")[0] for name in files},
                          {"VERSION", "images.lock", "services.json", "provisionador", "deis"})
-        self.assertNotIn(b"STAGING", b"".join(files.values()))
+        self.assertFalse([r for r in self.ROOTS for t in files.values() if r in t])
         self.assertEqual(json.loads(files["services.json"]), {
             "url": "https://gestion-nombres.apsconecta.workers.dev", "suffix": "gestion.apsconecta.cl",
             "acme_ca": "https://acme-v02.api.letsencrypt.org/directory"})
 
     def test_a_test_build_carries_each_staging_root_the_test_browser_trusts_in_a_file_of_its_own(self):
         files = self.bundle("v0.0.0-ci.1")
-        roots = re.findall(rb"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n",
-                           (REPO / "aps" / "acceptance" / "letsencrypt-staging-roots.pem").read_bytes(), re.S)
         trusted = {name: text for name, text in files.items() if name.startswith("trusted-cacerts/")}
-        self.assertEqual(len(roots), 4)
+        self.assertEqual(len(self.ROOTS), 4)
         self.assertTrue(all(name.endswith(".crt") for name in trusted), trusted.keys())
-        self.assertEqual(sorted(trusted.values()), sorted(roots))
+        self.assertEqual(sorted(trusted.values()), sorted(self.ROOTS))
         self.assertIn(b"acme-staging-v02", files["services.json"])
 
 

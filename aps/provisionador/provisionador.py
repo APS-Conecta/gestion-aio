@@ -210,8 +210,8 @@ class Provisionador:
     def get_state(self, query, body):
         state = self.state.read()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
-                     "components": list(components.COMPONENTS.values()), "backup_folder": backups.BACKUP_FOLDER,
-                     "install": self.progress(state)}
+                     "components": list(components.chosen(self.suite.hardware()).values()),
+                     "backup_folder": backups.BACKUP_FOLDER, "install": self.progress(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()

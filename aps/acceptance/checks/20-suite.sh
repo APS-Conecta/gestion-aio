@@ -9,8 +9,8 @@ set -euo pipefail
 chosen=(nextcloud-aio-apache nextcloud-aio-caddy nextcloud-aio-clamav nextcloud-aio-database nextcloud-aio-eurooffice
   nextcloud-aio-fulltextsearch nextcloud-aio-harp nextcloud-aio-imaginary nextcloud-aio-nextcloud
   nextcloud-aio-notify-push nextcloud-aio-redis nextcloud-aio-talk)
-config='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
-[ "$("$MACHINE" "$config" | jq -r '.isTalkRecordingEnabled // false')" != true ] || chosen+=(nextcloud-aio-talk-recording)
+aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
+[ "$("$MACHINE" "$aio" | jq -r '.isTalkRecordingEnabled // false')" != true ] || chosen+=(nextcloud-aio-talk-recording)
 lock="$("$MACHINE" cat /opt/aps-conecta/gestion/images.lock)"
 started="$("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" | { grep -vx nextcloud-aio-mastercontainer || true; } | sort)"
 if [ "$started" != "$(printf '%s\n' "${chosen[@]}" | sort)" ]; then
