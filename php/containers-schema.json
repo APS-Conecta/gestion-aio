@@ -183,7 +183,7 @@
 					},
 					"image_tag": {
 						"type": "string",
-						"pattern": "^([a-z0-9.-]+|%AIO_CHANNEL%)$"
+						"pattern": "^([a-z0-9.-]+|%AIO_CHANNEL%|sha256:[a-f0-9]{64})$"
 					},
 					"documentation": {
 						"type": "string",

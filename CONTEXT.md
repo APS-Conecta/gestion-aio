@@ -24,7 +24,7 @@ The declaration of every path where this repo differs from upstream, each with a
 conformance gate enforces it.
 
 **Suite release**:
-A signed version of this repo: bootstrap, our images, the pins of the official images, theme and data.
+A published version of this repo: bootstrap (carrying its bundle's checksum), our images, the pins of the official images, theme and data.
 It contains no apps.
 
 **Operator** (operador):
