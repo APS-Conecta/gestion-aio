@@ -353,7 +353,8 @@ class FakeSuite:
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
         # Calls in an outage: the name service's "claim" and "address", "aio" (the mastercontainer), "nextcloud"
-        # (Nextcloud's container) and "issuer" (a host's CA, out of the internet's reach).
+        # (Nextcloud's container), "issuer" (a host's CA, out of the internet's reach) and "eurooffice" (Euro-Office,
+        # which does not answer Nextcloud).
         self.down = set()
         self.limited = False  # the name service refuses claims over its limits
         self.claims = []  # the DEIS codes the name service gave a name
@@ -369,7 +370,7 @@ class FakeSuite:
         self.release.set()
         self.dies = False  # the Provisionador dies while AIO's start runs; AIO goes on
         self.system = {}  # Nextcloud's system settings
-        self.apps = {"core": {}, "admin_audit": {}}  # each installed app's settings
+        self.apps = {"core": {}, "admin_audit": {}, "office": {}, "eurooffice": {}}  # each installed app's settings
         self.commands = []  # every occ command, by its arguments
         self.imports = []  # the settings each config:import brought
         self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
@@ -448,6 +449,10 @@ class FakeSuite:
             if args[1] not in self.apps:
                 raise Unreachable(OCC_FAILED.format(" ".join(args)))
             self.apps[args[1]]["enabled"] = "yes"
+            return ""
+        if args == ("eurooffice:documentserver", "--check"):
+            if "eurooffice" in self.down or self.apps.get("eurooffice", {}).get("enabled") != "yes":
+                raise Unreachable(OCC_FAILED.format(" ".join(args)))
             return ""
         raise AssertionError(f"the fake suite runs no occ {args}")
 

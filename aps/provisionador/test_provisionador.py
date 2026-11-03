@@ -701,6 +701,64 @@ class InterruptedInstall(InstallTest):
         self.assertEqual(self.suite.starts, 1)
 
 
+OFFICE = "Office con Euro-Office"
+
+
+class Office(InstallTest):
+    """Nextcloud's own Office entry, on for every staff member, and Euro-Office, which AIO's Nextcloud container
+    installs, opening its documents by default; Nextcloud and Euro-Office reach each other inside the suite."""
+
+    def test_instalar_opens_the_office_entry_to_everyone_with_euro_office_as_its_editor(self):
+        self.suite.apps["office"]["enabled"] = '["admin"]'  # only an admin group would see the entry
+        self.claim()
+        self.install()
+        self.assertEqual(self.steps(self.until("done"))[OFFICE], ("green", None))
+        office = self.suite.apps["eurooffice"]
+        self.assertEqual((self.suite.apps["office"]["enabled"], office["enabled"]), ("yes", "yes"))
+        self.assertEqual(json.loads(office["defFormats"]), {"docx": True, "xlsx": True, "pptx": True})
+        self.assertEqual((office["DocumentServerInternalUrl"], office["StorageUrl"]),
+                         ("http://nextcloud-aio-eurooffice/", "http://nextcloud-aio-apache.nextcloud-aio:23973/"))
+
+    def test_office_waits_for_euro_office_to_answer_nextcloud(self):
+        self.claim()
+        self.suite.down = {"eurooffice"}
+        self.install()
+        self.until_step(OFFICE, "running")
+        time.sleep(1.5)
+        self.assertEqual(self.steps(self.progress())[OFFICE][0], "running")
+        self.suite.down = set()
+        self.assertEqual(self.steps(self.until("done"))[OFFICE], ("green", None))
+
+    def test_without_euro_office_installed_office_fails_loudly_and_reintentar_configures_it(self):
+        self.claim()
+        del self.suite.apps["eurooffice"]
+        self.install()
+        install = self.until("failed")
+        status, reason = self.steps(install)[OFFICE]
+        self.assertEqual(status, "failed")
+        self.assertIn("occ app:enable eurooffice", reason)
+        self.assertEqual(self.named(install, "failed"), {OFFICE})
+        self.suite.apps["eurooffice"] = {}
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["eurooffice"]["enabled"], "yes")
+
+    def test_an_office_entry_turned_off_after_its_step_keeps_listo_away_until_reintentar(self):
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[OFFICE][0], "green")
+        self.suite.apps["office"]["enabled"] = "no"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[OFFICE]
+        self.assertEqual(status, "failed")
+        self.assertIn("office.enabled", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["office"]["enabled"], "yes")
+
+
 class Listo(InstallTest):
     """«Listo» hands over the passwords file, kept root-only on the server, and the wizard closes: the link and every
     session stop working and the Provisionador stops."""
