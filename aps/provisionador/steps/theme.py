@@ -5,20 +5,19 @@ which upstream's updates keep, with the brand folder (the brand token file, its 
 in the tokens' colours, the establishment's name in site.css and the text overrides. Theming then says «APS Conecta
 Gestión» with the token file's colours, the theme's logo and the dark violet as backdrop, light only. Nextcloud's own
 voice goes quiet: its announcements, first-login slides, usage survey and support apps, its help links, its «get your
-own free account» link and its update banners are off, and a new person's home starts empty instead of with its sample
-files. Everyone's personal settings link the suite's source code and its licence.
+own free account» link, its update banners and its iOS app banner are off, and a new person's home starts empty
+instead of with its sample files. Everyone's personal settings link the suite's source code and its licence.
 
-The text overrides (aps/theme/texts.json) are Nextcloud's and Talk's Spanish translations that name the suite
-«Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names Nextcloud's company,
-editions, versions or community keeps upstream's. Nextcloud adds a theme's translations to its own on every screen and
-email it renders.
+The text overrides (aps/theme/texts.json) are Nextcloud's, Talk's, Calendar's and Contacts' Spanish translations that
+name the suite «Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names
+Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud adds a theme's translations to its
+own on every screen and email it renders.
 """
 
 import json
 from pathlib import Path
 
 import brand
-import deis
 from steps import differences
 
 NAME = "Tema y marca"
@@ -31,7 +30,8 @@ SITE = "https://apsconecta.cl"  # where the suite's name links on the login page
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
 IMAGES = {"logo": "core/img/logo.svg", "logoheader": "core/img/logoheader.svg", "favicon": "brand/favicon.svg"}
 IMPORTED = {"system": {"theme": THEME, "enforce_theme": "light", "knowledgebaseenabled": False,
-                       "simpleSignUpLink.shown": False, "updatechecker": False, "skeletondirectory": ""},
+                       "simpleSignUpLink.shown": False, "updatechecker": False, "skeletondirectory": "",
+                       "customclient_ios_appid": ""},
             "apps": {"theming": {"productName": SUITE}}}
 
 
@@ -61,10 +61,9 @@ def files(context):
     placed = {name: path.read_bytes() for name, path in found.items()}
     placed |= {name: brand.render(path.read_text(encoding="utf-8")).encode() for name, path in found.items()
                if name.endswith(".svg")}
-    for folder, translations in json.loads((SOURCE / "texts.json").read_text(encoding="utf-8")).items():
-        placed[f"{folder}/l10n/es.json"] = json.dumps({"translations": translations}, ensure_ascii=False).encode()
-    centre = deis.short_name({"nombre": context.centre["name"], "tipo": context.centre["type"]})
-    quoted = centre.replace("\\", "\\\\").replace('"', '\\"')
+    for app, translations in json.loads((SOURCE / "texts.json").read_text(encoding="utf-8")).items():
+        placed[f"{app}/l10n/es.json"] = json.dumps({"translations": translations}, ensure_ascii=False).encode()
+    quoted = context.centre["short_name"].replace("\\", "\\\\").replace('"', '\\"')
     placed["core/css/site.css"] = f':root {{ --aps-establishment: "{quoted}"; }}\n'.encode()
     return placed
 

@@ -246,20 +246,24 @@ class BrandGate(unittest.TestCase):
     def test_a_stray_brand_colour_fails_naming_where_in_any_case_or_notation(self):
         self.repo.write({"php/public/img/logo.svg": '<svg>\n<path fill="#123ABC"/>\n</svg>\n',
                          "php/templates/page.twig": "<p style=\"color: rgba(18, 58, 188, .5)\">\n",
-                         "aps/brand/favicon.svg": '<svg><rect fill="#ff2288"/></svg>\n'})
+                         "aps/brand/favicon.svg": '<svg><rect fill="#ff2288"/></svg>\n',
+                         "php/templates/alpha.twig": '<i style="color: #123abc80">\n<b style="color: #F288">\n'})
         self.repo.commit()
         code, out = run_gate("brand.py", self.repo)
         self.assertEqual(code, 1, out)
-        for where in ("php/public/img/logo.svg:2", "php/templates/page.twig:1", "aps/brand/favicon.svg:1"):
+        for where in ("php/public/img/logo.svg:2", "php/templates/page.twig:1", "aps/brand/favicon.svg:1",
+                      "php/templates/alpha.twig:1", "php/templates/alpha.twig:2"):
             self.assertIn(where, out)
 
     def test_a_colour_literal_in_our_own_stylesheets_fails_and_upstreams_are_left_alone(self):
-        self.repo.write({"aps/provisionador/www/app.css": ".pin { border: 4px solid #fff; }\n",
+        self.repo.write({"aps/provisionador/www/app.css": ".pin { border: 4px solid #fff; }\n"
+                                                          ".map { color: color(srgb 0.1 0.2 0.3); }\n",
                          "aps/theme/core/css/server.css": "body { --blur: rgba(255, 255, 255, .9); }\n"})
         self.repo.commit()
         code, out = run_gate("brand.py", self.repo)
         self.assertEqual(code, 1, out)
         self.assertIn("aps/provisionador/www/app.css:1", out)
+        self.assertIn("aps/provisionador/www/app.css:2", out)
         self.assertIn("aps/theme/core/css/server.css:1", out)
         self.assertNotIn("php/public/style.css", out)
 
