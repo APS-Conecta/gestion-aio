@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<!--
+  - SPDX-FileCopyrightText: 2026 APS Conecta
+  - SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="es-CL">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalación · APS Conecta Gestión</title>
+<link rel="stylesheet" href="/leaflet.css">
+<link rel="stylesheet" href="/app.css">
+<script src="/leaflet.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="header">
+  <span class="brand">APS Conecta Gestión</span>
+  <span class="header-subtitle">Instalación</span>
+</header>
+<div class="content">
+  <nav class="navigation" aria-label="Pasos de la instalación">
+    <ol>
+      <li aria-current="step"><span class="step">1</span>Centro</li>
+      <li><span class="step">2</span>Dirección</li>
+      <li><span class="step">3</span>Equipos</li>
+      <li><span class="step">4</span>Revisar</li>
+      <li><span class="step">5</span>Listo</li>
+    </ol>
+    <p class="fingerprint" id="fingerprint" hidden>Huella SHA-256 del certificado<code></code></p>
+  </nav>
+
+  <main class="app-content">
+    <section id="locked" hidden>
+      <h1>Abra el enlace de instalación</h1>
+      <p id="locked-message"></p>
+    </section>
+
+    <section id="centro" hidden>
+      <h1>Centro</h1>
+      <p class="lead">Busque su establecimiento en el registro DEIS<span id="register-date"></span>. Luego
+        confirme su ubicación en el mapa o muévala si no corresponde.</p>
+
+      <form id="search" class="filters" role="search">
+        <label>Región<select name="region"><option value="">Todas</option></select></label>
+        <label>Comuna<select name="comuna"><option value="">Todas</option></select></label>
+        <label>Tipo<select name="type"><option value="">Todos</option></select></label>
+        <label>Nombre<input name="name" type="search" autocomplete="off" placeholder="Por ejemplo: Los Castaños"></label>
+      </form>
+
+      <div class="columns">
+        <div>
+          <p class="muted" id="total" aria-live="polite"></p>
+          <ul class="results" id="results"></ul>
+        </div>
+        <div>
+          <div class="map" id="map" role="application" aria-label="Mapa del establecimiento"></div>
+          <p class="muted" id="map-note">Elija un establecimiento de la lista para verlo en el mapa.</p>
+          <p class="message error" id="map-error" hidden>No se pudo cargar el mapa de fondo. Revise la conexión a
+            internet de este equipo; puede confirmar el punto oficial de todos modos.</p>
+          <div class="actions">
+            <button type="button" class="primary" id="confirm" disabled>Confirmar centro</button>
+            <button type="button" id="reset" disabled>Volver al punto oficial</button>
+          </div>
+          <p class="message" id="message" role="status"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>
