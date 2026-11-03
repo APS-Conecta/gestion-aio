@@ -41,9 +41,10 @@ The one adapter through which the Provisionador talks to AIO, the name service a
 line. It has a real implementation and a fake one for tests.
 
 **Name service** (servicio de nombres):
-APS's Cloudflare Worker at `nombres.apsconecta.cl`, the only holder of APS's Cloudflare token. A DEIS code
-claims its dirección once and gets a credential that changes only that name's address record and, through
-acme-dns, its certificate's challenge record. PR runs use a separate CI deployment.
+APS's Cloudflare Worker at `gestion-nombres.apsconecta.workers.dev`, the only holder of APS's Cloudflare
+token. A DEIS code claims its dirección once and gets a credential that changes only that name's address
+record and, through acme-dns, its certificate's challenge record. PR runs use a separate CI deployment,
+`gestion-nombres-ci.apsconecta.workers.dev`.
 
 **Dirección**:
 The establishment's name, `<slug>.gestion.apsconecta.cl`, one per DEIS code. The slug is the short name,

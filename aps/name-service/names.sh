@@ -8,8 +8,8 @@ set -euo pipefail
 usage() { echo "usage: $0 <production|ci> <claim|release> <DEIS code>" >&2; exit 2; }
 [ "$#" -eq 3 ] || usage
 case "$1" in
-  production) url=https://nombres.apsconecta.cl ;;
-  ci) url=https://nombres-ci.apsconecta.cl ;;
+  production) url=https://gestion-nombres.apsconecta.workers.dev ;;
+  ci) url=https://gestion-nombres-ci.apsconecta.workers.dev ;;
   *) usage ;;
 esac
 [[ "$3" =~ ^[0-9]+$ ]] || { echo "::error::'$3' is not a DEIS code" >&2; exit 2; }

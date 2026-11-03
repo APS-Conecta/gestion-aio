@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Deploys the production name service, nombres.apsconecta.cl, from main only. PR runs deploy the separate
+# Deploys the production name service, gestion-nombres.apsconecta.workers.dev, from main only. PR runs deploy the separate
 # CI deployment from the release pipeline (aps-release.yml).
 name: APS name service
 
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Deploy nombres.apsconecta.cl
+      - name: Deploy gestion-nombres.apsconecta.workers.dev
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: aps/name-service/deploy.sh production

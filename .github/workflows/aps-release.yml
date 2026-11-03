@@ -201,7 +201,7 @@ jobs:
         with:
           persist-credentials: false
       # Right before the proof, so another PR's deployment has the least time to replace it.
-      - name: Deploy the name service's CI deployment, nombres-ci.apsconecta.cl, from this commit
+      - name: Deploy the name service's CI deployment, gestion-nombres-ci.apsconecta.workers.dev, from this commit
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: aps/name-service/deploy.sh ci

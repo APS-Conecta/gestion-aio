@@ -23,7 +23,7 @@ accounts="$(cloudflare /accounts)"
   || { echo "::error::CLOUDFLARE_API_TOKEN must reach exactly one Cloudflare account."; exit 1; }
 CLOUDFLARE_ACCOUNT_ID="$(jq -r '.result[0].id' <<< "$accounts")"
 export CLOUDFLARE_ACCOUNT_ID WRANGLER_SEND_METRICS=false
-# Cloudflare takes a Worker only on an account with a workers.dev subdomain, even one it never serves on.
+# The name service is served on the account's workers.dev subdomain, apsconecta.workers.dev.
 if ! cloudflare "/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" > /dev/null 2>&1; then
   cloudflare "/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" -X PUT --data '{"subdomain":"apsconecta"}'
 fi

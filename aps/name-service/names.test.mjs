@@ -10,7 +10,7 @@ import { nameService } from "./names.mjs";
 
 const TOKEN = "cloudflare-token-fixture";
 const ZONE = "apsconecta.cl";
-const ORIGIN = "https://nombres.apsconecta.cl";
+const ORIGIN = "https://gestion-nombres.apsconecta.workers.dev";
 const SLUGS = { 999001: "cesfam-los-castanos", 999002: "cecosf-estrecho" };
 const CASTANOS = "cesfam-los-castanos.gestion.apsconecta.cl";
 const ESTRECHO = "cecosf-estrecho.gestion.apsconecta.cl";
@@ -19,8 +19,8 @@ const CHALLENGE = (n) => String(n).padEnd(43, "x");
 function deployment({ suffix = "gestion.apsconecta.cl" } = {}) {
   const cloudflare = fakeCloudflare({ token: TOKEN, zone: ZONE });
   const storage = fakeStorage();
-  const start = () => nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs: SLUGS });
-  let serve = start();
+  const start = (slugs) => nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs });
+  let serve = start(SLUGS);
   const post = async (path, body, headers = {}) => {
     const response = await serve(new Request(ORIGIN + path, {
       method: "POST", headers: { "Content-Type": "application/json", ...headers },
@@ -30,7 +30,8 @@ function deployment({ suffix = "gestion.apsconecta.cl" } = {}) {
   };
   return {
     cloudflare, storage, post,
-    restart() { serve = start(); },
+    /** A redeploy, with the slug table of a later register if given. */
+    restart(slugs = SLUGS) { serve = start(slugs); },
     serve: (request) => serve(request),
     claim: (code) => post("/claim", { code }),
     as: (credential) => ({ "X-Api-User": credential.username, "X-Api-Key": credential.password }),
@@ -56,6 +57,22 @@ test("a second claim for the code is refused, after a restart too, and the first
   assert.equal(status, 409);
   assert.match(body.error, new RegExp(`${CASTANOS} is already claimed.*APS Conecta can release it`));
   assert.equal((await names.post("/address", { address: "192.168.1.10" }, names.as(first))).status, 200);
+});
+
+test("a claimed name stays the code's when a later register renames it or gives its slug to another code", async () => {
+  const names = deployment();
+  const castanos = (await names.claim("999001")).body;
+  names.restart({ 999001: "cesfam-los-castanos-santiago", 999002: "cesfam-los-castanos" });
+  const { status, body } = await names.claim("999002");
+  assert.equal(status, 409);
+  assert.match(body.error, new RegExp(`${CASTANOS} is already claimed`));
+  assert.equal((await names.claim("999001")).status, 409);
+  assert.deepEqual((await names.post("/address", { address: "10.0.0.9" }, names.as(castanos))).body,
+                   { name: CASTANOS, type: "A", address: "10.0.0.9" });
+  await names.post("/update", { subdomain: castanos.subdomain, txt: CHALLENGE(1) }, names.as(castanos));
+  assert.deepEqual(names.cloudflare.records(), [`A ${CASTANOS} 10.0.0.9`, `TXT _acme-challenge.${CASTANOS} ${CHALLENGE(1)}`]);
+  assert.deepEqual((await names.release("999001")).body, { name: CASTANOS });
+  assert.deepEqual(names.cloudflare.records(), []);
 });
 
 test("concurrent claims for one code hand out one credential", async () => {
