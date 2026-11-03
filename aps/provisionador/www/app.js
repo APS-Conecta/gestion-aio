@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 APS Conecta
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Provisionador's page: it exchanges the link's secret (the URL fragment, never sent in a request
-// line) for a session, then drives «Centro» through the HTTP API.
+// line) for a session, then drives «Centro» and «Dirección» through the HTTP API.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -11,6 +11,7 @@ let selected = null;
 let map = null;
 let marker = null;
 let searching = null;
+let polling = null;
 
 async function api(method, path, body) {
   let response;
@@ -27,6 +28,18 @@ async function api(method, path, body) {
   }
   if (!response.ok) throw new Error(answer.error || "Ocurrió un error inesperado. Intente nuevamente.");
   return answer;
+}
+
+// The screens in order; the navigation opens one already reached.
+function show(step) {
+  clearTimeout(polling);
+  for (const link of document.querySelectorAll(".step-link")) {
+    const current = link.dataset.step === step;
+    $(link.dataset.step).hidden = !current;
+    link.parentElement.toggleAttribute("aria-current", current);
+    if (current) link.disabled = false;
+  }
+  if (step === "centro") map.invalidateSize();
 }
 
 function element(tag, text) {
@@ -134,9 +147,61 @@ async function confirm() {
       code: selected.code, point: {latitude: round(at.lat), longitude: round(at.lng)},
     });
     confirmed(centre);
+    direccion();
   } catch (e) {
     say(e.message, true);
   }
+}
+
+// «Dirección»: the centre's name, claimed by itself; a name in use or an outage offers «Reintentar». Once the name
+// is claimed, the page checks that this computer opens the suite there.
+function status(id, text, isError = false) {
+  $(id).textContent = text;
+  $(id).classList.toggle("error", isError);
+}
+
+async function direccion() {
+  show("direccion");
+  $("retry").hidden = true;
+  status("reach", "");
+  try {
+    let {address} = await api("GET", "/api/state");
+    $("address-name").textContent = address.name;
+    if (!address.claimed) {
+      status("address-status", "Obteniendo la dirección del servicio de nombres de APS Conecta…");
+      ({address} = await api("POST", "/api/address", {}));
+    }
+    status("address-status", `Dirección asignada: https://${address.name}`);
+    reach(address);
+  } catch (e) {
+    status("address-status", e.message, true);
+    $("retry").hidden = false;
+  }
+}
+
+// Whether this browser opens the suite at its name.
+async function opens(name) {
+  try {
+    await fetch(`https://${name}/status.php`, {mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(8000)});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Asked again every 15 seconds: the suite starts later, and the operator may change the router meanwhile.
+async function reach(address) {
+  if (!address.answers) {
+    status("reach", "Cuando la suite esté en marcha, esta página comprobará que este equipo abre la dirección.");
+  } else if (await opens(address.name)) {
+    return status("reach", `Este equipo abre https://${address.name} correctamente.`);
+  } else {
+    status("reach", `Este equipo no logra abrir https://${address.name}, aunque la suite ya responde en el servidor: `
+      + "el DNS de esta red descarta las respuestas que apuntan a direcciones internas. En el router, permita esas "
+      + `respuestas para ${address.name.split(".").slice(1).join(".")} (una excepción a la protección contra «DNS `
+      + "rebinding») y vuelva a conectar este equipo a la red. Esta página lo comprobará de nuevo por sí sola.", true);
+  }
+  polling = setTimeout(() => api("GET", "/api/state").then((state) => reach(state.address), () => {}), 15000);
 }
 
 function startMap() {
@@ -173,11 +238,17 @@ async function start() {
   $("fingerprint").hidden = false;
   $("register-date").textContent = ` del ${register.date.split("-").reverse().join("-")}`;
   fillFilters();
-  $("centro").hidden = false;
   startMap();
+  for (const link of document.querySelectorAll(".step-link")) {
+    link.addEventListener("click", () => (link.dataset.step === "direccion" ? direccion() : show("centro")));
+  }
+  $("retry").addEventListener("click", direccion);
   if (state.centre) {
     select({...state.centre, point: state.centre.official_point}, state.centre.point);
     confirmed(state.centre);
+    direccion();
+  } else {
+    show("centro");
   }
   const form = $("search");
   form.addEventListener("submit", (e) => e.preventDefault());
