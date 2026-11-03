@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -35,11 +36,28 @@ def desec(path, body=None, token=None):
         return json.loads(response.read() or "null")
 
 
-token = desec("auth/login/", {"email": os.environ["DESEC_TEST_EMAIL"],
-                              "password": os.environ["DESEC_TEST_PASSWORD"]})["token"]
-print(f"::add-mask::{token}", flush=True)
-held = [d["name"][:-len(".dedyn.io")] for d in desec("domains/", token=token) if d["name"].endswith(".dedyn.io")]
-desec("auth/logout/", {}, token)
+def with_account(use):
+    """use(token) for the APS deSEC test account, between a login and a logout."""
+    token = desec("auth/login/", {"email": os.environ["DESEC_TEST_EMAIL"],
+                                  "password": os.environ["DESEC_TEST_PASSWORD"]})["token"]
+    print(f"::add-mask::{token}", flush=True)
+    try:
+        return use(token)
+    finally:
+        desec("auth/logout/", {}, token)
+
+
+def desec_answer(token):
+    """deSEC's own answer to registering the test name for the account, which upstream's message hides."""
+    try:
+        desec("domains/", {"name": f"{TEST_NAME}.dedyn.io"}, token)
+        return "201 Created"
+    except urllib.error.HTTPError as error:
+        return f"HTTP {error.code} {error.read().decode()}"
+
+
+held = with_account(lambda token: [d["name"][:-len(".dedyn.io")] for d in desec("domains/", token=token)
+                                   if d["name"].endswith(".dedyn.io")])
 TEST_NAME = held[0] if held else "aps-gestion-aio-ci"
 print(f"the APS deSEC test account holds {', '.join(held) or 'no dedyn.io name'}; CI registers {TEST_NAME}.dedyn.io")
 link, printed = wizard_link(Path(os.environ["CONSOLE"]).read_text(encoding="utf-8"))
@@ -73,7 +91,8 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     body = {"name": TEST_NAME, "email": os.environ["DESEC_TEST_EMAIL"], "password": os.environ["DESEC_TEST_PASSWORD"]}
     answer = json.loads(machine("sudo curl --silent --show-error --config -", curl_config(session, body)))
     if "address" not in answer:
-        sys.exit(f"the wizard did not register {TEST_NAME}.dedyn.io: {answer.get('error')}")
+        sys.exit(f"the wizard did not register {TEST_NAME}.dedyn.io: {answer.get('error')} (deSEC answers the test "
+                 f"account itself: {with_account(desec_answer)})")
     page.reload()
     expect(page.locator("#address-status")).to_have_text(f"Dirección registrada: https://{TEST_NAME}.dedyn.io",
                                                          timeout=30_000)
