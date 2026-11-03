@@ -23,7 +23,7 @@
     <ol>
       <li aria-current="step"><button type="button" class="step-link" data-step="centro"><span class="step">1</span>Centro</button></li>
       <li><button type="button" class="step-link" data-step="direccion" disabled><span class="step">2</span>Dirección</button></li>
-      <li><span class="step">3</span>Equipos</li>
+      <li><button type="button" class="step-link" data-step="equipos" disabled><span class="step">3</span>Equipos</button></li>
       <li><button type="button" class="step-link" data-step="revisar" disabled><span class="step">4</span>Revisar</button></li>
       <li><button type="button" class="step-link" data-step="listo" disabled><span class="step">5</span>Listo</button></li>
     </ol>
@@ -79,6 +79,19 @@
       </div>
     </section>
 
+    <section id="equipos" hidden>
+      <h1>Equipos</h1>
+      <p class="lead">Escriba los sectores y los programas del establecimiento, uno por línea. Cada uno será un equipo,
+        con su grupo y su carpeta compartida, y cada sector tendrá su cuenta de jefatura.</p>
+      <div class="columns">
+        <label>Sectores<textarea id="sectors" rows="6" placeholder="Por ejemplo: Norte"></textarea></label>
+        <label>Programas<textarea id="programs" rows="6" placeholder="Por ejemplo: Cardiovascular"></textarea></label>
+      </div>
+      <ul class="progress" id="teams" aria-label="Equipos del establecimiento" aria-live="polite"></ul>
+      <p class="message" id="teams-status" role="status"></p>
+      <div class="actions"><button type="button" class="primary" id="teams-continue">Continuar</button></div>
+    </section>
+
     <section id="revisar" hidden>
       <h1>Revisar</h1>
       <p class="lead">Revise lo que se instalará, marque las aplicaciones opcionales que usará el establecimiento y
@@ -86,6 +99,8 @@
       <dl class="summary">
         <dt>Centro</dt><dd id="summary-centre"></dd>
         <dt>Dirección</dt><dd id="summary-address"></dd>
+        <dt>Equipos</dt><dd><ul id="summary-teams"></ul></dd>
+        <dt>Cuentas de cargo</dt><dd><ul id="summary-cargo"></ul></dd>
         <dt>Componentes</dt><dd><ul id="summary-components"></ul></dd>
         <dt>Aplicaciones</dt><dd><ul id="summary-apps"></ul></dd>
         <dt>Aplicaciones opcionales</dt><dd><ul class="choices" id="optional-apps"

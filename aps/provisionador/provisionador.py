@@ -40,6 +40,7 @@ from urllib.parse import parse_qs
 
 import deis
 import runner
+import teams
 from steps import apps, backups, components, passwords
 from suite import Suite, Taken, Unreachable
 
@@ -67,10 +68,17 @@ IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este estab
           "APS Conecta puede liberarla; después presione «Reintentar».")
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
+TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
 NOT_OFFERED = "Elija solo entre las aplicaciones opcionales que ofrece «Revisar»."
 NOT_LISTO = "El archivo de contraseñas se entrega en «Listo», cuando la instalación terminó."
 CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gestión está instalada en https://{}.\n"
           "El archivo de contraseñas quedó en este servidor, legible solo por root: {}")
+
+
+def plan(declared):
+    """The teams «Equipos» declared and the cargo accounts they bring, as «Equipos» and «Revisar» show them."""
+    return {"teams": declared, "cargo_accounts": [{"user": account["user"], "name": account["name"]}
+                                                  for account in teams.cargo_accounts(declared)]}
 
 
 def digest(value):
@@ -216,7 +224,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
-                     "install": self.progress(state)}
+                     **plan(state.get("teams", [])), "install": self.progress(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -263,6 +271,20 @@ class Provisionador:
                 s["address"] = {"name": claimed}
         return 200, {"address": self.address(self.state.read())}
 
+    def post_teams(self, query, body):
+        """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its group and its
+        folder, and the cargo accounts they bring. «Revisar» and «Instalar» follow the last ones posted; once «Instalar»
+        was pressed they stay."""
+        try:
+            declared = teams.declare(body.get("sectors", []), body.get("programs", []))
+        except ValueError as refusal:
+            return 400, {"error": str(refusal)}
+        with self.state.change() as s:
+            if s.get("install"):
+                return 409, {"error": TEAMS_KEPT}
+            s["teams"] = declared
+        return 200, plan(declared)
+
     def busy(self):
         return self.worker is not None and self.worker.is_alive()
 
@@ -289,7 +311,7 @@ class Provisionador:
         state = self.state.read()
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
-                                  optional=frozenset(state.get("optional", ())))
+                                  optional=frozenset(state.get("optional", ())), teams=state.get("teams", []))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
 
@@ -329,6 +351,7 @@ class Provisionador:
         ("GET", "/api/establishments"): get_establishments,
         ("POST", "/api/centre"): post_centre,
         ("POST", "/api/address"): post_address,
+        ("POST", "/api/teams"): post_teams,
         ("POST", "/api/install"): post_install,
         ("POST", "/api/close"): post_close,
     }
