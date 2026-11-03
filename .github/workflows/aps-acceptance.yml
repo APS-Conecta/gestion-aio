@@ -32,7 +32,7 @@ jobs:
   clean-machine:
     name: The one command on a fresh Debian 12 VM
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     # Every run shares the name service's one CI deployment: one deploy-and-claim at a time.
     concurrency:
       group: aps-name-service-ci

@@ -11,15 +11,23 @@ name's address records and, through acme-dns, its certificate's challenge record
 root-only the moment it arrives and reused, so a name is claimed once. AIO is then set to the name, with our Caddy
 image as its reverse proxy, and the server's inside address is published; the host's timer publishes it again
 every 10 minutes (`provisionador.py publish`).
+
+«Instalar» drives AIO's own page as its interface does from a same-origin browser, signed in with the passphrase
+AIO keeps on this server: its optional-containers form, its backup settings and its start button. The passphrase
+never leaves this process. The containers' progress is AIO's own reading of their state, as its page lists them.
 """
 
+import http.client
 import json
 import os
+import re
 import socket
 import ssl
 import subprocess
 import sys
+import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -30,6 +38,17 @@ LIMITED = ("El servicio de nombres de APS Conecta limita las direcciones que se 
            "cada semana. Presione «Reintentar» más tarde.")
 REFUSED = "El servicio de nombres de APS Conecta rechazó la solicitud (HTTP {code}). Contacte a APS Conecta."
 SUITE_DOWN = "El contenedor maestro de la suite no responde. Revise que Docker esté en marcha y presione «Reintentar»."
+SUITE_REFUSED = ("El contenedor maestro de la suite rechazó la instalación (HTTP {code}). Presione «Reintentar»; si "
+                 "vuelve a ocurrir, contacte a APS Conecta.")
+NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores de la suite. Presione «Reintentar»; si "
+               "vuelve a ocurrir, contacte a APS Conecta.")
+MASTERCONTAINER = "nextcloud-aio-mastercontainer"
+AIO_CONFIG = "/mnt/docker-aio-config/data/configuration.json"  # AIO's settings, its passphrase among them
+AIO_AUTHORITY = "/mnt/docker-aio-config/caddy-internal/pki/authorities/local/root.crt"  # signs AIO's page certificate
+OFFICE_SUITES = {"collabora", "onlyoffice", "eurooffice"}  # AIO's office suites, one choice among them
+# How AIO's start answer ends once every container started (DockerController::getStreamingResponseHtmlEnd); when one
+# fails, it stops short or Slim's error page follows.
+STARTED = "</body>\n</html>"
 
 
 class Taken(Exception):
@@ -59,6 +78,73 @@ $config->setDomain($in['domain'], true);
     $this->set('secrets', array_merge($this->get('secrets', []), $values));
 })->call($config, $in['secrets']);
 """
+
+
+# The containers AIO's page lists (all but its own helpers), with AIO's reading of their state: stopped, starting
+# (its port does not answer yet) or running.
+CONTAINERS = r"""
+ini_set('display_errors', 'stderr');
+require '/var/www/docker-aio/php/vendor/autoload.php';
+$definition = \AIO\DependencyInjection::GetContainer()->get(\AIO\ContainerDefinitionFetcher::class);
+$listed = [];
+foreach ($definition->FetchDefinition() as $c) {
+    if (!$c->hideFromList) {
+        $listed[] = ['name' => $c->displayName, 'state' => $c->GetStartingState()->value];
+    }
+}
+echo json_encode($listed, JSON_THROW_ON_ERROR);
+"""
+
+
+class AioPage:
+    """AIO's own page on this host's loopback, driven as its interface drives it from a same-origin browser: the login
+    form, then the forms its page posts with the session's CSRF token. Its certificate is trusted only if AIO's internal
+    authority signed it."""
+
+    def __init__(self, authority, host):
+        self.context = ssl.create_default_context(cadata=authority)
+        self.context.check_hostname = False  # the loopback address: the authority alone vouches for the page
+        self.host = host  # what AIO records as its own address (AIO_URL), as a browser's address bar would
+        self.cookie = ""
+        self.csrf = {}
+
+    def request(self, method, path, form=None, timeout=60):
+        """The status and text AIO answers."""
+        headers = {"Host": self.host, "Sec-Fetch-Site": "same-origin"}
+        if self.cookie:
+            headers["Cookie"] = self.cookie
+        body = None
+        if form is not None:
+            body = urllib.parse.urlencode({**self.csrf, **form})
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        connection = http.client.HTTPSConnection("127.0.0.1", 8080, context=self.context, timeout=timeout)
+        try:
+            connection.request(method, path, body, headers)
+            response = connection.getresponse()
+            text = response.read().decode(errors="replace")
+        except (OSError, http.client.HTTPException) as error:
+            print(f"AIO {path}: {error}", file=sys.stderr)
+            raise Unreachable(SUITE_DOWN) from error
+        finally:
+            connection.close()
+        for cookie in response.headers.get_all("Set-Cookie") or ():
+            self.cookie = cookie.split(";", 1)[0]  # AIO's one session cookie
+        return response.status, text
+
+    def post(self, path, form, expected=201, timeout=60):
+        status, text = self.request("POST", path, form, timeout)
+        if status != expected:
+            print(f"AIO {path}: {status} {text[-2000:]}", file=sys.stderr)
+            raise Unreachable(SUITE_REFUSED.format(code=status))
+        return text
+
+    def log_in(self, passphrase):
+        """Sign in with the passphrase, then open the page after login, which joins the mastercontainer to the suite's
+        network."""
+        _, page = self.request("GET", "/login")
+        self.csrf = dict(re.findall(r'name="(csrf_name|csrf_value)" value="([^"]*)"', page))
+        self.post("/api/auth/login", {"password": passphrase})
+        self.request("GET", "/containers")
 
 
 class Suite:
@@ -120,17 +206,60 @@ class Suite:
         values = {"ACMEDNS_USERNAME": credential["username"], "ACMEDNS_PASSWORD": credential["password"],
                   "ACMEDNS_SUBDOMAIN": credential["subdomain"], "ACMEDNS_SERVER_URL": credential["server_url"],
                   "ACME_CA": self.services["acme_ca"]}
+        self.mastercontainer("php", "-r", CONFIGURE,
+                             stdin=json.dumps({"domain": credential["name"], "secrets": values}))
+        return credential["name"]
+
+    def mastercontainer(self, *command, stdin=""):
+        """What a command run in the mastercontainer as AIO's user printed. A failure is logged (what it printed is an
+        error, never a secret) and is Unreachable."""
         try:
-            run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data",
-                                  "nextcloud-aio-mastercontainer", "php", "-r", CONFIGURE],
-                                 input=json.dumps({"domain": credential["name"], "secrets": values}),
-                                 capture_output=True, text=True, timeout=120, check=False)
+            run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data", MASTERCONTAINER, *command],
+                                 input=stdin, capture_output=True, text=True, timeout=120, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
+            print(f"mastercontainer {command[0]}: {error}", file=sys.stderr)
             raise Unreachable(SUITE_DOWN) from error
         if run.returncode:
-            print(f"AIO did not take the name: {run.stdout}{run.stderr}", file=sys.stderr)
+            print(f"mastercontainer {command[0]}: {run.stdout}{run.stderr}", file=sys.stderr)
             raise Unreachable(SUITE_DOWN)
-        return credential["name"]
+        return run.stdout
+
+    def aio(self):
+        """AIO's page, signed in with the passphrase AIO's first-run setup (on «Dirección») stored on this server."""
+        page = AioPage(self.mastercontainer("cat", AIO_AUTHORITY), f"{self.stored()['name']}:8080")
+        page.log_in(json.loads(self.mastercontainer("cat", AIO_CONFIG))["password"])
+        return page
+
+    def switch(self, components):
+        """Turn the given optional containers on and every other one off, with AIO's optional-containers form
+        (php/templates/includes/optional-containers.twig): a switch it does not send is off, and the office suite is
+        one choice."""
+        form = {"options-form": "options-form", "office_suite_choice": ""}
+        for component in components:
+            if component in OFFICE_SUITES:
+                form["office_suite_choice"] = component
+            else:
+                form[component] = "on"
+        self.aio().post("/api/configuration", form)
+
+    def back_up(self, folder, time):
+        """AIO's own backup to the folder on this server, daily at the time (UTC), with its success notification and
+        without its automatic updates: what the suite runs changes only with a suite release."""
+        self.aio().post("/api/configuration", {"borg_backup_host_location": folder, "borg_remote_repo": "",
+                                               "daily_backup_time": time, "success_notification": "on"})
+
+    def start(self):
+        """AIO's start button: it pulls, creates and starts every container in order, and answers once it is done."""
+        text = self.aio().post("/api/docker/start", {}, expected=200, timeout=900)
+        if not text.rstrip().endswith(STARTED):
+            print(f"AIO did not start the suite: {text[-2000:]}", file=sys.stderr)
+            raise Unreachable(NOT_STARTED)
+
+    def containers(self):
+        """Each container AIO's page lists, with its state: stopped, starting or running."""
+        listed = json.loads(self.mastercontainer("php", "-r", CONTAINERS))
+        return [{"name": c["name"], "state": c["state"] if c["state"] in ("starting", "running") else "stopped"}
+                for c in listed]
 
     def publish(self, address):
         """Point the claimed name at `address`; nothing before the claim."""
@@ -161,13 +290,19 @@ class FakeSuite:
 
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
-        self.down = set()  # name-service calls in an outage: "claim", "address"
+        self.down = set()  # calls in an outage: the name service's "claim" and "address", and "aio"
         self.limited = False  # the name service refuses claims over its limits
         self.claims = []  # the DEIS codes the name service gave a name
         self.credential = None  # the stored claim
         self.domain = None  # the name AIO is set to
         self.published = []  # the inside addresses published
         self.answering = False  # whether the suite's reverse proxy answers at its name
+        self.switched = None  # the optional containers AIO was set to run; every other one is off
+        self.backup = None  # AIO's nightly backup: (folder, time)
+        self.starts = 0  # how often AIO's start button was pressed
+        self.states = {}  # what AIO reports per container: stopped, starting or running
+        self.release = threading.Event()  # AIO's start answers once it is set: tests clear it to watch a start
+        self.release.set()
 
     def claim(self, code, name):
         if self.credential is None:
@@ -194,3 +329,24 @@ class FakeSuite:
 
     def answers(self, name, address):
         return self.answering and name == self.domain
+
+    def aio(self):
+        if "aio" in self.down:
+            raise Unreachable(SUITE_DOWN)
+
+    def switch(self, components):
+        self.aio()
+        self.switched = set(components)
+
+    def back_up(self, folder, time):
+        self.aio()
+        self.backup = (folder, time)
+
+    def start(self):
+        self.aio()
+        self.release.wait()
+        self.starts += 1
+
+    def containers(self):
+        self.aio()
+        return [{"name": name, "state": state} for name, state in self.states.items()]
