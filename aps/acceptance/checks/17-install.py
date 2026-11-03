@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on to
-«Revisar», which summarises the centre's address, the apps and the backups; «Instalar» shows each container's progress
+«Revisar», which summarises the centre's address, the components and the backups; «Instalar» shows each container's progress
 live until «Listo» shows the suite's address. AIO then reports our components on, every other optional one off and
 nightly backups to the backup folder. AIO's passphrase never reaches the wizard: no answer the browser got carries it,
 and on the machine only root reads the file AIO keeps it in."""
@@ -19,11 +19,9 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 from browser import chromium, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
-from provisionador import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
+from provisionador import BACKUP_FOLDER, BACKUP_TIME, COMPONENTS  # noqa: E402
 
-APPS = ["Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo",
-        "HaRP (servidor de aplicaciones externas)"]
-CHOSEN = ["Talk", "EuroOffice", "Imaginary", "ClamAV", "Fulltextsearch", "HaRP"]  # their containers, as AIO names them
+CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": True, "isTalkRecordingEnabled": False,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
@@ -52,7 +50,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.click("#continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
     expect(page.locator("#summary-address")).to_have_text(f"https://{name}")
-    expect(page.locator("#summary-components li")).to_have_text(APPS)
+    expect(page.locator("#summary-components li")).to_have_text(CHOSEN)
     expect(page.locator("#summary-backups")).to_contain_text(BACKUP_FOLDER)
     page.screenshot(path=evidence / "revisar.png")
 
@@ -70,8 +68,9 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
         if {"running", "stopped"} <= {s[-1] for s in seen.values()} and not (evidence / "progress.png").exists():
             page.screenshot(path=evidence / "progress.png")
         page.wait_for_timeout(2000)
-    (evidence / "progress.txt").write_text("".join(f"{c}: {' → '.join(s)}\n" for c, s in seen.items()), encoding="utf-8")
-    print("".join(f"{c}: {' → '.join(s)}\n" for c, s in seen.items()), end="")
+    progress = "".join(f"{c}: {' → '.join(s)}\n" for c, s in seen.items())
+    (evidence / "progress.txt").write_text(progress, encoding="utf-8")
+    print(progress, end="")
     expect(page.locator("#suite-address")).to_have_text(f"https://{name}")
     expect(page.locator("#suite-address")).to_have_attribute("href", f"https://{name}")
     page.screenshot(path=evidence / "listo.png")

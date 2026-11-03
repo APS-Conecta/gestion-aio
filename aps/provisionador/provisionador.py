@@ -160,7 +160,7 @@ class Provisionador:
         self.slugs = deis.slugs(self.register.rows)
         self.suite = suite
         self.fingerprint = None
-        self.installing = threading.Lock()
+        self.install_lock = threading.Lock()
         self.worker = None  # the install running in the background, if any
 
     def server(self, address=("0.0.0.0", PORT)):
@@ -259,8 +259,9 @@ class Provisionador:
         return self.worker is not None and self.worker.is_alive()
 
     def progress(self, state):
-        """None before «Instalar»; a failure's Spanish reason; otherwise each container as AIO reports it, «done» once
-        AIO started them and every one runs. A reading that fails says why, and the next one asks again."""
+        """None before «Instalar»; a failure's Spanish reason; otherwise each container as AIO reports it, a component's
+        under its «Revisar» name, «done» once AIO started them and every one runs. A reading that fails says why, and
+        the next one asks again."""
         install = state.get("install")
         if not (install or self.busy()):
             return None
@@ -271,13 +272,15 @@ class Provisionador:
         except Unreachable as outage:
             return {"status": "installing", "containers": [], "error": str(outage)}
         done = bool(install) and all(c["state"] == "running" for c in containers)
-        return {"status": "done" if done else "installing", "containers": containers}
+        named = [{"name": COMPONENTS.get(c["id"].removeprefix("nextcloud-aio-"), c["name"]), "state": c["state"]}
+                 for c in containers]
+        return {"status": "done" if done else "installing", "containers": named}
 
     def post_install(self, query, body):
         """POST /api/install, «Instalar»: the install runs in the background and GET /api/state shows its progress.
         While it runs, or once AIO started the suite, pressing it again starts nothing more; after a failure it runs
         again («Reintentar»)."""
-        with self.installing:
+        with self.install_lock:
             state = self.state.read()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}

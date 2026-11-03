@@ -54,6 +54,7 @@ with chromium() as browser:
     print(f"https://{name}/login: {response.status}")
     if not response.ok:
         sys.exit(f"https://{name}/login answers {response.status}")
+    expect(page.locator("input[type=password]")).to_be_visible()
 
 # The wizard on «Dirección», in a browser on a network whose resolver answers the name and in one whose resolver
 # drops the answer.

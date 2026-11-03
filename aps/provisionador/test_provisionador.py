@@ -438,7 +438,7 @@ class Instalar(WizardTest):
             time.sleep(0.02)
         return install
 
-    def test_revisar_summarises_the_centre_the_address_the_apps_and_the_backups(self):
+    def test_revisar_summarises_the_centre_the_address_the_components_and_the_backups(self):
         self.claim()
         state = self.browser.get("/api/state")[1]
         self.assertEqual((state["centre"]["name"], state["address"]["name"], state["install"]),
@@ -465,21 +465,24 @@ class Instalar(WizardTest):
         self.assertEqual(self.suite.starts, 1)
 
     def test_progress_shows_each_container_as_aio_reports_it_and_listo_needs_every_one_running(self):
+        """A component's container goes by its «Revisar» name; every other one keeps AIO's."""
         self.claim()
         self.suite.release.clear()
-        self.suite.states = {"PostgreSQL": "running", "Servidor de aplicaciones": "starting", "Talk": "stopped"}
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
+                             "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
         self.install()
+        names = ["PostgreSQL", "Servidor de aplicaciones", "Búsqueda de texto completo"]
         self.assertEqual(self.progress(), {"status": "installing", "containers": [
-            {"name": "PostgreSQL", "state": "running"}, {"name": "Servidor de aplicaciones", "state": "starting"},
-            {"name": "Talk", "state": "stopped"}]})
-        self.suite.states["Talk"] = "starting"
-        self.assertEqual(self.progress()["containers"][2], {"name": "Talk", "state": "starting"})
-        self.suite.states = dict.fromkeys(self.suite.states, "running")
+            {"name": name, "state": state} for name, state in zip(names, ("running", "starting", "stopped"))]})
+        self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
+        self.assertEqual(self.progress()["containers"][2], {"name": "Búsqueda de texto completo", "state": "starting"})
+        self.suite.states = {id_: (name, "running") for id_, (name, _) in self.suite.states.items()}
         self.assertEqual(self.progress()["status"], "installing", "AIO is still starting containers")
         self.suite.release.set()
-        self.assertEqual(self.until("done")["containers"], [{"name": n, "state": "running"} for n in self.suite.states])
+        self.assertEqual(self.until("done")["containers"], [{"name": name, "state": "running"} for name in names])
         self.assertEqual(self.browser.get("/api/state")[1]["address"]["name"], NAME)
-        self.suite.states["Talk"] = "starting"
+        self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
         self.assertEqual(self.progress()["status"], "installing", "«Listo» needs every container running")
 
     def test_an_aio_outage_fails_in_spanish_and_reintentar_installs(self):
@@ -498,7 +501,7 @@ class Instalar(WizardTest):
     def test_a_reading_of_the_containers_that_fails_says_why_and_the_progress_goes_on(self):
         self.claim()
         self.suite.release.clear()
-        self.suite.states = {"Talk": "starting"}
+        self.suite.states = {"nextcloud-aio-talk": ("Talk", "starting")}
         self.install()
         self.suite.down = {"aio"}
         install = self.progress()

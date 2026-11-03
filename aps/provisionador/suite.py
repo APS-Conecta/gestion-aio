@@ -67,6 +67,7 @@ class Unreachable(Exception):
 # Caddy image as the reverse proxy and, among AIO's secrets, the values community-containers/caddy/caddy.json passes
 # it. The values arrive on stdin only.
 CONFIGURE = r"""
+ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
 $container = \AIO\DependencyInjection::GetContainer();
 $container->get(\AIO\Data\Setup::class)->Setup();
@@ -89,7 +90,7 @@ $definition = \AIO\DependencyInjection::GetContainer()->get(\AIO\ContainerDefini
 $listed = [];
 foreach ($definition->FetchDefinition() as $c) {
     if (!$c->hideFromList) {
-        $listed[] = ['name' => $c->displayName, 'state' => $c->GetStartingState()->value];
+        $listed[] = ['id' => $c->identifier, 'name' => $c->displayName, 'state' => $c->GetStartingState()->value];
     }
 }
 echo json_encode($listed, JSON_THROW_ON_ERROR);
@@ -211,8 +212,8 @@ class Suite:
         return credential["name"]
 
     def mastercontainer(self, *command, stdin=""):
-        """What a command run in the mastercontainer as AIO's user printed. A failure is logged (what it printed is an
-        error, never a secret) and is Unreachable."""
+        """What a command run in the mastercontainer as AIO's user printed. What it printed may be a secret and is never
+        logged; a failure logs its errors only and is Unreachable."""
         try:
             run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data", MASTERCONTAINER, *command],
                                  input=stdin, capture_output=True, text=True, timeout=120, check=False)
@@ -220,11 +221,11 @@ class Suite:
             print(f"mastercontainer {command[0]}: {error}", file=sys.stderr)
             raise Unreachable(SUITE_DOWN) from error
         if run.returncode:
-            print(f"mastercontainer {command[0]}: {run.stdout}{run.stderr}", file=sys.stderr)
+            print(f"mastercontainer {command[0]}: {run.stderr}", file=sys.stderr)
             raise Unreachable(SUITE_DOWN)
         return run.stdout
 
-    def aio(self):
+    def _signed_in(self):
         """AIO's page, signed in with the passphrase AIO's first-run setup (on «Dirección») stored on this server."""
         page = AioPage(self.mastercontainer("cat", AIO_AUTHORITY), f"{self.stored()['name']}:8080")
         page.log_in(json.loads(self.mastercontainer("cat", AIO_CONFIG))["password"])
@@ -240,26 +241,25 @@ class Suite:
                 form["office_suite_choice"] = component
             else:
                 form[component] = "on"
-        self.aio().post("/api/configuration", form)
+        self._signed_in().post("/api/configuration", form)
 
     def back_up(self, folder, time):
         """AIO's own backup to the folder on this server, daily at the time (UTC), with its success notification and
         without its automatic updates: what the suite runs changes only with a suite release."""
-        self.aio().post("/api/configuration", {"borg_backup_host_location": folder, "borg_remote_repo": "",
-                                               "daily_backup_time": time, "success_notification": "on"})
+        self._signed_in().post("/api/configuration", {"borg_backup_host_location": folder, "borg_remote_repo": "",
+                                                      "daily_backup_time": time, "success_notification": "on"})
 
     def start(self):
         """AIO's start button: it pulls, creates and starts every container in order, and answers once it is done."""
-        text = self.aio().post("/api/docker/start", {}, expected=200, timeout=900)
+        text = self._signed_in().post("/api/docker/start", {}, expected=200, timeout=900)
         if not text.rstrip().endswith(STARTED):
             print(f"AIO did not start the suite: {text[-2000:]}", file=sys.stderr)
             raise Unreachable(NOT_STARTED)
 
     def containers(self):
-        """Each container AIO's page lists, with its state: stopped, starting or running."""
+        """Each container AIO's page lists, by its id and AIO's name, with its state: stopped, starting or running."""
         listed = json.loads(self.mastercontainer("php", "-r", CONTAINERS))
-        return [{"name": c["name"], "state": c["state"] if c["state"] in ("starting", "running") else "stopped"}
-                for c in listed]
+        return [{**c, "state": c["state"] if c["state"] in ("starting", "running") else "stopped"} for c in listed]
 
     def publish(self, address):
         """Point the claimed name at `address`; nothing before the claim."""
@@ -300,7 +300,7 @@ class FakeSuite:
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.starts = 0  # how often AIO's start button was pressed
-        self.states = {}  # what AIO reports per container: stopped, starting or running
+        self.states = {}  # what AIO reports per container id: (AIO's name, state: stopped, starting or running)
         self.release = threading.Event()  # AIO's start answers once it is set: tests clear it to watch a start
         self.release.set()
 
@@ -330,23 +330,23 @@ class FakeSuite:
     def answers(self, name, address):
         return self.answering and name == self.domain
 
-    def aio(self):
+    def _outage_guard(self):
         if "aio" in self.down:
             raise Unreachable(SUITE_DOWN)
 
     def switch(self, components):
-        self.aio()
+        self._outage_guard()
         self.switched = set(components)
 
     def back_up(self, folder, time):
-        self.aio()
+        self._outage_guard()
         self.backup = (folder, time)
 
     def start(self):
-        self.aio()
+        self._outage_guard()
         self.release.wait()
         self.starts += 1
 
     def containers(self):
-        self.aio()
-        return [{"name": name, "state": state} for name, state in self.states.items()]
+        self._outage_guard()
+        return [{"id": id_, "name": name, "state": state} for id_, (name, state) in self.states.items()]
