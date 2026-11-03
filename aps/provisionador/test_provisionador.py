@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
 import provisionador
+from steps.components import RECORDING, RECORDING_THRESHOLD
 from suite import FakeSuite
 
 HERE = Path(__file__).resolve().parent
@@ -659,6 +660,47 @@ class StepRunner(InstallTest):
         self.install()
         self.until("done")
         self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
+
+
+class Recording(InstallTest):
+    """Talk recording is on, with the components, on a server that passes the recording threshold, and off on any
+    other: the operator has nothing to choose. The fake's server is the bootstrap's minimum until a test changes it."""
+
+    def switched(self, **hardware):
+        """The optional containers AIO runs once «Instalar» finished on a server with these cores and memory."""
+        self.suite.machine = {**RECORDING_THRESHOLD, **hardware}
+        self.claim()
+        self.install()
+        self.until("done")
+        return self.suite.switched
+
+    def test_a_server_at_the_threshold_records_talk_calls(self):
+        self.assertEqual(self.switched(), COMPONENTS | {RECORDING})
+
+    def test_a_server_one_core_short_does_not(self):
+        self.assertEqual(self.switched(cpus=RECORDING_THRESHOLD["cpus"] - 1), COMPONENTS)
+
+    def test_a_server_one_gib_short_does_not(self):
+        self.assertEqual(self.switched(memory_gib=RECORDING_THRESHOLD["memory_gib"] - 1), COMPONENTS)
+
+
+class TrustedCertificates(InstallTest):
+    """Nextcloud trusts what AIO's own folder of trusted CAs holds, which AIO also gives Talk: a test build's Let's
+    Encrypt staging roots, so server-side calls through the suite's name verify its staging certificate; a release
+    holds none and Nextcloud imports nothing."""
+
+    def test_in_a_test_build_nextcloud_imports_each_ca_aio_trusts(self):
+        self.suite.cacerts = ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"]
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.trusted, ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"])
+
+    def test_in_a_release_nextcloud_imports_none(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.trusted, self.suite.issuers), ([], ["www.ispch.gob.cl"]))
 
 
 class InterruptedInstall(InstallTest):
