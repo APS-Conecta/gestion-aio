@@ -119,42 +119,52 @@ class ConformanceGate(unittest.TestCase):
         self.assertNotIn("Traceback", out)
 
 
-CODE = "999999"
+# Fixture codes only: the gate itself proves no real register code is named here.
+CODE, OTHER_CODE = "999999", "999998"
+REGISTER = "aps/deis/establecimientos-deis-2026-07-23.csv"
 
 
 class DeisCodeCheck(unittest.TestCase):
     def setUp(self):
-        self.repo = Repo({"readme.md": "r\n"})
+        self.repo = Repo({
+            "readme.md": "r\n",
+            REGISTER: f"codigo,tipo,nombre\n{CODE},CESFAM,Uno\n{OTHER_CODE},SAPU,Dos\n",
+        })
         self.addCleanup(self.repo.close)
 
-    def test_tracked_file_naming_a_deis_code_fails_with_its_location(self):
+    def test_tracked_file_naming_a_register_code_fails_with_its_location(self):
         self.repo.write({"aps/sites/demo.sh": "SITE_NOMBRE=x\nSITE_DEIS=" + CODE + "\n"})
         self.repo.commit()
         code, out = run_gate("deis_codes.py", self.repo)
         self.assertEqual(code, 1, out)
         self.assertIn("aps/sites/demo.sh:2", out)
 
-    def test_other_shapes_of_a_named_code_fail(self):
-        self.repo.write({"docs.md": "DEIS " + CODE + "\nrun deis.py " + CODE + "\n--deis=" + CODE + "\n"})
+    def test_a_code_without_a_deis_label_fails(self):
+        self.repo.write({"docs.md": "El centro " + OTHER_CODE + " queda en la comuna\nsites/" + CODE + "/site.sh\n"})
         self.repo.commit()
         code, out = run_gate("deis_codes.py", self.repo)
         self.assertEqual(code, 1, out)
-        for n in (1, 2, 3):
+        for n in (1, 2):
             self.assertIn(f"docs.md:{n}:", out)
 
-    def test_register_data_and_clean_text_pass(self):
-        self.repo.write({
-            "aps/deis/establecimientos-2026-07-23.csv": "codigo;nombre\n" + CODE + ";CESFAM\n",
-            "notes.md": "the DEIS register lists every establishment\nport 8443\ndeis.slug(name)\n",
-        })
+    def test_numbers_that_are_not_register_codes_pass(self):
+        self.repo.write({"notes.md": "DEIS 2026-07\nDEIS 123456\nport 8443\n1" + CODE + "\n"
+                                     "sha256:ab" + CODE + "cd\n"})
         self.repo.commit()
         code, out = run_gate("deis_codes.py", self.repo)
         self.assertEqual(code, 0, out)
 
-    def test_untracked_files_are_not_scanned(self):
+    def test_the_register_and_untracked_files_are_not_scanned(self):
         self.repo.write({"aps/sites/local.sh": "SITE_DEIS=" + CODE + "\n"})
         code, out = run_gate("deis_codes.py", self.repo)
         self.assertEqual(code, 0, out)
+
+    def test_a_tree_without_the_register_fails(self):
+        self.repo.delete(REGISTER)
+        self.repo.commit()
+        code, out = run_gate("deis_codes.py", self.repo)
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("no DEIS register", out)
 
 
 if __name__ == "__main__":
