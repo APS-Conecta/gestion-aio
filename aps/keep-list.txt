@@ -11,7 +11,9 @@ AGENTS.md APS agent steering replaces upstream's contributor steering
 CONTEXT.md APS domain glossary
 .github/workflows/aps-gates.yml APS static gates and PR-title check
 .github/workflows/aps-acceptance.yml APS clean-machine acceptance run on a fresh Debian 12 VM
-.github/workflows/aps-release.yml APS release pipeline: our two images, the bundle, test pre-releases and the bootstrap proof
+.github/workflows/aps-release.yml APS release pipeline: our three images, the bundle, test pre-releases, the bootstrap and staging-certificate proofs
+.github/workflows/aps-name-service.yml APS name service: the production deployment, from main only
+.github/workflows/aps-name-release.yml APS name release: frees a DEIS code's name and its records
 php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image; Spanish display names
 php/containers-schema.json an image_tag may be a sha256 digest pin
 php/public/click-handlers.js Spanish «APS Conecta Gestión» text on AIO's page
