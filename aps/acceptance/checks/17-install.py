@@ -37,9 +37,8 @@ def aio(file):
 
 config = json.loads(aio("configuration.json"))
 passphrase, name = config.get("password"), config["domain"]
-if not passphrase:
+if not passphrase:  # it stays in memory: run.sh masks it in the log
     sys.exit("AIO stored no passphrase")
-print(f"::add-mask::{passphrase}", flush=True)
 evidence = Path(os.environ["EVIDENCE"])
 link, printed = wizard_link(machine("sudo python3 /opt/aps-conecta/gestion/provisionador/provisionador.py link"))
 url = urlsplit(link)
