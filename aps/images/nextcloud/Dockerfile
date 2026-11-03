@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The thin Nextcloud image: upstream v14.4.3's Nextcloud image without AIO's one-click 100-user cap,
-# with AIO's notifications and admin section in Spanish and Nextcloud's maintenance window at night.
+# with AIO's notifications and admin section in Spanish, Nextcloud's maintenance window at night and an
+# antivirus that deletes infected files.
 # The cap is the block between upstream's "AIO one-click settings" markers in /entrypoint.sh and the
 # one-click keys of the image's aio.config.php; the build fails if any of it is left. Its start no longer
 # turns the support app back on, which the theme install step (aps/provisionador/steps/theme.py) turns off.
@@ -28,3 +29,11 @@ RUN set -eux; \
 # The hour (UTC) Nextcloud's heavy daily jobs start, which upstream's entrypoint sets at every start; the jobs install
 # step (aps/provisionador/steps/jobs.py) declares the same one.
 ENV NEXTCLOUD_MAINTENANCE_WINDOW=5
+
+# The antivirus deletes what its background scan finds infected: upstream's start sets its infected-file action to
+# only_log, and here to delete, as the antivirus install step (aps/provisionador/steps/antivirus.py) declares it; the
+# build fails if upstream's line is left.
+RUN set -eux; \
+    sed -i 's/\( files_antivirus av_infected_action --value=\)"only_log"$/\1"delete"/' /entrypoint.sh; \
+    grep -q ' files_antivirus av_infected_action --value="delete"$' /entrypoint.sh; \
+    if grep -n only_log /entrypoint.sh; then exit 1; fi

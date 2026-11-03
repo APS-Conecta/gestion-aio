@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The suite's apps, as the Suite manifest (apps.json) lists them: every default app, and the optional apps the operator
 ticked on «Revisar». The apps of the components (Talk, Euro-Office, the antivirus, full-text search) are AIO's, which
-installs them with each component's switch.
+installs them with each component's switch, but for full-text search's files provider: the manifest's fork replaces
+AIO's store copy (aps/keep-list.txt says why).
 
 An own or fork app comes from its repo's newest App release that the running Nextcloud admits, proven before it is
 unpacked: the app key signed its SHA256SUMS, which hold its tarball's checksum, and the tarball holds only the app's
@@ -145,7 +146,9 @@ def install(context, app, lock, major):
         suite.occ("app:enable", app["id"])
         return
     tag = lock.get(app["id"]) or newest(suite, app, major)
-    suite.unpack(app["id"], proven(suite, app, tag))
+    tarball = proven(suite, app, tag)
+    suite.occ("app:disable", app["id"])  # Nextcloud upgrades an app it already holds only as it enables it
+    suite.unpack(app["id"], tarball)
     suite.occ("app:enable", app["id"])
     lock[app["id"]] = tag
     write_root_only(context.folder / LOCK, json.dumps(lock, indent=1))
