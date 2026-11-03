@@ -110,13 +110,13 @@ class LogViewer {
             event.preventDefault();
             if (this.isAutoloadingEnabled()) {
                 this.stopAutoloading();
-                statusElem.textContent = 'disabled';
-                button.textContent = 'Enable';
+                statusElem.textContent = 'desactivada';
+                button.textContent = 'Activar';
                 this.autoloadingDisabledFromButton = true;
             } else {
                 this.startAutoloading();
-                statusElem.textContent = 'enabled';
-                button.textContent = 'Disable';
+                statusElem.textContent = 'activada';
+                button.textContent = 'Desactivar';
                 this.autoloadingDisabledFromButton = false;
             }
         });
