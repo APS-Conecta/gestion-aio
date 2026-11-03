@@ -25,21 +25,17 @@ export NC_DOMAIN ACMEDNS_USERNAME ACMEDNS_PASSWORD ACMEDNS_SUBDOMAIN ACMEDNS_SER
 printf 'code=%s\nname=%s\n' "$code" "$NC_DOMAIN" >> "$GITHUB_OUTPUT"
 echo "claimed $NC_DOMAIN"
 
-# What upstream's start.sh waits for in the suite: Nextcloud's port 9001 and the admin's caddy folder. The
-# image's own Caddyfile gets only the staging directory, so the image runs as shipped otherwise.
+# What upstream's start.sh waits for in the suite: Nextcloud's port 9001 and the admin's caddy folder. ACME_CA
+# names the staging directory, as a test build's suite does.
 work="$(mktemp -d)"
 mkdir -p "$work/nextcloud/admin/files/nextcloud-aio-caddy"
 touch "$work/nextcloud/admin/files/nextcloud-aio-caddy/allowed-countries.txt"
-docker run --rm --entrypoint cat "$caddy" /Caddyfile \
-  | awk -v dir="$staging" '{ print } /issuer acme \{/ { print "            dir " dir }' > "$work/Caddyfile"
-grep -qF "dir $staging" "$work/Caddyfile" || { echo "::error::the image's Caddyfile has no 'issuer acme' block for staging"; exit 1; }
-chmod 666 "$work/Caddyfile"
 docker network create aps-certificate > /dev/null
 docker run -d --name nextcloud-aio-nextcloud --network aps-certificate --entrypoint nc "$caddy" -lk 9001 > /dev/null
 docker run -d --name nextcloud-aio-caddy --network aps-certificate --publish 127.0.0.1:8443:443 \
-  --env NC_DOMAIN --env APACHE_PORT=11000 \
+  --env NC_DOMAIN --env APACHE_PORT=11000 --env ACME_CA="$staging" \
   --env ACMEDNS_USERNAME --env ACMEDNS_PASSWORD --env ACMEDNS_SUBDOMAIN --env ACMEDNS_SERVER_URL \
-  --volume "$work/Caddyfile:/Caddyfile" --volume "$work/nextcloud:/nextcloud:ro" --volume aps-caddy-data:/data \
+  --volume "$work/nextcloud:/nextcloud:ro" --volume aps-caddy-data:/data \
   "$caddy" > /dev/null
 
 for _ in $(seq 60); do

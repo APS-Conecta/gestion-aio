@@ -14,6 +14,7 @@ CONTEXT.md APS domain glossary
 .github/workflows/aps-release.yml APS release pipeline: our three images, the bundle, test pre-releases, the bootstrap and staging-certificate proofs
 .github/workflows/aps-name-service.yml APS name service: the production deployment, from main only
 .github/workflows/aps-name-release.yml APS name release: frees a DEIS code's name and its records
+community-containers/caddy/caddy.json the reverse proxy is our thin Caddy image, pinned per release, with the name service's acme-dns credential and the ACME directory; Spanish display name
 php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image; Spanish display names
 php/containers-schema.json an image_tag may be a sha256 digest pin
 php/public/click-handlers.js Spanish «APS Conecta Gestión» text on AIO's page
@@ -32,7 +33,7 @@ php/src/Cron/CheckFreeDiskSpace.php AIO's notifications in Spanish, naming «APS
 php/src/Cron/OutdatedNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
 php/src/Cron/UpdateNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
 php/src/Data/ConfigurationManager.php Spanish «APS Conecta Gestión» text on AIO's page
-php/src/Docker/DockerActionManager.php an image_tag that is a sha256 digest is requested as image@digest; Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Docker/DockerActionManager.php an image_tag that is a sha256 digest is requested as image@digest; Spanish «APS Conecta Gestión» text on AIO's page; inside the suite the domain resolves to its reverse proxy
 php/templates/already-installed.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/components/container-state.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/containers.twig Spanish «APS Conecta Gestión» text on AIO's page; upstream's switch for the unused Nextcloud major upgrade turned off
