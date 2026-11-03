@@ -5,7 +5,7 @@
             "display_name": "Dnsmasq (Local DNS)",
             "documentation": "https://github.com/nextcloud/all-in-one/tree/main/community-containers/dnsmasq",
             "image": "ghcr.io/szaimen/aio-dnsmasq",
-            "image_tag": "v1",
+            "image_tag": "sha256:51841e975c667001febefcae44439658cf7f495cd42336c2d4e22d1cc8dd4633",
             "internal_port": "host",
             "restart": "unless-stopped",
             "environment": [
