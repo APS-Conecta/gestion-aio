@@ -139,7 +139,8 @@ class OneTimeLink(WizardTest):
     def test_every_wizard_call_without_a_session_is_refused(self):
         browser = Browser(self.link().url)
         for method, path in (("GET", "/api/state"), ("GET", "/api/register"),
-                             ("GET", "/api/establishments?name=castanos"), ("POST", "/api/centre")):
+                             ("GET", "/api/establishments?name=castanos"), ("POST", "/api/centre"),
+                             ("POST", "/api/address")):
             status, body = browser.request(method, path, {} if method == "POST" else None)
             self.assertEqual(status, 401, path)
             self.assertIn("enlace", body["error"])
@@ -289,6 +290,121 @@ class CentroChoice(WizardTest):
             status, body = self.choose(browser, code=code)
             self.assertEqual((status, body["centre"]["timezone"]), (200, timezone), code)
 
+
+NAME = "cesfam-los-castanos.gestion.apsconecta.cl"
+
+
+class Direccion(WizardTest):
+    """«Dirección»: the centre's name from the slug table, claimed from the APS name service through the suite port."""
+
+    def setUp(self):
+        super().setUp()
+        self.browser = self.operator()
+
+    def choose(self, code="999001", **body):
+        return self.browser.request("POST", "/api/centre", {"code": code, **body})
+
+    def claim(self, **body):
+        return self.browser.request("POST", "/api/address", body)
+
+    def address(self):
+        return self.browser.get("/api/state")[1]["address"]
+
+    def test_the_name_is_the_centres_from_the_slug_table_and_is_not_editable(self):
+        self.assertIsNone(self.address())
+        for code, slug in (("999002", "cecosf-estrecho"), ("999003", "sapu-rapa-nui"),
+                           ("999004", "cesfam-doctor-juan-perez"), ("999001", "cesfam-los-castanos")):
+            self.choose(code)
+            self.assertEqual(self.address(), {"name": f"{slug}.gestion.apsconecta.cl", "claimed": False})
+        status, body = self.claim(name="otro-nombre.gestion.apsconecta.cl")
+        self.assertEqual((status, body["address"]["name"]), (200, NAME))
+
+    def test_there_is_no_claim_before_the_centre_is_chosen(self):
+        status, body = self.claim()
+        self.assertEqual(status, 409)
+        self.assertIn("centro", body["error"])
+        self.assertEqual(self.suite.claims, [])
+
+    def test_the_claim_asks_nothing_sets_the_suite_to_the_name_and_publishes_the_inside_address(self):
+        self.choose()
+        status, body = self.claim()
+        self.assertEqual((status, body), (200, {"address": {"name": NAME, "claimed": True, "answers": False}}))
+        self.assertEqual((self.suite.claims, self.suite.domain), (["999001"], NAME))
+        self.assertEqual(self.suite.published, [provisionador.lan_ip()])
+        self.assertEqual(self.address(), body["address"])
+
+    def test_a_name_in_use_says_aps_conecta_can_release_it_and_a_retry_claims_it_once_released(self):
+        self.suite.in_use = {"999001"}
+        self.choose()
+        status, body = self.claim()
+        self.assertEqual(status, 409)
+        for text in (NAME, "en uso", "APS Conecta puede liberarla", "Reintentar"):
+            self.assertIn(text, body["error"])
+        self.assertEqual((self.suite.claims, self.suite.domain, self.address()["claimed"]), ([], None, False))
+        self.suite.in_use = set()
+        self.assertEqual(self.claim()[0], 200)
+        self.assertEqual(self.suite.claims, ["999001"])
+
+    def test_an_outage_or_the_claim_limits_say_so_in_spanish_with_retry_and_change_nothing(self):
+        self.choose()
+        self.suite.down = {"claim", "address"}
+        status, body = self.claim()
+        self.assertEqual(status, 503)
+        self.assertIn("servicio de nombres", body["error"])
+        self.assertIn("Reintentar", body["error"])
+        self.suite.down = set()
+        self.suite.limited = True
+        status, body = self.claim()
+        self.assertEqual(status, 503)
+        self.assertIn("limita", body["error"])
+        self.assertIn("Reintentar", body["error"])
+        self.assertEqual((self.suite.claims, self.suite.domain, self.address()["claimed"]), ([], None, False))
+
+    def test_a_claim_that_succeeded_is_reused_not_repeated(self):
+        self.choose()
+        self.suite.down = {"address"}
+        status, body = self.claim()
+        self.assertEqual(status, 503)
+        self.assertIn("Reintentar", body["error"])
+        self.assertEqual((self.suite.claims, self.suite.published, self.address()["claimed"]), (["999001"], [], False))
+        port = self.server.server_address[1]
+        self.stop()
+        self.start(port)
+        self.suite.down = set()
+        self.assertEqual(self.claim()[1]["address"]["claimed"], True)
+        self.assertEqual(self.claim()[1]["address"]["claimed"], True)
+        self.assertEqual((self.suite.claims, self.suite.domain), (["999001"], NAME))
+        self.assertEqual(self.suite.published, [provisionador.lan_ip()])
+
+    def test_once_claimed_the_centre_keeps_its_name_and_only_its_point_can_move(self):
+        self.choose()
+        self.claim()
+        status, body = self.choose("999002")
+        self.assertEqual(status, 409)
+        self.assertIn(NAME, body["error"])
+        moved = {"latitude": -33.4512, "longitude": -70.6634}
+        self.assertEqual(self.choose(point=moved)[0], 200)
+        state = self.browser.get("/api/state")[1]
+        self.assertEqual((state["centre"]["code"], state["centre"]["point"], state["address"]["name"]),
+                         ("999001", moved, NAME))
+
+    def test_a_stored_claim_locks_the_centre_and_names_the_suite_even_before_the_wizard_records_it(self):
+        self.choose()
+        self.suite.down = {"address"}
+        self.assertEqual(self.claim()[0], 503)
+        status, body = self.choose("999002")
+        self.assertEqual(status, 409)
+        self.assertIn(NAME, body["error"])
+        self.suite.down = set()
+        status, body = self.claim()
+        self.assertEqual((status, body["address"]["name"], self.suite.domain), (200, NAME, NAME))
+
+    def test_the_state_says_when_the_suite_answers_at_its_name(self):
+        self.choose()
+        self.claim()
+        self.assertIs(self.address()["answers"], False)
+        self.suite.answering = True
+        self.assertIs(self.address()["answers"], True)
 
 
 class Resume(WizardTest):

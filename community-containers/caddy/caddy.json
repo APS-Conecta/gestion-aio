@@ -2,10 +2,10 @@
     "aio_services_v1": [
         {
             "container_name": "nextcloud-aio-caddy",
-            "display_name": "Caddy with geoblocking",
+            "display_name": "Proxy inverso (Caddy)",
             "documentation": "https://github.com/nextcloud/all-in-one/tree/main/community-containers/caddy",
-            "image": "ghcr.io/szaimen/aio-caddy",
-            "image_tag": "v4",
+            "image": "ghcr.io/aps-conecta/gestion-caddy",
+            "image_tag": "%AIO_CHANNEL%",
             "internal_port": "443",
             "restart": "unless-stopped",
             "ports": [
@@ -22,7 +22,11 @@
                 "APACHE_IP_BINDING=%APACHE_IP_BINDING%",
                 "NEXTCLOUD_EXPORTER_CADDY_PASSWORD=%NEXTCLOUD_EXPORTER_CADDY_PASSWORD%",
                 "NEXTCLOUD_GLANCES_CADDY_PASSWORD=%NEXTCLOUD_GLANCES_CADDY_PASSWORD%",
-                "DESEC_TOKEN=%DESEC_TOKEN%"
+                "ACMEDNS_USERNAME=%ACMEDNS_USERNAME%",
+                "ACMEDNS_PASSWORD=%ACMEDNS_PASSWORD%",
+                "ACMEDNS_SUBDOMAIN=%ACMEDNS_SUBDOMAIN%",
+                "ACMEDNS_SERVER_URL=%ACMEDNS_SERVER_URL%",
+                "ACME_CA=%ACME_CA%"
             ],
             "volumes": [
                 {
@@ -38,7 +42,12 @@
             ],
             "secrets": [
                 "NEXTCLOUD_EXPORTER_CADDY_PASSWORD",
-                "NEXTCLOUD_GLANCES_CADDY_PASSWORD"
+                "NEXTCLOUD_GLANCES_CADDY_PASSWORD",
+                "ACMEDNS_USERNAME",
+                "ACMEDNS_PASSWORD",
+                "ACMEDNS_SUBDOMAIN",
+                "ACMEDNS_SERVER_URL",
+                "ACME_CA"
             ],
             "aio_variables": [
                 "apache_ip_binding=@INTERNAL",

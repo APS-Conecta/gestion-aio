@@ -29,5 +29,6 @@ RUN set -eux; \
     sed -i -f /tmp/dns-provider.sed /start.sh; \
     if grep -in desec /start.sh; then exit 1; fi; \
     grep -q 'dns acmedns' /start.sh; \
+    grep -qF 'dir {$ACME_CA:' /start.sh; \
     rm /tmp/dns-provider.sed
 USER www-data

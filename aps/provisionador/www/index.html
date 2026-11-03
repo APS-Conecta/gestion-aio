@@ -21,8 +21,8 @@
 <div class="content">
   <nav class="navigation" aria-label="Pasos de la instalación">
     <ol>
-      <li aria-current="step"><span class="step">1</span>Centro</li>
-      <li><span class="step">2</span>Dirección</li>
+      <li aria-current="step"><button type="button" class="step-link" data-step="centro"><span class="step">1</span>Centro</button></li>
+      <li><button type="button" class="step-link" data-step="direccion" disabled><span class="step">2</span>Dirección</button></li>
       <li><span class="step">3</span>Equipos</li>
       <li><span class="step">4</span>Revisar</li>
       <li><span class="step">5</span>Listo</li>
@@ -65,6 +65,16 @@
           <p class="message" id="message" role="status"></p>
         </div>
       </div>
+    </section>
+
+    <section id="direccion" hidden>
+      <h1>Dirección</h1>
+      <p class="lead">La suite tendrá esta dirección, la del centro elegido, con un certificado real y sin abrir puertos
+        en el router. Se obtiene por sí sola del servicio de nombres de APS Conecta.</p>
+      <p class="address" id="address-name"></p>
+      <p class="message" id="address-status" role="status"></p>
+      <div class="actions"><button type="button" id="retry" hidden>Reintentar</button></div>
+      <p class="message" id="reach" aria-live="polite"></p>
     </section>
   </main>
 </div>
