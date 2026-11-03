@@ -39,9 +39,9 @@ and `docs/agents/` for the issue tracker.
 
 ## Tests and gates
 
-- Test only at the spec's three seams: the clean-machine acceptance run, the Provisionador's HTTP API
-  with the fake suite port, and the static gates. Start each ticket with a red test at the lowest
-  suitable seam.
+- Test only at the spec's four seams: the clean-machine acceptance run, the Provisionador's HTTP API
+  with the fake suite port, the static gates, and the name service's HTTP API against a fake Cloudflare.
+  Start each ticket with a red test at the lowest suitable seam.
 - `aps/gates/run.sh` runs the static gates exactly as CI does. Run it in the foreground before pushing.
 - Never weaken a gate to get green; fix the input.
 - Upstream's workflows are disabled on this fork. Only `aps-*` workflows and the org's CodeQL default
