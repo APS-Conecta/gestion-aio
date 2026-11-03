@@ -199,7 +199,7 @@ readonly class DockerActionManager {
         $url = $this->BuildApiUrl(sprintf('containers/%s/start', urlencode($container->identifier)));
         try {
             if ($addToStreamingResponseBody !== null) {
-                $addToStreamingResponseBody("Starting container", $container);
+                $addToStreamingResponseBody("Iniciando el contenedor", $container);
             }
             $this->sendHttpRequest('POST', $url);
         } catch (RequestException $e) {
@@ -607,7 +607,7 @@ readonly class DockerActionManager {
         $imageIsThere = true;
         try {
             if ($addToStreamingResponseBody) {
-                $addToStreamingResponseBody("Pulling image", $container);
+                $addToStreamingResponseBody("Descargando la imagen", $container);
             }
             $imageUrl = $this->BuildApiUrl(sprintf('images/%s/json', $encodedImageName));
             $this->sendHttpRequest('GET', $imageUrl)->getBody()->getContents();
@@ -1168,7 +1168,7 @@ readonly class DockerActionManager {
             }
 
             if ($addToStreamingResponseBody !== null) {
-                $addToStreamingResponseBody("Running $endpoint...");
+                $addToStreamingResponseBody("Ejecutando $endpoint...");
             }
 
             try {
@@ -1184,13 +1184,13 @@ readonly class DockerActionManager {
                     $reclaimed = $data['SpaceReclaimed'] ?? 0;
                     $parts = [];
                     if ($deleted > 0) {
-                        $parts[] = "$deleted item(s) deleted";
+                        $parts[] = "$deleted elemento(s) eliminado(s)";
                     }
                     if ($reclaimed > 0) {
                         $i = (int)floor(log($reclaimed, 1024));
-                        $parts[] = 'Space reclaimed: ' . (string)round($reclaimed / (1024 ** $i), 2) . ' ' . ['B','KB','MB','GB'][$i];
+                        $parts[] = 'Espacio recuperado: ' . (string)round($reclaimed / (1024 ** $i), 2) . ' ' . ['B','KB','MB','GB'][$i];
                     }
-                    $addToStreamingResponseBody(!empty($parts) ? implode('. ', $parts) . '.' : 'Nothing to prune.');
+                    $addToStreamingResponseBody(!empty($parts) ? implode('. ', $parts) . '.' : 'No hay nada que limpiar.');
                 }
             } catch (RequestException $e) {
                 error_log(sprintf('Docker prune (%s) failed: %s', $endpoint, $e->getMessage()));
@@ -1202,11 +1202,11 @@ readonly class DockerActionManager {
         }
 
         if ($addToStreamingResponseBody !== null) {
-            $addToStreamingResponseBody("Docker system prune completed.");
+            $addToStreamingResponseBody("Terminó la limpieza del sistema Docker.");
             sleep(1);
 
             // We automatically reload after 10s so that the output can be read or copied if necessary
-            $addToStreamingResponseBody("Automatically reloading the page after 10s.");
+            $addToStreamingResponseBody("La página se recargará automáticamente en 10 s.");
             sleep(10);
         }
     }

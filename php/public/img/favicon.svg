@@ -1,0 +1,13 @@
+<!--
+  - SPDX-FileCopyrightText: 2026 APS Conecta
+  - SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <!-- APS Conecta Gestión -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="#7f21fe"/>
+  <path d="M32 14 L47 28 M32 14 L17 28" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" opacity="0.5"/>
+  <path d="M12 40 Q32 30 52 38" fill="none" stroke="#f28f36" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="47" cy="28" r="3.6" fill="#ffffff"/>
+  <circle cx="17" cy="28" r="3.6" fill="#ffffff"/>
+  <path d="M32 7 L33.82 12.18 L39 14 L33.82 15.82 L32 21 L30.18 15.82 L25 14 L30.18 12.18 Z" fill="#f28f36"/>
+</svg>

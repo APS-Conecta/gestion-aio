@@ -91,21 +91,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function handleDockerSocketProxyWarning() {
         if (document.getElementById("docker-socket-proxy").checked) {
-            alert('⚠️ The docker socket proxy container is deprecated. Please use the HaRP (High-availability Reverse Proxy for Nextcloud ExApps) instead!');
+            alert('⚠️ El contenedor Docker Socket Proxy está obsoleto. Use HaRP (proxy inverso de alta disponibilidad para ExApps) en su lugar.');
             document.getElementById("docker-socket-proxy").checked = false
         }
     }
 
     function handleOnlyofficeWarning() {
         if (document.getElementById("office-onlyoffice").checked) {
-            alert('⚠️ The ONLYOFFICE container is deprecated. Please use Nextcloud Office powered by Euro-Office instead!');
+            alert('⚠️ El contenedor ONLYOFFICE está obsoleto. Use la oficina con Euro-Office en su lugar.');
             document.getElementById("office-onlyoffice").checked = false
         }
     }
 
     function handleHarpWarning() {
         if (document.getElementById("harp").checked) {
-            alert('⚠️ Warning! Enabling this container comes with possible Security problems since you are exposing the docker socket and all its privileges to the HaRP container. Enable this only if you are sure what you are doing!');
+            alert('⚠️ ¡Advertencia! Activar este contenedor puede traer problemas de seguridad, ya que expone el socket de Docker y todos sus privilegios al contenedor HaRP. Actívelo solo si está seguro de lo que hace.');
             document.getElementById("docker-socket-proxy").checked = false
         }
     }

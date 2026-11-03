@@ -154,7 +154,7 @@
         "nextcloud-aio-imaginary",
         "nextcloud-aio-docker-socket-proxy"
       ],
-      "display_name": "Nextcloud",
+      "display_name": "Servidor de aplicaciones",
       "image": "ghcr.io/aps-conecta/gestion-nextcloud",
       "init": true,
       "healthcheck": {
@@ -376,7 +376,7 @@
       "container_name": "nextcloud-aio-collabora",
       "image_tag": "sha256:d996eb3fd16749aa5a8fe4e21cf175c2514c9efdd4d7ce472f4982cd69de5053",
       "documentation": "https://github.com/nextcloud/all-in-one/discussions/1358",
-      "display_name": "Nextcloud Office",
+      "display_name": "Collabora Online",
       "image": "ghcr.io/nextcloud-releases/aio-collabora",
       "init": true,
       "healthcheck": {
@@ -426,7 +426,7 @@
       "container_name": "nextcloud-aio-talk",
       "image_tag": "sha256:ac35eb212ee178a29a68befa3d8c99ffb146bbcc958dec1fcab0c14d083eca15",
       "documentation": "https://github.com/nextcloud/all-in-one/discussions/1358",
-      "display_name": "Nextcloud Talk",
+      "display_name": "Talk",
       "image": "ghcr.io/nextcloud-releases/aio-talk",
       "user": "1000",
       "init": true,
@@ -495,7 +495,7 @@
     {
       "container_name": "nextcloud-aio-talk-recording",
       "image_tag": "sha256:a83764674d515d357a71b5f3e6a5b5c54b4b28c2b2d7569c38acf994049852fd",
-      "display_name": "Nextcloud Talk Recording",
+      "display_name": "Grabador de Talk",
       "image": "ghcr.io/nextcloud-releases/aio-talk-recording",
       "user": "122",
       "init": true,
@@ -721,7 +721,7 @@
     {
       "container_name": "nextcloud-aio-onlyoffice",
       "image_tag": "sha256:925849ae8da76612ff68a5bc1683969c479593a045f334ad59b278fecf62e178",
-      "display_name": "OnlyOffice (deprecated)",
+      "display_name": "OnlyOffice (obsoleto)",
       "image": "ghcr.io/nextcloud-releases/aio-onlyoffice",
       "init": true,
       "healthcheck": {
@@ -910,7 +910,7 @@
     {
       "container_name": "nextcloud-aio-docker-socket-proxy",
       "image_tag": "sha256:1f9c9a854193a539736dbbaebe938963030c1222d35ac307cb588aa6ac07d2ce",
-      "display_name": "Docker Socket Proxy (deprecated)",
+      "display_name": "Docker Socket Proxy (obsoleto)",
       "image": "ghcr.io/nextcloud-releases/aio-docker-socket-proxy",
       "init": true,
       "internal_port": "2375",
@@ -989,7 +989,7 @@
     {
       "container_name": "nextcloud-aio-whiteboard",
       "image_tag": "sha256:31fc9d3ffdd3daf636caae06d907f1499e3d3c91b7e989c18a64a45be945013a",
-      "display_name": "Nextcloud Whiteboard",
+      "display_name": "Whiteboard",
       "image": "ghcr.io/nextcloud-releases/aio-whiteboard",
       "user": "65534",
       "init": true,
