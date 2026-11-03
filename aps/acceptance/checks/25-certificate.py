@@ -7,7 +7,6 @@ Encrypt's staging service (its DNS has no answer for the production one). A brow
 roots alone opens the suite at its name, with the wizard closed at «Listo» (17-install checks what its page says
 then about this computer and the router)."""
 
-import json
 import os
 import subprocess
 import sys
@@ -15,15 +14,12 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import chromium, machine  # noqa: E402
+from browser import chromium, suite_name  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 
 address = os.environ["ADDRESS"]
 evidence = Path(os.environ["EVIDENCE"])
-name = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
-                          "/mnt/docker-aio-config/data/configuration.json")).get("domain")
-if not name:
-    sys.exit("the suite has no name: «Dirección» claimed none")
+name = suite_name()
 
 
 def served():

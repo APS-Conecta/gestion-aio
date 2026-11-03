@@ -8,10 +8,10 @@ voice goes quiet: its announcements, first-login slides, usage survey and suppor
 own free account» link, its update banners and its iOS app banner are off, and a new person's home starts empty
 instead of with its sample files. Everyone's personal settings link the suite's source code and its licence.
 
-The text overrides (aps/theme/texts.json) are Nextcloud's, Talk's, Calendar's and Contacts' Spanish translations that
-name the suite «Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names
-Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud adds a theme's translations to its
-own on every screen and email it renders.
+The text overrides (aps/theme/texts.json) are Spanish translations, Nextcloud's and its apps', that name the suite
+«Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names Nextcloud's company,
+editions, versions or community keeps upstream's. Nextcloud adds a theme's translations to its own on every screen and
+email it renders.
 """
 
 import json

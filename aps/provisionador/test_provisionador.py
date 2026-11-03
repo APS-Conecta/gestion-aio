@@ -1016,7 +1016,8 @@ class Branding(InstallTest):
     def test_text_overrides_say_aps_conecta_gestion_where_nextclouds_spanish_names_the_suite_nextcloud(self):
         texts = {path: json.loads(data)["translations"] for path, data in self.theme.items()
                  if path.endswith("/l10n/es.json")}
-        self.assertLessEqual({"core/l10n/es.json", "apps/settings/l10n/es.json", "custom_apps/spreed/l10n/es.json"},
+        self.assertLessEqual({"core/l10n/es.json", "apps/settings/l10n/es.json", "custom_apps/spreed/l10n/es.json",
+                              "custom_apps/files_antivirus/l10n/es.json", "custom_apps/fulltextsearch/l10n/es.json"},
                              set(texts))
         said = [value for translations in texts.values() for value in translations.values()]
         self.assertFalse([value for value in said if "Nextcloud" in str(value)])
@@ -1051,6 +1052,52 @@ class CustomMenu(InstallTest):
             self.assertIn(f"«{apps.BY_ID['side_menu']['name']}»: ", steps[step][1], step)
         self.assertEqual(self.named(install, "green"), set(steps) - {APPS_STEP, MENU})
         self.assertNotIn("side_menu", self.suite.apps, "nothing configures an app that is not there")
+
+
+SEARCH, ANTIVIRUS = "Índice de búsqueda de texto completo", "Antivirus"
+
+
+class SearchAndAntivirus(InstallTest):
+    """Full-text search and the antivirus as AIO sets them up with their switches: the install builds the search index,
+    whose files provider is the Suite manifest's fork in place of AIO's store copy, and the antivirus deletes the
+    infected files it finds. When AIO turned their apps off, each step fails saying so and every other step goes on."""
+
+    def test_instalar_builds_the_index_and_upgrades_aios_files_provider_to_the_fork(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertTrue(self.suite.indexed)
+        self.assertIn("files_fulltextsearch", [app for app, _ in self.suite.unpacked])
+        self.assertEqual((self.suite.apps["files_fulltextsearch"]["enabled"], self.suite.outdated), ("yes", set()),
+                         "Nextcloud upgraded its copy to the fork as it enabled the app again: no upgrade is pending")
+
+    def test_the_antivirus_deletes_the_infected_files_it_finds(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["files_antivirus"]["av_infected_action"], "delete")
+
+    def test_an_app_aio_turned_off_fails_its_step_saying_so_and_every_other_step_goes_on(self):
+        for app in ("files_antivirus", "fulltextsearch"):
+            self.suite.apps[app]["enabled"] = "no"
+        self.claim()
+        self.install()
+        steps = self.steps(install := self.until("failed"))
+        self.assertIn("ClamAV no respondió a tiempo", steps[ANTIVIRUS][1])
+        self.assertIn("búsqueda de texto completo porque su contenedor no respondió a tiempo", steps[SEARCH][1])
+        self.assertEqual(self.named(install, "failed"), {SEARCH, ANTIVIRUS})
+        self.assertFalse(self.suite.indexed)
+
+    def test_a_corrupted_fork_release_fails_the_search_step_naming_the_fork_and_why(self):
+        fork, package = apps.BY_ID["files_fulltextsearch"], "files_fulltextsearch.tar.gz"
+        tag, assets = next(iter(self.suite.app_releases[fork["repo"]].items()))
+        self.suite.app_releases[fork["repo"]] = {tag: {**assets, package: assets[package] + b"\0"}}
+        self.claim()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[SEARCH]
+        self.assertEqual(status, "failed")
+        self.assertRegex(reason, f"^«{fork['name']}»: [^«]*suma de verificación")
+        self.assertFalse(self.suite.indexed)
 
 
 class Listo(InstallTest):

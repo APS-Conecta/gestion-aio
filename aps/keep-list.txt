@@ -45,3 +45,6 @@ php/templates/layout.twig Spanish «APS Conecta Gestión» text on AIO's page, f
 php/templates/log.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/login.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/setup.twig Spanish «APS Conecta Gestión» text on AIO's page
+# Apps that change upstream's, kept only while they fix a real vanilla problem (Suite manifest, aps/provisionador/apps.json):
+# files_fulltextsearch: kept as the fork APS-Conecta/files-fulltextsearch; the store's Nextcloud 34 release finds no file for a username with a dot (nextcloud/files_fulltextsearch#463, unreleased); drop it once the store's release carries the fix.
+# files_upload_guard: kept as an own app; a rejected infected overwrite deletes the previous clean file (nextcloud/server#62853, open); drop it once a Nextcloud 34 release stages overwrites.
