@@ -24,8 +24,8 @@
       <li aria-current="step"><button type="button" class="step-link" data-step="centro"><span class="step">1</span>Centro</button></li>
       <li><button type="button" class="step-link" data-step="direccion" disabled><span class="step">2</span>Dirección</button></li>
       <li><span class="step">3</span>Equipos</li>
-      <li><span class="step">4</span>Revisar</li>
-      <li><span class="step">5</span>Listo</li>
+      <li><button type="button" class="step-link" data-step="revisar" disabled><span class="step">4</span>Revisar</button></li>
+      <li><button type="button" class="step-link" data-step="listo" disabled><span class="step">5</span>Listo</button></li>
     </ol>
     <p class="fingerprint" id="fingerprint" hidden>Huella SHA-256 del certificado<code></code></p>
   </nav>
@@ -73,8 +73,32 @@
         en el router. Se obtiene por sí sola del servicio de nombres de APS Conecta.</p>
       <p class="address" id="address-name"></p>
       <p class="message" id="address-status" role="status"></p>
-      <div class="actions"><button type="button" id="retry" hidden>Reintentar</button></div>
+      <div class="actions">
+        <button type="button" id="retry" hidden>Reintentar</button>
+        <button type="button" class="primary" id="continue" hidden>Continuar</button>
+      </div>
       <p class="message" id="reach" aria-live="polite"></p>
+    </section>
+
+    <section id="revisar" hidden>
+      <h1>Revisar</h1>
+      <p class="lead">Revise lo que se instalará y presione «Instalar». La instalación sigue por sí sola y esta página
+        muestra su avance.</p>
+      <dl class="summary">
+        <dt>Centro</dt><dd id="summary-centre"></dd>
+        <dt>Dirección</dt><dd id="summary-address"></dd>
+        <dt>Aplicaciones</dt><dd><ul id="summary-components"></ul></dd>
+        <dt>Copias de seguridad</dt><dd id="summary-backups"></dd>
+      </dl>
+      <div class="actions"><button type="button" class="primary" id="install" hidden>Instalar</button></div>
+      <p class="message" id="install-status" role="status"></p>
+      <ul class="progress" id="progress" aria-label="Avance de los contenedores"></ul>
+    </section>
+
+    <section id="listo" hidden>
+      <h1>Listo</h1>
+      <p class="lead">APS Conecta Gestión quedó instalada. El personal del establecimiento la abre en esta dirección:</p>
+      <p class="address"><a id="suite-address"></a></p>
     </section>
   </main>
 </div>

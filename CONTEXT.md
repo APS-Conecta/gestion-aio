@@ -57,6 +57,13 @@ One idempotent unit of the install, with the steps it depends on.
 **End-of-install check**:
 The comparison of the running suite with what the Provisionador declared. «Listo» needs it clean.
 
+**Component** (componente):
+An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
+full-text search and the app server (HaRP). Every other optional container stays off.
+
+**Backup folder** (carpeta de copias de seguridad):
+`/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
+
 **Team** (equipo):
 A sector or program of the establishment. It becomes a group with its folders.
 
