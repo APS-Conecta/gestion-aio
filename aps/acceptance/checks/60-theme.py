@@ -8,9 +8,7 @@ the login page, the dashboard, Files, Talk or the personal settings, which link 
 licence. The custom menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of
 Nextcloud's container, and the support app stays off."""
 
-import json
 import os
-import secrets
 import sys
 import time
 from pathlib import Path
@@ -18,7 +16,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import chromium, machine  # noqa: E402
+from browser import chromium, machine, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 from steps.theme import THEME  # noqa: E402
 
@@ -44,16 +42,8 @@ STATUS = "url => fetch(url, {cache: 'no-store'}).then(r => r.ok ? r.json() : {})
 
 tokens = brand.tokens()
 evidence = Path(os.environ["EVIDENCE"])
-name = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
-                          "/mnt/docker-aio-config/data/configuration.json")).get("domain")
-if not name:
-    sys.exit("the suite has no name: «Dirección» claimed none")
-suite = f"https://{name}"
-password = secrets.token_urlsafe(24)
-print(f"::add-mask::{password}", flush=True)
-machine(f"sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud sh -c 'read -r OC_PASS && "
-        f"export OC_PASS && php occ user:add --password-from-env --display-name \"Persona de prueba\" {PERSON}'",
-        stdin=password + "\n")
+suite = f"https://{suite_name()}"
+password = person(PERSON, "Persona de prueba")
 
 
 def shows(page, label):

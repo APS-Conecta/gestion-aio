@@ -6,20 +6,19 @@ passphrase), says «APS Conecta Gestión» in Spanish: brand in the title and he
 controls, the source-code link, and no «Nextcloud» in what it shows. Its colours are the brand token file's and it
 serves Nunito Sans itself. Its backups go to the backup folder."""
 
-import json
 import os
 import sys
 from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
 import brand  # noqa: E402
-from browser import chromium, machine  # noqa: E402
+from browser import aio_config, chromium, machine  # noqa: E402
 from steps.backups import BACKUP_FOLDER  # noqa: E402
 
 aio = f"https://{os.environ['ADDRESS']}:8080"
 evidence = Path(os.environ["EVIDENCE"])
 # The token behind the suite's login link and the passphrase stay in memory: never printed.
-config = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json"))
+config = aio_config()
 # AIO's own :8080 certificate, as the machine serves it to itself.
 certificate = machine("openssl s_client -connect 127.0.0.1:8080 -noservername < /dev/null 2> /dev/null | openssl x509")
 violet = brand.tokens()["--aps-violet"]
