@@ -1,33 +1,33 @@
-<h2>Get a free domain from deSEC</h2>
-<p><a target="_blank" href="https://desec.io">deSEC</a> offers free dynamic DNS subdomains under <strong>dedyn.io</strong>. AIO can register an account and a subdomain for you automatically. The <strong>caddy</strong> community container will be enabled as a reverse proxy, the <strong>dnsmasq</strong> container will be enabled for local DNS resolution, and the mastercontainer will keep your DNS record up to date automatically.</p>
+<h2>Obtenga un dominio gratuito de deSEC</h2>
+<p><a target="_blank" href="https://desec.io">deSEC</a> ofrece subdominios DNS dinámicos gratuitos bajo <strong>dedyn.io</strong>. AIO puede registrar por usted una cuenta y un subdominio automáticamente. Se activarán el contenedor de la comunidad <strong>caddy</strong> como proxy inverso y el contenedor <strong>dnsmasq</strong> para la resolución DNS local, y el mastercontainer mantendrá actualizado su registro DNS automáticamente.</p>
 {% if desec_awaiting_verification %}
-    <p>⚠️ A deSEC account for <strong>{{ desec_email }}</strong> was requested but it could not be used yet. Please check your inbox: if deSEC sent you a verification email, click the link inside, then click the button below to finish setting up your domain.</p>
-    <p>If this email address already had a deSEC account, no new account was created and no verification email was sent. In that case, enter your existing deSEC password below and try again to log in with it.</p>
+    <p>⚠️ Se solicitó una cuenta de deSEC para <strong>{{ desec_email }}</strong>, pero aún no se pudo usar. Revise su bandeja de entrada: si deSEC le envió un correo de verificación, haga clic en el enlace que contiene y luego en el botón de abajo para terminar de configurar su dominio.</p>
+    <p>Si esta dirección de correo ya tenía una cuenta de deSEC, no se creó una cuenta nueva ni se envió un correo de verificación. En ese caso, ingrese abajo su contraseña actual de deSEC e intente iniciar sesión con ella.</p>
     <form method="POST" action="api/desec/register" class="xhr">
         <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
         <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-        <input type="password" name="desec_password" placeholder="Existing deSEC password (only if you already had an account)" autocomplete="current-password" />
-        <input type="text" name="desec_slug" value="{{ desec_slug|default('') }}" placeholder="my-nextcloud (optional)" pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Only lowercase letters, digits and hyphens (1–63 characters). No leading or trailing hyphen." />
-        <input type="submit" value="I have verified my email – register domain" />
+        <input type="password" name="desec_password" placeholder="Contraseña actual de deSEC (solo si ya tenía una cuenta)" autocomplete="current-password" />
+        <input type="text" name="desec_slug" value="{{ desec_slug|default('') }}" placeholder="mi-dominio (opcional)" pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Solo letras minúsculas, dígitos y guiones (1 a 63 caracteres), sin guion al inicio ni al final." />
+        <input type="submit" value="Ya verifiqué mi correo: registrar el dominio" />
     </form>
 {% elseif desec_account_registered %}
-    <p>Your deSEC account (<strong>{{ desec_email }}</strong>) was registered successfully but the domain could not be registered. Please enter a desired subdomain slug (the part before <code>.dedyn.io</code>) and try again, or leave it blank for a random one.</p>
+    <p>Su cuenta de deSEC (<strong>{{ desec_email }}</strong>) se registró correctamente, pero no se pudo registrar el dominio. Ingrese el subdominio que desea (la parte antes de <code>.dedyn.io</code>) e inténtelo de nuevo, o déjelo en blanco para obtener uno al azar.</p>
     <form method="POST" action="api/desec/register" class="xhr">
         <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
         <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-        <input type="text" name="desec_slug" value="{{ desec_slug|default('') }}" placeholder="my-nextcloud (optional)" pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Only lowercase letters, digits and hyphens (1–63 characters). No leading or trailing hyphen." />
-        <input type="submit" value="Register free domain via deSEC" />
+        <input type="text" name="desec_slug" value="{{ desec_slug|default('') }}" placeholder="mi-dominio (opcional)" pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Solo letras minúsculas, dígitos y guiones (1 a 63 caracteres), sin guion al inicio ni al final." />
+        <input type="submit" value="Registrar un dominio gratuito con deSEC" />
     </form>
 {% else %}
-    <p>Please enter your email address. You can also enter a desired subdomain slug (the part before <code>.dedyn.io</code>); leave it blank for a random one.</p>
-    <p>If you already have a deSEC account for this email address, enter your deSEC password in the optional password field below to log in with it instead of creating a new account. When creating a new account, deSEC will email you a verification link that you must click before the domain can be set up.</p>
+    <p>Ingrese su dirección de correo. También puede ingresar el subdominio que desea (la parte antes de <code>.dedyn.io</code>); déjelo en blanco para obtener uno al azar.</p>
+    <p>Si ya tiene una cuenta de deSEC con esta dirección de correo, ingrese su contraseña de deSEC en el campo opcional de abajo para iniciar sesión con ella en lugar de crear una cuenta nueva. Al crear una cuenta nueva, deSEC le enviará por correo un enlace de verificación en el que debe hacer clic antes de poder configurar el dominio.</p>
     <form method="POST" action="api/desec/register" class="xhr">
         <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
         <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-        <input type="email" name="desec_email" placeholder="your@email.com" required />
-        <input type="password" name="desec_password" placeholder="deSEC password (only if already registered)" autocomplete="current-password" />
-        <input type="text" name="desec_slug" value="{{ desec_slug|default('') }}" placeholder="my-nextcloud (optional)" pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Only lowercase letters, digits and hyphens (1–63 characters). No leading or trailing hyphen." />
-        <input type="submit" value="Register free domain via deSEC" />
+        <input type="email" name="desec_email" placeholder="su@correo.cl" required />
+        <input type="password" name="desec_password" placeholder="Contraseña de deSEC (solo si ya está registrado)" autocomplete="current-password" />
+        <input type="text" name="desec_slug" value="{{ desec_slug|default('') }}" placeholder="mi-dominio (opcional)" pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?" title="Solo letras minúsculas, dígitos y guiones (1 a 63 caracteres), sin guion al inicio ni al final." />
+        <input type="submit" value="Registrar un dominio gratuito con deSEC" />
     </form>
-    <p><strong>Note:</strong> By submitting this form you agree to the <a target="_blank" href="https://desec.io/terms">deSEC terms of service</a>. The registered domain and your deSEC account credentials are stored in the AIO configuration. After registration, set your router's DHCP DNS server to this machine's local IP address so LAN devices resolve the domain locally (see the <a target="_blank" href="https://github.com/nextcloud/all-in-one/tree/main/community-containers/dnsmasq">dnsmasq documentation</a>). Alternatively adjust the hosts files on your clients so that they can reach the server using the local ip-address.</p>
+    <p><strong>Nota:</strong> al enviar este formulario, acepta los <a target="_blank" href="https://desec.io/terms">términos de servicio de deSEC</a>. El dominio registrado y las credenciales de su cuenta de deSEC se guardan en la configuración de AIO. Después del registro, configure como servidor DNS del DHCP de su router la dirección IP local de este equipo, para que los dispositivos de la red local resuelvan el dominio localmente (vea la <a target="_blank" href="https://github.com/nextcloud/all-in-one/tree/main/community-containers/dnsmasq">documentación de dnsmasq</a>). Como alternativa, ajuste el archivo hosts de sus equipos para que lleguen al servidor por su dirección IP local.</p>
 {% endif %}

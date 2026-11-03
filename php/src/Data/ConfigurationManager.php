@@ -623,27 +623,27 @@ class ConfigurationManager
     public function setDomain(string $domain, bool $skipDomainValidation) : void {
         // Validate that at least one dot is contained
         if (!str_contains($domain, '.')) {
-            throw new InvalidSettingConfigurationException("Domain must contain at least one dot!");
+            throw new InvalidSettingConfigurationException("¡El dominio debe contener al menos un punto!");
         }
 
         // Validate that no slashes are contained
         if (str_contains($domain, '/')) {
-            throw new InvalidSettingConfigurationException("Domain must not contain slashes!");
+            throw new InvalidSettingConfigurationException("¡El dominio no debe contener barras!");
         }
 
         // Validate that no colons are contained
         if (str_contains($domain, ':')) {
-            throw new InvalidSettingConfigurationException("Domain must not contain colons!");
+            throw new InvalidSettingConfigurationException("¡El dominio no debe contener dos puntos!");
         }
 
         // Validate domain
         if (filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-            throw new InvalidSettingConfigurationException("Domain is not a valid domain!");
+            throw new InvalidSettingConfigurationException("¡El dominio no es válido!");
         }
 
         // Validate that it is not an IP-address
         if(filter_var($domain, FILTER_VALIDATE_IP)) {
-            throw new InvalidSettingConfigurationException("Please enter a domain and not an IP-address!");
+            throw new InvalidSettingConfigurationException("¡Ingrese un dominio y no una dirección IP!");
         }
 
         // Skip domain validation if opted in to do so
@@ -664,7 +664,7 @@ class ConfigurationManager
 
             // Validate IP
             if (!filter_var($dnsRecordIP, FILTER_VALIDATE_IP)) {
-                throw new InvalidSettingConfigurationException("DNS config is not set for this domain or the domain is not a valid domain! (It was found to be set to '" . $dnsRecordIP . "')");
+                throw new InvalidSettingConfigurationException("¡El DNS de este dominio no está configurado o el dominio no es válido! (Se encontró configurado en '" . $dnsRecordIP . "')");
             }
 
             // Get the apache port
@@ -672,7 +672,7 @@ class ConfigurationManager
 
             if (!filter_var($dnsRecordIP, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
                 if ($port === '443') {
-                    throw new InvalidSettingConfigurationException("It seems like the ip-address of the domain is set to an internal or reserved ip-address. This is not supported by the domain validation. (It was found to be set to '" . $dnsRecordIP . "'). Please set it to a public ip-address so that the domain validation can work or skip the domain validation!");
+                    throw new InvalidSettingConfigurationException("Parece que la dirección IP del dominio es una dirección interna o reservada, lo que la validación del dominio no admite. (Se encontró configurada en '" . $dnsRecordIP . "'). ¡Configure una dirección IP pública para que la validación del dominio funcione u omita la validación del dominio!");
                 } else {
                     error_log("Info: It seems like the ip-address of " . $domain . " is set to an internal or reserved ip-address. (It was found to be set to '" . $dnsRecordIP . "')");
                 }
@@ -683,7 +683,7 @@ class ConfigurationManager
             if ($connection) {
                 fclose($connection);
             } else {
-                throw new InvalidSettingConfigurationException("The domain is not reachable on Port 443 from within this container. Have you opened port 443/tcp in your router/firewall? If yes is the problem most likely that the router or firewall forbids local access to your domain. Or in other words: NAT loopback (Hairpinning) does not seem to work in your network. You can work around that by setting up a local DNS server and utilizing Split-Brain-DNS and configuring the daemon.json file of your docker daemon to use the local DNS server.");
+                throw new InvalidSettingConfigurationException("No se puede acceder al dominio en el puerto 443 desde este contenedor. ¿Abrió el puerto 443/tcp en su router o firewall? Si lo hizo, lo más probable es que el router o el firewall impidan el acceso local a su dominio; en otras palabras, el NAT loopback (hairpinning) no parece funcionar en su red. Puede evitarlo con un servidor DNS local con Split-Brain-DNS y configurando el archivo daemon.json de su daemon de Docker para que use ese servidor DNS local.");
             }
 
             // Get Instance ID
@@ -706,16 +706,16 @@ class ConfigurationManager
                 $response = str_replace("\n", "", (string)$guzzleResponse->getBody());
             } catch (TransferException $e) {
                 $response = '';
-                $errorMessage = 'The error message was: ' . $e->getMessage();
+                $errorMessage = 'El mensaje de error fue: ' . $e->getMessage();
             }
 
             if ($response !== $instanceID) {
                 error_log('The response of the connection attempt to "' . $testUrl . '" was: ' . $response);
                 error_log('Expected was: ' . $instanceID);
                 error_log($errorMessage);
-                $notice = "Domain does not point to this server or the reverse proxy is not configured correctly. See the mastercontainer logs for more details. ('sudo docker logs -f nextcloud-aio-mastercontainer')";
+                $notice = "El dominio no apunta a este servidor o el proxy inverso no está bien configurado. Vea más detalles en los registros del mastercontainer. ('sudo docker logs -f nextcloud-aio-mastercontainer')";
                 if ($port === '443') {
-                    $notice .= " If you should be using Cloudflare, make sure to disable the Cloudflare Proxy feature as it might block the domain validation. Same for any other firewall or service that blocks unencrypted access on port 443.";
+                    $notice .= " Si usa Cloudflare, desactive la función Cloudflare Proxy, ya que podría bloquear la validación del dominio. Lo mismo vale para cualquier otro firewall o servicio que bloquee el acceso sin cifrar en el puerto 443.";
                 } else {
                     error_log('Please follow https://github.com/nextcloud/all-in-one/blob/main/reverse-proxy.md#how-to-debug in order to debug things!');
                 }
@@ -753,9 +753,9 @@ class ConfigurationManager
 
     private function validateBorgLocationVars(string $location, string $repo) : void {
         if ($location === '' && $repo === '') {
-            throw new InvalidSettingConfigurationException("Please enter a path or a remote repo url!");
+            throw new InvalidSettingConfigurationException("¡Ingrese una ruta o una URL de repositorio remoto!");
         } elseif ($location !== '' && $repo !== '') {
-            throw new InvalidSettingConfigurationException("Location and remote repo url are mutually exclusive!");
+            throw new InvalidSettingConfigurationException("¡La ubicación y la URL del repositorio remoto son excluyentes!");
         }
 
         if ($location !== '') {
@@ -768,25 +768,25 @@ class ConfigurationManager
             }
 
             if (!$isValidPath) {
-                throw new InvalidSettingConfigurationException("The path must start with '/', must not end with '/' and must not contain '//', '/./', '/../' or '/,/'! Another option is to use the docker volume name 'nextcloud_aio_backupdir'.");
+                throw new InvalidSettingConfigurationException("¡La ruta debe comenzar con '/', no debe terminar con '/' y no debe contener '//', '/./', '/../' ni '/,/'! Otra opción es usar el nombre de volumen de Docker 'nextcloud_aio_backupdir'.");
             }
 
             // Prevent backup to be contained in Nextcloud Datadir as this will delete the backup archive upon restore
             // See https://github.com/nextcloud/all-in-one/issues/6607
             if (str_starts_with($location . '/', rtrim($this->nextcloudDatadirMount, '/') . '/')) {
-                throw new InvalidSettingConfigurationException("The path must not be a children of or equal to NEXTCLOUD_DATADIR, which is currently set to " . $this->nextcloudDatadirMount);
+                throw new InvalidSettingConfigurationException("La ruta no debe estar dentro de NEXTCLOUD_DATADIR ni ser igual a él, que actualmente es " . $this->nextcloudDatadirMount);
             }
 
             foreach (['/var/lib/docker', '/var/snap/docker', '/var/lib/containerd'] as $dockerDir) {
                 if (str_starts_with($location . '/', $dockerDir . '/')) {
-                    throw new InvalidSettingConfigurationException("The path must not be a children of or equal to '" . $dockerDir . "'! Please use the docker volume name 'nextcloud_aio_backupdir' instead.");
+                    throw new InvalidSettingConfigurationException("¡La ruta no debe estar dentro de '" . $dockerDir . "' ni ser igual a ella! Use en su lugar el nombre de volumen de Docker 'nextcloud_aio_backupdir'.");
                 }
             }
 
             // Prevent backup to be written into system directories
             foreach (['/bin', '/boot', '/dev', '/etc', '/lib', '/lib32', '/lib64', '/libx32', '/proc', '/sbin', '/sys', '/usr'] as $systemDir) {
                 if (str_starts_with($location . '/', $systemDir . '/')) {
-                    throw new InvalidSettingConfigurationException("The path must not be a children of or equal to the system directory '" . $systemDir . "'!");
+                    throw new InvalidSettingConfigurationException("¡La ruta no debe estar dentro del directorio del sistema '" . $systemDir . "' ni ser igual a él!");
                 }
             }
 
@@ -796,13 +796,13 @@ class ConfigurationManager
     }
 
     private function validateBorgRemoteRepo(string $repo) : void {
-        $commonMsg = "For valid urls, see the remote examples at https://borgbackup.readthedocs.io/en/stable/usage/general.html#repository-urls";
+        $commonMsg = "Para ver URL válidas, revise los ejemplos remotos en https://borgbackup.readthedocs.io/en/stable/usage/general.html#repository-urls";
         if ($repo === "") {
             // Ok, remote repo is optional
         } elseif (!str_contains($repo, "@")) {
-            throw new InvalidSettingConfigurationException("The remote repo must contain '@'. $commonMsg");
+            throw new InvalidSettingConfigurationException("El repositorio remoto debe contener '@'. $commonMsg");
         } elseif (!str_contains($repo, ":")) {
-            throw new InvalidSettingConfigurationException("The remote repo must contain ':'. $commonMsg");
+            throw new InvalidSettingConfigurationException("El repositorio remoto debe contener ':'. $commonMsg");
         }
     }
 
@@ -828,7 +828,7 @@ class ConfigurationManager
         $this->validateBorgLocationVars($location, $repo);
 
         if ($password === '') {
-            throw new InvalidSettingConfigurationException("Please enter the password!");
+            throw new InvalidSettingConfigurationException("¡Ingrese la contraseña!");
         }
 
         $this->startTransaction();
@@ -844,23 +844,23 @@ class ConfigurationManager
      */
     public function changeMasterPassword(string $currentPassword, string $newPassword) : void {
         if ($currentPassword === '') {
-            throw new InvalidSettingConfigurationException("Please enter your current password.");
+            throw new InvalidSettingConfigurationException("Ingrese su frase de contraseña actual.");
         }
 
         if (!hash_equals($this->password, $currentPassword)) {
-            throw new InvalidSettingConfigurationException("The entered current password is not correct.");
+            throw new InvalidSettingConfigurationException("La frase de contraseña actual ingresada no es correcta.");
         }
 
         if ($newPassword === '') {
-            throw new InvalidSettingConfigurationException("Please enter a new password.");
+            throw new InvalidSettingConfigurationException("Ingrese una nueva frase de contraseña.");
         }
 
         if (strlen($newPassword) < 24) {
-            throw new InvalidSettingConfigurationException("New passwords must be >= 24 digits.");
+            throw new InvalidSettingConfigurationException("La nueva frase de contraseña debe tener al menos 24 caracteres.");
         }
 
         if (!preg_match("#^[a-zA-Z0-9 ]+$#", $newPassword)) {
-            throw new InvalidSettingConfigurationException('Not allowed characters in the new password.');
+            throw new InvalidSettingConfigurationException('La nueva frase de contraseña contiene caracteres no permitidos.');
         }
 
         // All checks pass so set the password
@@ -872,7 +872,7 @@ class ConfigurationManager
      */
     private function writeConfig() : void {
         if(!is_dir(DataConst::GetDataDirectory())) {
-            throw new InvalidSettingConfigurationException(DataConst::GetDataDirectory() . " does not exist! Something was set up falsely!");
+            throw new InvalidSettingConfigurationException(DataConst::GetDataDirectory() . " no existe. ¡Algo se configuró mal!");
         }
         // Shouldn't happen, but as a precaution we won't write an empty config to disk.
         if ($this->config === []) {
@@ -882,7 +882,7 @@ class ConfigurationManager
         $content = json_encode($this->config, JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT|JSON_THROW_ON_ERROR);
         $size = strlen($content) + 10240;
         if ($df !== false && (int)$df < $size) {
-            throw new InvalidSettingConfigurationException(DataConst::GetDataDirectory() . " does not have enough space for writing the config file! Not writing it back!");
+            throw new InvalidSettingConfigurationException(DataConst::GetDataDirectory() . " no tiene espacio suficiente para escribir el archivo de configuración. ¡No se escribió!");
         }
         // Write to a temp file first to avoid truncating the config file if the
         // disk fills up mid-write. rename() is atomic on POSIX filesystems, so the
@@ -893,11 +893,11 @@ class ConfigurationManager
             if (file_exists($tempFile)) {
                 unlink($tempFile);
             }
-            throw new InvalidSettingConfigurationException("Failed to write temporary config file: " . $tempFile);
+            throw new InvalidSettingConfigurationException("No se pudo escribir el archivo de configuración temporal: " . $tempFile);
         }
         if (!rename($tempFile, DataConst::GetConfigFile())) {
             unlink($tempFile);
-            throw new InvalidSettingConfigurationException("Failed to rename " . $tempFile . " to " . DataConst::GetConfigFile());
+            throw new InvalidSettingConfigurationException("No se pudo renombrar " . $tempFile . " a " . DataConst::GetConfigFile());
         }
         $this->config = [];
     }
@@ -953,11 +953,11 @@ class ConfigurationManager
      */
     public function setDailyBackupTime(string $time, bool $enableAutomaticUpdates, bool $successNotification) : void {
         if ($time === "") {
-            throw new InvalidSettingConfigurationException("The daily backup time must not be empty!");
+            throw new InvalidSettingConfigurationException("¡La hora de la copia de seguridad diaria no debe estar vacía!");
         }
 
         if (!preg_match("#^[0-1][0-9]:[0-5][0-9]$#", $time) && !preg_match("#^2[0-3]:[0-5][0-9]$#", $time)) {
-            throw new InvalidSettingConfigurationException("You did not enter a correct time! One correct example is '04:00'!");
+            throw new InvalidSettingConfigurationException("¡No ingresó una hora correcta! Un ejemplo correcto es '04:00'.");
         }
 
         if ($enableAutomaticUpdates === false) {
@@ -1035,7 +1035,7 @@ class ConfigurationManager
             $entry = trim($entry);
             if ($entry !== "") {
                 if (!preg_match("#^/[.0-9a-zA-Z/_-]+$#", $entry) && !preg_match("#^[.0-9a-zA-Z_-]+$#", $entry)) {
-                    throw new InvalidSettingConfigurationException("You entered unallowed characters! Problematic is " . $entry);
+                    throw new InvalidSettingConfigurationException("¡Ingresó caracteres no permitidos! El problema está en " . $entry);
                 }
                 $validDirectories .= rtrim($entry, '/') . PHP_EOL;
             }
@@ -1071,11 +1071,11 @@ class ConfigurationManager
      */
     private function validateTimezone(string $timezone) : void {
         if ($timezone === "") {
-            throw new InvalidSettingConfigurationException("The timezone must not be empty!");
+            throw new InvalidSettingConfigurationException("¡La zona horaria no debe estar vacía!");
         }
 
         if (!preg_match("#^[a-zA-Z0-9_\-\/\+]+$#", $timezone)) {
-            throw new InvalidSettingConfigurationException("The entered timezone does not seem to be a valid timezone!");
+            throw new InvalidSettingConfigurationException("¡La zona horaria ingresada no parece ser válida!");
         }
     }
 
@@ -1114,11 +1114,11 @@ class ConfigurationManager
      */
     private function validateCollaboraDictionaries(string $CollaboraDictionaries) : void {
         if ($CollaboraDictionaries === "") {
-            throw new InvalidSettingConfigurationException("The dictionaries must not be empty!");
+            throw new InvalidSettingConfigurationException("¡Los diccionarios no deben estar vacíos!");
         }
 
         if (!preg_match("#^[a-zA-Z_ ]+$#", $CollaboraDictionaries)) {
-            throw new InvalidSettingConfigurationException("The entered dictionaries do not seem to be a valid!");
+            throw new InvalidSettingConfigurationException("¡Los diccionarios ingresados no parecen ser válidos!");
         }
     }
 
@@ -1134,11 +1134,11 @@ class ConfigurationManager
      */
     private function validateCollaboraAdditionalOptions(string $additionalCollaboraOptions) : void {
         if ($additionalCollaboraOptions === "") {
-            throw new InvalidSettingConfigurationException("The additional options must not be empty!");
+            throw new InvalidSettingConfigurationException("¡Las opciones adicionales no deben estar vacías!");
         }
 
         if (!preg_match("#^--o:#", $additionalCollaboraOptions)) {
-            throw new InvalidSettingConfigurationException("The entered options must start with '--o:'. So the config does not seem to be a valid!");
+            throw new InvalidSettingConfigurationException("Las opciones ingresadas deben comenzar con '--o:'. ¡La configuración no parece ser válida!");
         }
     }
 

@@ -5,23 +5,23 @@
         <svg class="nextcloud-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 142 100" width="142" height="100">
             <use href="img/nextcloud-logo.svg#logo"></use>
             <use href="img/nextcloud-logo.svg#Nextcloud"></use>
-            <text x="10" y="50" fill="var(--color-nextcloud-logo)" class="fallback-text">Nextcloud Logo</text>
+            <text x="10" y="50" fill="var(--color-nextcloud-logo)" class="fallback-text">Logotipo de APS Conecta Gestión</text>
         </svg>
-        <h1>Nextcloud AIO Login</h1>
+        <h1>Inicio de sesión en APS Conecta Gestión AIO</h1>
         {% if is_login_allowed == true %}
             {% if login_unblocked_notice %}
                 <p>{{ login_unblocked_notice }}</p>
             {% endif %}
-            <p>Log in using your Nextcloud AIO passphrase:</p>
+            <p>Inicie sesión con su frase de contraseña de APS Conecta Gestión AIO:</p>
             <form method="POST" action="api/auth/login" class="xhr">
-                <input type="password" autocomplete="current-password" name="password" placeholder="Password" id="master-password" data-input-show-password>
+                <input type="password" autocomplete="current-password" name="password" placeholder="Frase de contraseña" id="master-password" data-input-show-password>
                 <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
                 <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-                <input type="submit" class="button" value="Log in" />
+                <input type="submit" class="button" value="Iniciar sesión" />
             </form>
         {% else %}
-            <p>The direct login is blocked since Nextcloud is running.<br>Please use the <a target="_blank" href="https://github.com/nextcloud/all-in-one#how-to-easily-log-in-to-the-aio-interface"><strong>login link from your Nextcloud</strong></a> to unblock it.<br><br>
-            If that is not possible, you can unblock the direct login by running<br><strong>sudo docker stop nextcloud-aio-apache</strong></p>
+            <p>El inicio de sesión directo está bloqueado porque APS Conecta Gestión está en ejecución.<br>Use el <a target="_blank" href="https://github.com/nextcloud/all-in-one#how-to-easily-log-in-to-the-aio-interface"><strong>enlace de inicio de sesión desde APS Conecta Gestión</strong></a> para desbloquearlo.<br><br>
+            Si eso no es posible, puede desbloquear el inicio de sesión directo ejecutando<br><strong>sudo docker stop nextcloud-aio-apache</strong></p>
         {% endif %}
     </div>
     <script type="text/javascript" src="before-unload.js"></script>

@@ -42,7 +42,7 @@ readonly class LoginController {
             return $response->withStatus(403);
         }
 
-        $response->getBody()->write("The password is incorrect.");
+        $response->getBody()->write("La frase de contraseña es incorrecta.");
         return $response->withHeader('Location', '.')->withStatus(422);
     }
 

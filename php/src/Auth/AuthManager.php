@@ -105,7 +105,7 @@ readonly class AuthManager {
         if (!$this->IsLoginUnblockedForSession()) {
             return null;
         }
-        return "This login form is now available to you for up to " . (self::LOGIN_UNBLOCK_SECONDS / 60) . " minutes and max. " . self::LOGIN_UNBLOCK_MAX_FAILED_ATTEMPTS . " attempts.";
+        return "Este formulario de inicio de sesión está disponible para usted durante un máximo de " . (self::LOGIN_UNBLOCK_SECONDS / 60) . " minutos y " . self::LOGIN_UNBLOCK_MAX_FAILED_ATTEMPTS . " intentos.";
     }
 
     public function IsLoginUnblockedForSession() : bool {

@@ -21,6 +21,6 @@ $nextcloudContainer = $containerDefinitionFetcher->GetContainerById($id);
 $isNextcloudImageOutdated = $dockerActionManager->isNextcloudImageOutdated();
 
 if ($isNextcloudImageOutdated === true) {
-    $dockerActionManager->sendNotification($nextcloudContainer, 'AIO is outdated!', 'Please open the AIO interface to update it. If you do not want to do it manually each time, you can enable the daily backup feature from the AIO interface which automatically updates all containers.');
+    $dockerActionManager->sendNotification($nextcloudContainer, '¡APS Conecta Gestión está desactualizado!', 'Abra la interfaz de AIO de APS Conecta Gestión para actualizarlo. Si no desea hacerlo manualmente cada vez, active en esa interfaz la copia de seguridad diaria, que actualiza automáticamente todos los contenedores.');
 }
 

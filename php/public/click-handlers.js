@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const toggle = document.createElement('button');
         toggle.type = 'button';
         toggle.className = 'password-toggle';
-        toggle.setAttribute('aria-label', 'Show passphrase');
+        toggle.setAttribute('aria-label', 'Mostrar la frase de contraseña');
         toggle.setAttribute('aria-pressed', 'false');
         if (passwordField.id) {
             toggle.setAttribute('aria-controls', passwordField.id);
@@ -26,7 +26,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const reveal = passwordField.type === 'password';
             passwordField.type = reveal ? 'text' : 'password';
             toggle.setAttribute('aria-pressed', String(reveal));
-            toggle.setAttribute('aria-label', reveal ? 'Hide passphrase' : 'Show passphrase');
+            toggle.setAttribute('aria-label', reveal ? 'Ocultar la frase de contraseña' : 'Mostrar la frase de contraseña');
         });
         wrapper.appendChild(toggle);
     });

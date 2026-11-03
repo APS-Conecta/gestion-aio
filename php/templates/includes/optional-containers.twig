@@ -1,17 +1,17 @@
-<h2>Optional containers</h2>
-<p>In this section you can enable or disable optional containers.</p>
+<h2>Contenedores opcionales</h2>
+<p>En esta sección puede activar o desactivar contenedores opcionales.</p>
 {% if isAnyRunning == true %}
-    <p><strong>Please note:</strong> You can enable or disable the options below only when your containers are stopped.</p>
+    <p><strong>Tenga en cuenta:</strong> solo puede activar o desactivar las opciones de abajo cuando sus contenedores estén detenidos.</p>
 {% else %}
-    <p><strong>Please note:</strong> Make sure to save your changes by clicking <strong>Save changes</strong> below the list of optional containers. The changes will not be auto-saved.</p>
+    <p><strong>Tenga en cuenta:</strong> guarde sus cambios con <strong>Guardar cambios</strong>, bajo la lista de contenedores opcionales. Los cambios no se guardan automáticamente.</p>
 {% endif %}
 <form id="options-form" method="POST" action="api/configuration" class="xhr">
     <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
     <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
     <input type="hidden" name="options-form" value="options-form">
-    <h3>Office Suite</h3>
+    <h3>Suite de oficina</h3>
     {% if isAnyRunning == false %}
-        <p>Choose your preferred office suite. Only one can be enabled at a time.</p>
+        <p>Elija su suite de oficina preferida. Solo puede activar una a la vez.</p>
     {% endif %}
     <div class="office-suite-cards">
         <input
@@ -27,8 +27,8 @@
         <label class="office-card{{ isAnyRunning ? ' office-card-disabled' : '' }}" for="office-eurooffice">
             <div class="office-card-header">
                 <div>
-                    <h4>Nextcloud Office</h4>
-                    <p class="office-powered-by">powered by Euro-Office</p>
+                    <h4>Oficina</h4>
+                    <p class="office-powered-by">con Euro-Office</p>
                 </div>
                 <svg class="office-checkmark" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="12" cy="12" r="10" fill="var(--color-nextcloud-blue)"/>
@@ -36,16 +36,16 @@
                 </svg>
             </div>
             <ul class="office-features">
-                <li>Good Nextcloud integration</li>
-                <li>Open source</li>
-                <li>Best performance</li>
-                <li>Limited ODF compatibility</li>
-                <li>Best Microsoft compatibility</li>
-                <li>Good security</li>
+                <li>Buena integración con APS Conecta Gestión</li>
+                <li>Código abierto</li>
+                <li>Mejor rendimiento</li>
+                <li>Compatibilidad limitada con ODF</li>
+                <li>Mejor compatibilidad con Microsoft</li>
+                <li>Buena seguridad</li>
             </ul>
             {% if isAnyRunning == false %}
                 <a href="https://github.com/Euro-Office" target="_blank" class="office-learn-more" data-stop-event-propagation="true">
-                    Learn more
+                    Más información
                 </a>
             {% endif %}
         </label>
@@ -62,8 +62,8 @@
         <label class="office-card{{ isAnyRunning ? ' office-card-disabled' : '' }}" for="office-collabora">
             <div class="office-card-header">
                 <div>
-                    <h4>Nextcloud Office</h4>
-                    <p class="office-powered-by">powered by Collabora Online</p>
+                    <h4>Oficina</h4>
+                    <p class="office-powered-by">con Collabora Online</p>
                 </div>
                 <svg class="office-checkmark" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="12" cy="12" r="10" fill="var(--color-nextcloud-blue)"/>
@@ -71,17 +71,17 @@
                 </svg>
             </div>
             <ul class="office-features">
-                <li>Best Nextcloud integration</li>
-                <li>Open source</li>
-                <li>Good performance</li>
-                <li>Best ODF compatibility</li>
-                <li>Best support for legacy files</li>
-                <li>Best security: documents never leave your server</li>
+                <li>Mejor integración con APS Conecta Gestión</li>
+                <li>Código abierto</li>
+                <li>Buen rendimiento</li>
+                <li>Mejor compatibilidad con ODF</li>
+                <li>Mejor soporte para archivos antiguos</li>
+                <li>Mejor seguridad: los documentos nunca salen de su servidor</li>
             </ul>
             {% if isAnyRunning == false %}
                 <a href="https://www.collaboraoffice.com/code/" target="_blank" class="office-learn-more" data-stop-event-propagation="true">
-                    Learn more
-                    <img src="img/collabora.svg" alt="Collabora Logo" />
+                    Más información
+                    <img src="img/collabora.svg" alt="Logotipo de Collabora" />
                 </a>
             {% endif %}
         </label>
@@ -98,8 +98,8 @@
         <label class="office-card{{ isAnyRunning ? ' office-card-disabled' : '' }}" for="office-onlyoffice">
             <div class="office-card-header">
                 <div>
-                    <h4>ONLYOFFICE (deprecated)</h4>
-                    <p class="office-powered-by">by Ascensio System SIA</p>
+                    <h4>ONLYOFFICE (obsoleto)</h4>
+                    <p class="office-powered-by">de Ascensio System SIA</p>
                 </div>
                 <svg class="office-checkmark" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="12" cy="12" r="10" fill="var(--color-nextcloud-blue)"/>
@@ -107,17 +107,17 @@
                 </svg>
             </div>
             <ul class="office-features">
-                <li>OK Nextcloud integration</li>
-                <li>Open Core</li>
-                <li>Best performance</li>
-                <li>Limited ODF compatibility</li>
-                <li>Best Microsoft compatibility</li>
-                <li>Good security</li>
+                <li>Integración aceptable con APS Conecta Gestión</li>
+                <li>Núcleo abierto (Open Core)</li>
+                <li>Mejor rendimiento</li>
+                <li>Compatibilidad limitada con ODF</li>
+                <li>Mejor compatibilidad con Microsoft</li>
+                <li>Buena seguridad</li>
             </ul>
             {% if isAnyRunning == false %}
                 <a href="https://www.onlyoffice.com/" target="_blank" class="office-learn-more" data-stop-event-propagation="true">
-                    Learn more
-                    <img src="img/onlyoffice.svg" alt="Onlyoffice Logo" />
+                    Más información
+                    <img src="img/onlyoffice.svg" alt="Logotipo de Onlyoffice" />
                 </a>
             {% endif %}
         </label>
@@ -135,14 +135,14 @@
                 {% endif %}
             >
             <label class="office-none-label" for="office-none">
-                <img src="img/office-none.svg" alt="Disable Office icon" />
-                Disable office suite
+                <img src="img/office-none.svg" alt="Ícono de oficina desactivada" />
+                Desactivar la suite de oficina
             </label>
         </div>
     {% endif %}
     <input type="hidden" id="initial-office-suite" value="{{ office_suite }}">
-    <input class="options-form-submit" type="submit" value="Save changes" />
-    <h3>Additional Optional Containers</h3>
+    <input class="options-form-submit" type="submit" value="Guardar cambios" />
+    <h3>Otros contenedores opcionales</h3>
     <p>
         <input
             type="checkbox"
@@ -155,7 +155,7 @@
                 data-initial-state="false"
             {% endif %}
         >
-        <label for="clamav">ClamAV (Antivirus backend for Nextcloud, needs ~1GB additional RAM)</label>
+        <label for="clamav">ClamAV (antivirus para APS Conecta Gestión; requiere ~1 GB de RAM adicional)</label>
     </p>
     <p>
         <input
@@ -170,9 +170,9 @@
             {% endif %}
         >
         <label for="fulltextsearch">
-            Fulltextsearch (needs ~1GB additional RAM, <a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/5768">does not work on Kernels without Seccomp</a>)
+            Fulltextsearch (búsqueda de texto completo; requiere ~1 GB de RAM adicional y <a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/5768">no funciona en kernels sin Seccomp</a>)
             {% if is_fulltextsearch_enabled == false %}
-                . <strong>Please note:</strong> the initial indexing can take a long time during which Nextcloud will be unavailable
+                . <strong>Tenga en cuenta:</strong> la indexación inicial puede tardar mucho y, durante ese tiempo, APS Conecta Gestión no estará disponible
             {% endif %}
         </label>
     </p>
@@ -188,7 +188,7 @@
                 data-initial-state="false"
             {% endif %}
         >
-        <label for="imaginary">Imaginary (for previews of heic, heif, illustrator, pdf, svg, tiff and webp. Imaginary is currently <a target="_blank" href="https://github.com/nextcloud/server/issues/34262">incompatible with server-side-encryption</a>)</label>
+        <label for="imaginary">Imaginary (vistas previas de heic, heif, illustrator, pdf, svg, tiff y webp. Imaginary es actualmente <a target="_blank" href="https://github.com/nextcloud/server/issues/34262">incompatible con el cifrado del lado del servidor</a>)</label>
     </p>
     <p>
         <input
@@ -202,7 +202,7 @@
                 data-initial-state="false"
             {% endif %}
         >
-        <label for="talk">Nextcloud Talk (needs ports {{ talk_port }}/TCP and {{ talk_port }}/UDP open/forwarded in your firewall/router)</label>
+        <label for="talk">Talk (requiere los puertos {{ talk_port }}/TCP y {{ talk_port }}/UDP abiertos o reenviados en su firewall o router)</label>
     </p>
     <p>
         <input
@@ -216,7 +216,7 @@
                 data-initial-state="false"
             {% endif %}
         >
-        <label for="talk-recording">Nextcloud Talk Recording-server (needs Nextcloud Talk being enabled and ~1GB additional RAM and ~2 additional vCPUs)</label>
+        <label for="talk-recording">Servidor de grabación de Talk (requiere Talk activado, ~1 GB de RAM adicional y ~2 vCPU adicionales)</label>
     </p>
 
     <p>
@@ -231,7 +231,7 @@
                 data-initial-state="false"
             {% endif %}
         >
-        <label for="docker-socket-proxy">Docker Socket Proxy (needed for <a target="_blank" href="https://github.com/cloud-py-api/app_api#nextcloud-appapi">Nextcloud App API</a>) ⚠️ The docker socket proxy container is deprecated. Please use the HaRP (High-availability Reverse Proxy for Nextcloud ExApps) instead!</label>
+        <label for="docker-socket-proxy">Docker Socket Proxy (necesario para <a target="_blank" href="https://github.com/cloud-py-api/app_api#nextcloud-appapi">App API</a>) ⚠️ El contenedor Docker Socket Proxy está obsoleto. Use HaRP (proxy inverso de alta disponibilidad para ExApps) en su lugar.</label>
     </p>
     <p>
         <input
@@ -245,7 +245,7 @@
                 data-initial-state="false"
             {% endif %}
         >
-        <label for="harp">HaRP (<a target="_blank" href="https://github.com/nextcloud/HaRP">High-availability Reverse Proxy</a> for Nextcloud ExApps)</label>
+        <label for="harp">HaRP (<a target="_blank" href="https://github.com/nextcloud/HaRP">proxy inverso de alta disponibilidad</a> para ExApps)</label>
     </p>
     <p>
         <input
@@ -261,54 +261,54 @@
         >
         <label for="whiteboard">Whiteboard</label>
     </p>
-    <input class="options-form-submit" type="submit" value="Save changes" />
+    <input class="options-form-submit" type="submit" value="Guardar cambios" />
 </form>
-<p><strong>Minimal system requirements:</strong> When any optional container is enabled, at least 2GB RAM, a dual-core CPU and 40GB system storage are required. When enabling ClamAV,  Nextcloud Talk Recording-server or Fulltextsearch, at least 3GB RAM are required. For Talk Recording-server additional 2 vCPUs are required. When enabling everything, at least 5GB RAM and a quad-core CPU are required. Recommended are at least 1GB more RAM than the minimal requirement. For further advice and recommendations see <strong><a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/1335">this documentation</a></strong></p>
+<p><strong>Requisitos mínimos del sistema:</strong> con cualquier contenedor opcional activado se requieren al menos 2 GB de RAM, una CPU de dos núcleos y 40 GB de almacenamiento. Al activar ClamAV, el servidor de grabación de Talk o Fulltextsearch, se requieren al menos 3 GB de RAM. El servidor de grabación de Talk requiere además 2 vCPU. Con todo activado, se requieren al menos 5 GB de RAM y una CPU de cuatro núcleos. Se recomienda al menos 1 GB de RAM más que el mínimo. Para más consejos y recomendaciones, vea <strong><a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/1335">esta documentación</a></strong></p>
 {% if isAnyRunning == true %}
     <script type="text/javascript" src="disable-containers.js?v1"></script>
 {% endif %}
 
 {% if office_suite == 'collabora' and isAnyRunning == false and was_start_button_clicked == true %}
-    <h3>Nextcloud Office dictionaries</h3>
+    <h3>Diccionarios de la oficina</h3>
 
     {% if collabora_dictionaries == "" %}
-        <p>In order to get the correct dictionaries in Nextcloud Office, you may configure the dictionaries below:</p>
+        <p>Para tener los diccionarios correctos en la oficina, puede configurarlos a continuación:</p>
         <form method="POST" action="api/configuration" class="xhr">
             <input type="text" name="collabora_dictionaries" placeholder="de_DE en_GB en_US es_ES fr_FR it nl pt_BR pt_PT ru" />
             <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
             <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-            <input type="submit" value="Submit Nextcloud Office dictionaries" />
+            <input type="submit" value="Enviar los diccionarios de la oficina" />
         </form>
-        <p>You need to make sure that the dictionaries that you enter are valid. An example is <strong>de_DE en_GB en_US es_ES fr_FR it nl pt_BR pt_PT ru</strong>.</p>
+        <p>Debe asegurarse de que los diccionarios que ingrese sean válidos. Un ejemplo es <strong>de_DE en_GB en_US es_ES fr_FR it nl pt_BR pt_PT ru</strong>.</p>
     {% else %}
-        <p>The dictionaries for Nextcloud Office are currently set to <strong>{{ collabora_dictionaries }}</strong>. You can reset them again by clicking on the button below.</p>
+        <p>Los diccionarios de la oficina están configurados actualmente en <strong>{{ collabora_dictionaries }}</strong>. Puede restablecerlos con el botón de abajo.</p>
         <form method="POST" action="api/configuration" class="xhr">
             <input type="hidden" name="delete_collabora_dictionaries" value="yes"/>
             <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
             <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-            <input type="submit" value="Reset Nextcloud Office dictionaries" />
+            <input type="submit" value="Restablecer los diccionarios de la oficina" />
         </form>
     {% endif %}
 
-    <h3>Additional Nextcloud Office options</h3>
+    <h3>Opciones adicionales de la oficina</h3>
 
     {% if collabora_additional_options == "" %}
-        <p>You can configure additional options for Nextcloud Office below.</p>
-        <p>(This can be used for configuring the net.content_security_policy and more. Make sure to submit the value!)</p>
+        <p>Puede configurar a continuación opciones adicionales para la oficina.</p>
+        <p>(Sirve para configurar net.content_security_policy, entre otras. ¡No olvide enviar el valor!)</p>
         <form method="POST" action="api/configuration" class="xhr">
             <input type="text" name="collabora_additional_options" />
             <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
             <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-            <input type="submit" value="Submit additional Nextcloud Office options" />
+            <input type="submit" value="Enviar las opciones adicionales de la oficina" />
         </form>
-        <p>You need to make sure that the options that you enter are valid. An example is <strong>--o:net.content_security_policy=frame-ancestors *.example.com:*;</strong>.</p>
+        <p>Debe asegurarse de que las opciones que ingrese sean válidas. Un ejemplo es <strong>--o:net.content_security_policy=frame-ancestors *.example.com:*;</strong>.</p>
     {% else %}
-        <p>The additioinal options for Nextcloud Office are currently set to <strong>{{ collabora_additional_options }}</strong>. You can reset them again by clicking on the button below.</p>
+        <p>Las opciones adicionales de la oficina están configuradas actualmente en <strong>{{ collabora_additional_options }}</strong>. Puede restablecerlas con el botón de abajo.</p>
         <form method="POST" action="api/configuration" class="xhr">
             <input type="hidden" name="delete_collabora_additional_options" value="yes"/>
             <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
             <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-            <input type="submit" value="Reset additional Nextcloud Office options" />
+            <input type="submit" value="Restablecer las opciones adicionales de la oficina" />
         </form>
     {% endif %}
 {% endif %}
