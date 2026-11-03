@@ -139,7 +139,8 @@ class OneTimeLink(WizardTest):
     def test_every_wizard_call_without_a_session_is_refused(self):
         browser = Browser(self.link().url)
         for method, path in (("GET", "/api/state"), ("GET", "/api/register"),
-                             ("GET", "/api/establishments?name=castanos"), ("POST", "/api/centre")):
+                             ("GET", "/api/establishments?name=castanos"), ("POST", "/api/centre"),
+                             ("GET", "/api/address"), ("POST", "/api/address")):
             status, body = browser.request(method, path, {} if method == "POST" else None)
             self.assertEqual(status, 401, path)
             self.assertIn("enlace", body["error"])
@@ -289,6 +290,132 @@ class CentroChoice(WizardTest):
             status, body = self.choose(browser, code=code)
             self.assertEqual((status, body["centre"]["timezone"]), (200, timezone), code)
 
+
+EMAIL = "operador@example.cl"
+
+
+class Direccion(WizardTest):
+    """«Dirección»: the free domain named after the centre, registered through the suite port."""
+
+    def setUp(self):
+        super().setUp()
+        self.browser = self.operator()
+
+    def centre(self, code="999001"):
+        self.assertEqual(self.browser.request("POST", "/api/centre", {"code": code})[0], 200)
+
+    def check(self, name=None):
+        return self.browser.get("/api/address" + ("" if name is None else "?" + urlencode({"name": name})))
+
+    def submit(self, **body):
+        return self.browser.request("POST", "/api/address", {"name": "cesfam-los-castanos", "email": EMAIL, **body})
+
+    def address(self):
+        return self.browser.get("/api/state")[1]["address"]
+
+
+class DireccionName(Direccion):
+    def test_the_suggestion_is_the_centre_short_name_folded_and_hyphenated(self):
+        for code, name in (("999001", "cesfam-los-castanos"), ("999002", "cecosf-estrecho"),
+                           ("999003", "sapu-rapa-nui"), ("999004", "cesfam-doctor-juan-perez")):
+            self.centre(code)
+            self.assertEqual(self.check(), (200, {"name": name, "domain": f"{name}.dedyn.io", "available": True}))
+
+    def test_there_is_no_suggestion_before_the_centre_is_chosen(self):
+        status, body = self.check()
+        self.assertEqual(status, 409)
+        self.assertIn("centro", body["error"])
+
+    def test_an_edited_name_is_checked_at_once_and_an_invalid_one_is_flagged(self):
+        self.assertEqual(self.check("mi-centro")[1]["available"], True)
+        for name in ("Los Castaños", "cesfam los castanos", "-cesfam", "cesfam-", "a" * 64, "", "cesfam.dedyn.io"):
+            status, body = self.check(name)
+            self.assertEqual(status, 400, name)
+            self.assertIn("guion", body["error"])
+
+    def test_a_taken_name_gets_a_free_suffix_the_operator_can_edit(self):
+        self.suite.taken = {"cesfam-los-castanos", "cesfam-los-castanos-2"}
+        self.centre()
+        self.assertEqual(self.check(), (200, {"name": "cesfam-los-castanos", "domain": "cesfam-los-castanos.dedyn.io",
+                                              "available": False, "suggestion": "cesfam-los-castanos-3"}))
+        self.assertEqual(self.check("cesfam-los-castanos-3")[1]["available"], True)
+
+    def test_an_outage_is_reported_in_spanish_with_retry(self):
+        self.suite.reachable = False
+        status, body = self.check("mi-centro")
+        self.assertEqual(status, 503)
+        self.assertIn("deSEC", body["error"])
+        self.assertIn("Reintentar", body["error"])
+
+
+class DireccionRegistration(Direccion):
+    def setUp(self):
+        super().setUp()
+        self.centre()
+
+    def test_a_new_account_waits_for_the_verification_and_then_continues_by_itself(self):
+        awaiting = {"name": "cesfam-los-castanos", "domain": "cesfam-los-castanos.dedyn.io", "email": EMAIL,
+                    "status": "awaiting"}
+        self.assertEqual(self.submit(), (200, {"address": awaiting}))
+        self.assertEqual(self.submit(), (200, {"address": awaiting}), "the page asks again until it is verified")
+        port = self.server.server_address[1]
+        self.stop()
+        self.start(port)
+        self.assertEqual(self.address(), awaiting)
+        self.assertEqual((self.suite.created, self.suite.domain), ([EMAIL], None))
+
+        self.suite.verify(EMAIL)
+        status, body = self.submit()
+        self.assertEqual((status, body["address"]["status"]), (200, "registered"))
+        self.assertEqual(self.address()["status"], "registered")
+        self.assertEqual((self.suite.created, self.suite.domain), ([EMAIL], "cesfam-los-castanos.dedyn.io"))
+
+    def test_an_existing_account_registers_at_once_with_its_password_which_is_never_kept(self):
+        self.suite.accounts[EMAIL] = "clave-de-desec"
+        status, body = self.submit(password="otra-clave")
+        self.assertEqual(status, 422)
+        self.assertIn("contraseña", body["error"])
+        self.assertIsNone(self.suite.domain)
+        status, body = self.submit(password="clave-de-desec")
+        self.assertEqual((status, body["address"]["status"]), (200, "registered"))
+        self.assertEqual((self.suite.created, self.suite.domain), ([], "cesfam-los-castanos.dedyn.io"))
+        self.assertNotIn("clave-de-desec", (self.state / "state.json").read_text(encoding="utf-8"))
+
+    def test_a_taken_name_is_refused_with_a_suffix_and_nothing_is_registered(self):
+        self.suite.taken = {"cesfam-los-castanos"}
+        status, body = self.submit()
+        self.assertEqual((status, body["suggestion"]), (409, "cesfam-los-castanos-2"))
+        self.assertIn("registrada", body["error"])
+        self.suite.accounts[EMAIL] = "clave-de-desec"
+        status, body = self.submit(password="clave-de-desec")
+        self.assertEqual((status, body["suggestion"]), (409, "cesfam-los-castanos-2"))
+        self.assertEqual((self.suite.created, self.suite.domain, self.address()), ([], None, None))
+
+    def test_an_outage_mid_registration_is_resumed_not_repeated(self):
+        self.submit()
+        self.suite.verify(EMAIL)
+        self.suite.reachable = False
+        status, body = self.submit()
+        self.assertEqual(status, 503)
+        self.assertIn("Reintentar", body["error"])
+        self.assertEqual(self.address()["status"], "awaiting")
+        self.suite.reachable = True
+        self.assertEqual(self.submit()[1]["address"]["status"], "registered")
+        status, body = self.submit(name="otro-nombre")
+        self.assertEqual((status, body["address"]["domain"]), (200, "cesfam-los-castanos.dedyn.io"))
+        self.assertEqual((self.suite.created, self.suite.domain), ([EMAIL], "cesfam-los-castanos.dedyn.io"))
+
+    def test_an_invalid_name_email_or_password_is_refused_and_changes_nothing(self):
+        for body in ({"name": "Mi Centro"}, {"email": "no-es-un-correo"}, {"email": None}, {"password": 5}):
+            self.assertEqual(self.submit(**body)[0], 400, body)
+        self.assertEqual((self.suite.created, self.address()), ([], None))
+
+    def test_the_state_says_when_the_suite_answers_at_its_address(self):
+        self.suite.accounts[EMAIL] = "clave-de-desec"
+        self.submit(password="clave-de-desec")
+        self.assertIs(self.address()["answers"], False)
+        self.suite.answering = True
+        self.assertIs(self.address()["answers"], True)
 
 
 class Resume(WizardTest):

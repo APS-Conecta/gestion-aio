@@ -21,8 +21,8 @@
 <div class="content">
   <nav class="navigation" aria-label="Pasos de la instalación">
     <ol>
-      <li aria-current="step"><span class="step">1</span>Centro</li>
-      <li><span class="step">2</span>Dirección</li>
+      <li aria-current="step"><button type="button" class="step-link" data-step="centro"><span class="step">1</span>Centro</button></li>
+      <li><button type="button" class="step-link" data-step="direccion" disabled><span class="step">2</span>Dirección</button></li>
       <li><span class="step">3</span>Equipos</li>
       <li><span class="step">4</span>Revisar</li>
       <li><span class="step">5</span>Listo</li>
@@ -65,6 +65,32 @@
           <p class="message" id="message" role="status"></p>
         </div>
       </div>
+    </section>
+
+    <section id="direccion" hidden>
+      <h1>Dirección</h1>
+      <p class="lead">La suite tendrá una dirección gratuita de deSEC con un certificado real, que funciona en la red del
+        establecimiento sin abrir puertos. El nombre se sugiere a partir del centro; puede cambiarlo.</p>
+
+      <form id="address" class="stack" novalidate>
+        <label for="address-name">Dirección</label>
+        <span class="name-field"><input id="address-name" name="name" autocomplete="off" spellcheck="false"
+          maxlength="63" required><span>.dedyn.io</span></span>
+        <p class="message" id="name-status" aria-live="polite"></p>
+        <button type="button" id="use-suggestion" hidden></button>
+        <label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
+        <p class="muted">deSEC enviará a este correo un enlace de verificación; la dirección quedará a su nombre.</p>
+        <details>
+          <summary>¿Este correo ya tiene una cuenta en deSEC?</summary>
+          <label>Contraseña de deSEC<input name="password" type="password" autocomplete="current-password"></label>
+          <p class="muted">Se usa solo para registrar la dirección; no se guarda.</p>
+        </details>
+        <div class="actions"><button type="submit" class="primary">Registrar dirección</button></div>
+      </form>
+
+      <p class="message" id="address-status" role="status"></p>
+      <p class="message" id="reach" aria-live="polite"></p>
+      <div class="actions"><button type="button" id="retry" hidden>Reintentar</button></div>
     </section>
   </main>
 </div>
