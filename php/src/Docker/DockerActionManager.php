@@ -44,6 +44,10 @@ readonly class DockerActionManager {
         if ($tag === '%AIO_CHANNEL%') {
             $tag = $this->GetCurrentChannel();
         }
+        // APS: an image_tag that is a digest pins the image
+        if (str_starts_with($tag, 'sha256:')) {
+            return $container->containerName . '@' . $tag;
+        }
         return $container->containerName . ':' . $tag;
     }
 
