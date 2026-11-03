@@ -107,7 +107,7 @@ The key that signs every App release. Its public half ships in each Suite releas
 and fork app against it before unpacking it.
 
 **Suite manifest**:
-The only list of the suite's apps.
+The only list of the apps the suite adds; the components' apps come with AIO's switches.
 
 **Lock file**:
 The per-server record of the installed app tags.

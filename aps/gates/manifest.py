@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Suite manifest, aps/provisionador/apps.json, is the only list of the suite's apps. Each app has its Nextcloud id,
-its Spanish name and its source: own or fork, from the App releases of its APS-Conecta repo, or store, from Nextcloud's
-app store. An optional app, which «Revisar» offers off, is marked so and has the summary «Revisar» shows. No app names a
-version: an own or fork app comes from its newest compatible App release, a store app from the store.
+"""The Suite manifest, aps/provisionador/apps.json, is the only list of the apps the suite adds; the components' apps
+come with AIO's switches. Each app has its Nextcloud id, its Spanish name and its source: own or fork, from the App
+releases of its APS-Conecta repo, or store, from Nextcloud's app store. An optional app, which «Revisar» offers off, is
+marked so and has the summary «Revisar» shows. No app names a version: an own or fork app comes from its newest
+compatible App release, a store app from the store.
 """
 
 import argparse

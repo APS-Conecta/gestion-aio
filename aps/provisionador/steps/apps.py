@@ -5,17 +5,19 @@ ticked on «Revisar». The apps of the components (Talk, Euro-Office, the antivi
 installs them with each component's switch.
 
 An own or fork app comes from its repo's newest App release that the running Nextcloud admits, proven before it is
-unpacked: the app key signed its SHA256SUMS, which hold its tarball's checksum. The lock file then records its tag, and
-an app the lock names is installed again at that tag, never a newer one. A store app comes from Nextcloud's open app
-store, as in vanilla Nextcloud.
+unpacked: the app key signed its SHA256SUMS, which hold its tarball's checksum, and the tarball holds only the app's
+folder, at the version its tag names. The lock file then records its tag, and an app the lock names is installed again
+at that tag, never a newer one. A store app comes from Nextcloud's open app store, as in vanilla Nextcloud.
 
 An app that fails is named with its reason while every other app installs; «Reintentar» installs the ones that failed.
 """
 
 import base64
 import hashlib
+import io
 import json
 import subprocess
+import tarfile
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -34,6 +36,8 @@ UNSIGNED = ("La versión {} no está firmada con la clave de aplicaciones de APS
             "Conecta.")
 ALTERED = ("El paquete de la versión {} no coincide con su suma de verificación firmada y no se instaló. Presione "
            "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+MISPACKED = ("El paquete de la versión {} no contiene solo la aplicación en esa versión y no se instaló. Contacte a "
+             "APS Conecta.")
 DISABLED = ("Estas aplicaciones no están activadas en Nextcloud: {}. Presione «Reintentar»; si vuelve a ocurrir, "
             "contacte a APS Conecta.")
 
@@ -57,21 +61,32 @@ def read_lock(context):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def installed(app, on, lock):
+    """Whether the app is enabled and, for an own or fork app, the lock file records its tag."""
+    return app["id"] in on and (app["source"] == "store" or app["id"] in lock)
+
+
 def admits(info, major):
-    """Whether an info.xml admits the Nextcloud major; one that does not read as one admits none."""
+    """Whether an info.xml admits the Nextcloud major, by the major of each bound; one that does not read as one admits
+    none."""
     try:
         nextcloud = ET.fromstring(info).find("dependencies/nextcloud")
-        return int(nextcloud.get("min-version")) <= major <= int(nextcloud.get("max-version", major))
-    except (ET.ParseError, AttributeError, TypeError, ValueError):
+        low, high = nextcloud.get("min-version"), nextcloud.get("max-version", str(major))
+        return int(low.split(".")[0]) <= major <= int(high.split(".")[0])
+    except (ET.ParseError, AttributeError, ValueError):
         return False
 
 
 def newest(suite, app, major):
-    """The tag of the app's newest App release whose info.xml admits the Nextcloud major. The info.xml is read before
-    anything is proven: the tarball is proven before it is unpacked, and Nextcloud refuses to enable an app whose own
-    info.xml does not admit it."""
+    """The tag of the app's newest App release whose info.xml admits the Nextcloud major: the latest release, which
+    GitHub redirects to, and only when that one does not admit it, the releases GitHub's API lists. The info.xml is
+    read before anything is proven: the tarball is proven before it is unpacked, and Nextcloud refuses to enable an
+    app whose own info.xml does not admit it."""
+    latest = suite.latest(app["repo"])
+    if latest and admits(suite.asset(app["repo"], latest, "info.xml"), major):
+        return latest
     for tag in suite.releases(app["repo"]):
-        if admits(suite.asset(app["repo"], tag, "info.xml"), major):
+        if tag != latest and admits(suite.asset(app["repo"], tag, "info.xml"), major):
             return tag
     raise Refused(NO_RELEASE.format(major))
 
@@ -94,8 +109,22 @@ def signed(key, sums, signature):
                               capture_output=True, check=False).returncode == 0
 
 
+def version(tarball, app):
+    """The version the tarball's own info.xml declares, when the tarball holds only files and folders (no link) under
+    the app's folder, with no `..`; else None. Nothing is unpacked."""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as tar:
+            for member in tar.getmembers():
+                parts = member.name.split("/")
+                if not (member.isfile() or member.isdir()) or parts[0] != app or ".." in parts:
+                    return None
+            return ET.parse(tar.extractfile(f"{app}/appinfo/info.xml")).findtext("version", "").strip()
+    except (tarfile.TarError, OSError, EOFError, KeyError, ET.ParseError, TypeError):
+        return None
+
+
 def proven(suite, app, tag):
-    """The app's tarball at the tag, once the app key vouches for it."""
+    """The app's tarball at the tag, once the app key vouches for it and it holds only the app at that version."""
     repo, package = app["repo"], f"{app['id']}.tar.gz"
     sums = suite.asset(repo, tag, "SHA256SUMS")
     if not signed(suite.app_key, sums, suite.asset(repo, tag, "SHA256SUMS.minisig")):
@@ -103,6 +132,8 @@ def proven(suite, app, tag):
     tarball = suite.asset(repo, tag, package)
     if f"{hashlib.sha256(tarball).hexdigest()}  {package}" not in sums.decode(errors="replace").splitlines():
         raise Refused(ALTERED.format(tag))
+    if tag != f"v{version(tarball, app['id'])}":
+        raise Refused(MISPACKED.format(tag))
     return tarball
 
 
@@ -126,7 +157,7 @@ def run(context):
     major = int(json.loads(suite.occ("status", "--output=json"))["version"].split(".")[0])
     reasons = []
     for app in chosen(context):
-        if app["id"] in on and (app["source"] == "store" or app["id"] in lock):
+        if installed(app, on, lock):
             continue
         try:
             install(context, app, lock, major)
@@ -137,6 +168,5 @@ def run(context):
 
 def check(context):
     on, lock = enabled(context.suite), read_lock(context)
-    off = [app["name"] for app in chosen(context)
-           if app["id"] not in on or (app["source"] != "store" and app["id"] not in lock)]
+    off = [app["name"] for app in chosen(context) if not installed(app, on, lock)]
     return [DISABLED.format(", ".join(off))] if off else []

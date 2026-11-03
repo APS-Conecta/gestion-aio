@@ -449,16 +449,18 @@ APPS_STEP = "Aplicaciones"
 versions = itertools.count(1)
 
 
-def app_release(app, nextcloud=FakeSuite.nextcloud, key=KEY):
-    """An App release of the app: its tag, and its four assets, for that Nextcloud major and signed with the key."""
+def app_release(app, nextcloud=FakeSuite.nextcloud, key=KEY, extra=()):
+    """An App release of the app: its tag, and its four assets, for that Nextcloud version (both bounds) and signed with
+    the key. Its tarball holds the app's info.xml, and the `extra` files."""
     version = f"1.{next(versions)}.0"
     info = (f'<?xml version="1.0"?>\n<info><id>{app}</id><version>{version}</version><dependencies>'
             f'<nextcloud min-version="{nextcloud}" max-version="{nextcloud}"/></dependencies></info>\n').encode()
     packed = io.BytesIO()
     with tarfile.open(fileobj=packed, mode="w:gz") as tar:
-        member = tarfile.TarInfo(f"{app}/appinfo/info.xml")
-        member.size = len(info)
-        tar.addfile(member, io.BytesIO(info))
+        for name in (f"{app}/appinfo/info.xml", *extra):
+            member = tarfile.TarInfo(name)
+            member.size = len(info)
+            tar.addfile(member, io.BytesIO(info))
     assets = {f"{app}.tar.gz": packed.getvalue(), "info.xml": info}
     sums = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in assets.items()).encode()
     return f"v{version}", {**assets, "SHA256SUMS": sums, "SHA256SUMS.minisig": key.sign(sums)}
@@ -760,6 +762,7 @@ class Apps(InstallTest):
         self.until("done")
         self.assertLessEqual(DEFAULT_APPS, self.enabled())
         self.assertFalse(OPTIONAL_APPS & set(self.suite.apps), "no optional app is installed unless ticked")
+        self.assertEqual(self.suite.api_calls, 0, "the latest releases are compatible: GitHub's API is not called")
         defaults = [app for app in RELEASED if not app.get("optional")]
         self.assertEqual(self.lock(), {app["id"]: self.newest(app) for app in defaults})
         self.assertEqual(self.suite.unpacked, [
@@ -792,6 +795,28 @@ class Apps(InstallTest):
         self.install()
         self.until("done")
         self.assertEqual(self.lock()[app["id"]], compatible)
+        self.assertEqual(self.suite.api_calls, 1, "only the app whose latest release is incompatible asks the API")
+
+    def test_a_release_whose_bounds_name_a_minor_version_admits_that_major(self):
+        app = RELEASED[0]
+        tag, assets = app_release(app["id"], nextcloud=f"{FakeSuite.nextcloud}.0.1")
+        self.suite.app_releases[app["repo"]] = {tag: assets}
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.lock()[app["id"]], tag)
+
+    def test_a_package_with_more_than_the_app_or_an_old_release_under_a_new_tag_is_refused_with_its_reason(self):
+        outside, republished = [app for app in RELEASED if not app.get("optional")][:2]
+        self.suite.app_releases[outside["repo"]] = dict([app_release(outside["id"], extra=["otra/appinfo/info.xml"])])
+        old = next(iter(self.suite.app_releases[republished["repo"]].values()))
+        self.suite.app_releases[republished["repo"]] = {app_release(republished["id"])[0]: old}
+        self.claim()
+        self.install()
+        reason = self.steps(self.until("failed"))[APPS_STEP][1]
+        for app in (outside, republished):
+            self.assertRegex(reason, f"«{app['name']}»: [^«]*no contiene solo la aplicación en esa versión")
+        self.assertFalse({outside["id"], republished["id"]} & {app for app, _ in self.suite.unpacked})
 
     def test_a_bad_signature_or_checksum_refuses_that_app_with_its_reason_and_reintentar_installs_it(self):
         signed, tampered = [app for app in RELEASED if not app.get("optional")][:2]

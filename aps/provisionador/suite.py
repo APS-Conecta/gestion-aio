@@ -52,8 +52,10 @@ NEXTCLOUD_DOWN = ("El contenedor de Nextcloud no responde. Presione «Reintentar
 OCC_FAILED = "Nextcloud no pudo completar «occ {}». Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta."
 GITHUB_FAILED = ("No se pudo descargar {} desde GitHub. Revise la conexión a internet del servidor y presione "
                  "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
-UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a "
-                 "APS Conecta.")
+GITHUB_LIMITED = ("GitHub limitó las consultas de este servidor al pedir {}. Presione «Reintentar» en una hora; si "
+                  "vuelve a ocurrir, contacte a APS Conecta.")
+UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de la aplicación. Presione «Reintentar»; si vuelve a ocurrir, "
+                 "contacte a APS Conecta.")
 ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
                  "servidor y presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
@@ -144,7 +146,7 @@ php /var/www/html/occ security:certificates:import "$dir/$name"
 
 # In the Nextcloud container, the app $1's tarball, in base64 on stdin, in place of any copy in custom_apps.
 UNPACK = """set -eu
-rm -rf "/var/www/html/custom_apps/$1"
+rm -rf "/var/www/html/custom_apps/${1:?}"
 base64 -d | tar -xzf - -C /var/www/html/custom_apps"""
 
 
@@ -295,15 +297,24 @@ class Suite:
         self.execute(NEXTCLOUD, ("sh", "-c", ISSUER, "sh", host), failed=ISSUER_FAILED.format(host))
 
     @staticmethod
-    def download(url, what):
-        """What GitHub serves at the URL; a failure is Unreachable, naming `what`."""
-        request = urllib.request.Request(url, headers={"User-Agent": "aps-conecta-gestion"})
+    def download(url, what, method="GET"):
+        """What GitHub serves at the URL, or for HEAD the URL it redirects to; a failure is Unreachable, naming `what`:
+        GitHub's rate limit (403 or 429 without a token) asks to retry later."""
+        request = urllib.request.Request(url, method=method, headers={"User-Agent": "aps-conecta-gestion"})
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
-                return response.read()
+                return response.geturl() if method == "HEAD" else response.read()
         except (OSError, http.client.HTTPException) as error:
             print(f"GitHub {url}: {error}", file=sys.stderr)
-            raise Unreachable(GITHUB_FAILED.format(what)) from error
+            limited = isinstance(error, urllib.error.HTTPError) and error.code in (403, 429)
+            raise Unreachable((GITHUB_LIMITED if limited else GITHUB_FAILED).format(what)) from error
+
+    def latest(self, repo):
+        """The tag of the repo's latest release, from where GitHub redirects /releases/latest, with no API call; None
+        when the repo has none."""
+        final = self.download(f"https://github.com/{repo}/releases/latest", f"la última versión de {repo}", "HEAD")
+        found = re.search(r"/releases/tag/([^/?#]+)$", final)
+        return found and urllib.parse.unquote(found.group(1))
 
     def releases(self, repo):
         """The tags of the repo's published releases, newest first, from one call to GitHub's API."""
@@ -420,6 +431,7 @@ class FakeSuite:
         self.app_releases = {}  # GitHub's App releases, by repo, newest first: {tag: {file name: bytes}}
         self.store = set()  # the ids of the apps the open app store offers
         self.unpacked = []  # each app id and tarball unpacked into custom_apps, in turn
+        self.api_calls = 0  # the calls to GitHub's API
 
     def claim(self, code, name):
         if self.credential is None:
@@ -500,7 +512,11 @@ class FakeSuite:
             return ""
         raise AssertionError(f"the fake suite runs no occ {args}")
 
+    def latest(self, repo):
+        return next(iter(self.app_releases.get(repo, {})), None)
+
     def releases(self, repo):
+        self.api_calls += 1
         return list(self.app_releases.get(repo, {}))
 
     def asset(self, repo, tag, name):
