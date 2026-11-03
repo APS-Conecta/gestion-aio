@@ -5,10 +5,10 @@
 # The bootstrap. The operator runs it as the one command:
 #   curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/latest/download/install.sh | sudo bash
 #
-# The release pipeline fills RELEASE_TAG, BUNDLE_SHA256 and PUBLIC_KEY (aps/release/package.sh); the
-# committed copy refuses to run. Order: check the host without changing it; install minisign when
-# missing; verify the bundle's signature and checksum; install Docker Engine when missing; unpack the
-# bundle; start the mastercontainer as upstream's readme does, from the digest the bundle names.
+# The release pipeline fills RELEASE_TAG and BUNDLE_SHA256 (aps/release/package.sh); the committed copy
+# refuses to run. Order: check the host without changing it; verify the bundle's checksum; install
+# Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
+# from the digest the bundle names.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.
@@ -16,7 +16,6 @@ set -euo pipefail
 
 RELEASE_TAG=""
 BUNDLE_SHA256=""
-PUBLIC_KEY=""
 
 # The hardware minimum: the old installer's memory and disk floors, two CPU cores.
 MIN_MEMORY_GIB=6
@@ -67,18 +66,12 @@ check_host() {
 }
 
 fetch_and_verify() {
-  local url="${GESTION_DOWNLOAD_URL:-$REPO_URL/releases/download/$RELEASE_TAG}" bundle="gestion-aio-$RELEASE_TAG.tar.gz" f
+  local url="${GESTION_DOWNLOAD_URL:-$REPO_URL/releases/download/$RELEASE_TAG}" bundle="gestion-aio-$RELEASE_TAG.tar.gz"
   say "Descargando y verificando APS Conecta Gestión $RELEASE_TAG..."
-  for f in "$bundle" SHA256SUMS SHA256SUMS.minisig; do
-    curl -fsSL --retry 3 -o "$WORK_DIR/$f" "$url/$f" \
-      || die "no se pudo descargar $url/$f. Revise la conexión a internet del servidor y vuelva a ejecutar el instalador."
-  done
-  minisign -Vq -P "$PUBLIC_KEY" -m "$WORK_DIR/SHA256SUMS" -x "$WORK_DIR/SHA256SUMS.minisig" \
-    || die "la firma de la versión $RELEASE_TAG no es válida. No se instaló nada; descargue el instalador nuevamente desde $REPO_URL/releases"
-  if ! grep -qxF "$BUNDLE_SHA256  $bundle" "$WORK_DIR/SHA256SUMS" \
-    || [ "$(sha256sum "$WORK_DIR/$bundle" | cut -d ' ' -f 1)" != "$BUNDLE_SHA256" ]; then
-    die "el paquete descargado no coincide con su suma de verificación. No se instaló nada; vuelva a ejecutar el instalador."
-  fi
+  curl -fsSL --retry 3 -o "$WORK_DIR/$bundle" "$url/$bundle" \
+    || die "no se pudo descargar $url/$bundle. Revise la conexión a internet del servidor y vuelva a ejecutar el instalador."
+  [ "$(sha256sum "$WORK_DIR/$bundle" | cut -d ' ' -f 1)" = "$BUNDLE_SHA256" ] \
+    || die "el paquete descargado no coincide con su suma de verificación. No se instaló nada; vuelva a ejecutar el instalador."
 }
 
 install_docker() {
@@ -131,7 +124,7 @@ start_mastercontainer() {
 main() {
   [ "$(id -u)" -eq 0 ] \
     || die "ejecute el instalador como administrador: curl -fsSL $REPO_URL/releases/latest/download/install.sh | sudo bash"
-  if [ -z "$RELEASE_TAG" ] || [ -z "$BUNDLE_SHA256" ] || [ -z "$PUBLIC_KEY" ]; then
+  if [ -z "$RELEASE_TAG" ] || [ -z "$BUNDLE_SHA256" ]; then
     die "este archivo es la copia del repositorio y no trae la suma del paquete. Use el instalador publicado en $REPO_URL/releases"
   fi
   if command -v docker >/dev/null 2>&1 && docker container inspect nextcloud-aio-mastercontainer >/dev/null 2>&1; then
@@ -140,7 +133,6 @@ main() {
     return 0
   fi
   check_host
-  command -v minisign >/dev/null 2>&1 || apt_install minisign
   WORK_DIR="$(mktemp -d)"
   trap 'rm -rf "$WORK_DIR"' EXIT
   fetch_and_verify
