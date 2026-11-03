@@ -11,7 +11,7 @@ export class CloudflareError extends Error {}
 const unquoted = (content) => content.replace(/^"(.*)"$/, "$1");
 
 export function dnsRecords({ fetch, token, zone }) {
-  let records;
+  let recordsPath; // the zone's DNS records endpoint, once the zone is looked up
 
   async function call(method, path, body) {
     const response = await fetch(API + path, {
@@ -25,18 +25,18 @@ export function dnsRecords({ fetch, token, zone }) {
     return answer.result;
   }
 
-  async function recordsPath() {
-    if (!records) {
+  async function zoneRecordsPath() {
+    if (!recordsPath) {
       const [found] = await call("GET", `/zones?name=${encodeURIComponent(zone)}`);
       if (!found) throw new CloudflareError(`Cloudflare has no zone ${zone} for this token`);
-      records = `/zones/${found.id}/dns_records`;
+      recordsPath = `/zones/${found.id}/dns_records`;
     }
-    return records;
+    return recordsPath;
   }
 
   /** Makes `name`'s records of `type` exactly `contents`, editing records it can reuse and deleting the rest. */
   async function set(name, type, contents) {
-    const path = await recordsPath();
+    const path = await zoneRecordsPath();
     const existing = await call("GET", `${path}?type=${type}&name=${encodeURIComponent(name)}&per_page=100`);
     const kept = new Set();
     const spare = [];

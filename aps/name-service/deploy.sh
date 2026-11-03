@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Deploys the name service from the checked-out tree: the slug table generated from the DEIS register is
-# bundled, and CLOUDFLARE_API_TOKEN (from the environment) deploys the Worker and becomes its secret.
+# bundled, the locked wrangler deploys it with CLOUDFLARE_API_TOKEN (from the environment), which also becomes
+# the Worker's secret.
 # Usage: deploy.sh <production|ci>
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -27,6 +28,7 @@ export CLOUDFLARE_ACCOUNT_ID WRANGLER_SEND_METRICS=false
 if ! cloudflare "/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" > /dev/null 2>&1; then
   cloudflare "/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" -X PUT --data '{"subdomain":"apsconecta"}'
 fi
-wrangler=(npx --yes wrangler@4.157.0 --config aps/name-service/wrangler.jsonc --env "$env")
+npm ci --prefix aps/name-service --no-audit --no-fund --silent
+wrangler=(aps/name-service/node_modules/.bin/wrangler --config aps/name-service/wrangler.jsonc --env "$env")
 "${wrangler[@]}" deploy
 printf '%s' "$CLOUDFLARE_API_TOKEN" | "${wrangler[@]}" secret put CLOUDFLARE_API_TOKEN

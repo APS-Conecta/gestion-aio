@@ -19,7 +19,9 @@ const CHALLENGE = (n) => String(n).padEnd(43, "x");
 function deployment({ suffix = "gestion.apsconecta.cl" } = {}) {
   const cloudflare = fakeCloudflare({ token: TOKEN, zone: ZONE });
   const storage = fakeStorage();
-  const start = (slugs) => nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs });
+  const clock = { ms: 0 };
+  const start = (slugs) =>
+    nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs, now: () => clock.ms });
   let serve = start(SLUGS);
   const post = async (path, body, headers = {}) => {
     const response = await serve(new Request(ORIGIN + path, {
@@ -29,7 +31,7 @@ function deployment({ suffix = "gestion.apsconecta.cl" } = {}) {
     return { status: response.status, body: await response.json() };
   };
   return {
-    cloudflare, storage, post,
+    cloudflare, storage, post, clock,
     /** A redeploy, with the slug table of a later register if given. */
     restart(slugs = SLUGS) { serve = start(slugs); },
     serve: (request) => serve(request),
@@ -102,7 +104,7 @@ test("the address update accepts any valid address: IPv4 goes in the A record, I
   const names = deployment();
   const castanos = names.as((await names.claim("999001")).body);
   for (const [address, type, record] of [["192.168.1.10", "A", "192.168.1.10"], ["203.0.113.7", "A", "203.0.113.7"],
-                                         ["fd00::A:10", "AAAA", "fd00::a:10"]]) {
+                                         ["fd00::A:10", "AAAA", "fd00::a:10"], ["192.168.1.20", "A", "192.168.1.20"]]) {
     const { status, body } = await names.post("/address", { address }, castanos);
     assert.equal(status, 200, address);
     assert.deepEqual(body, { name: CASTANOS, type, address: record });
@@ -122,7 +124,7 @@ test("an unchanged address makes no Cloudflare call", async () => {
 test("anything but an IPv4 or IPv6 address, or another record type or name, is refused and changes nothing", async () => {
   const names = deployment();
   const castanos = names.as((await names.claim("999001")).body);
-  for (const address of ["999.1.1.1", "1.2.3", "01.2.3.4", "1.2.3.4 ", "::g", "fe80::1%eth0", "::1]@evil.example/[",
+  for (const address of ["999.1.1.1", "1.2.3", "01.2.3.4", "1.2.3.4 ", "::g", "fe80::1%eth0", "::1]@evil.example/[", "::ffff:192.168.1.10", "::FFFF:c0a8:10a",
                          "cesfam.example.com", "", 3232235786, null]) {
     const { status, body } = await names.post("/address", { address }, castanos);
     assert.equal(status, 400, String(address));
@@ -180,6 +182,25 @@ test("an update that is not an ACME challenge value is refused", async () => {
     assert.equal((await names.post("/update", body, names.as(castanos))).status, 400, JSON.stringify(body));
   }
   assert.deepEqual(names.cloudflare.records(), []);
+});
+
+test("a code changes its records at most five times a minute; more answer 429 and change nothing", async () => {
+  const names = deployment();
+  const castanos = (await names.claim("999001")).body;
+  const estrecho = names.as((await names.claim("999002")).body);
+  const update = (n) => names.post("/update", { subdomain: castanos.subdomain, txt: CHALLENGE(n) }, names.as(castanos));
+  for (const n of [1, 2, 3, 4]) assert.equal((await update(n)).status, 200);
+  assert.equal((await names.post("/address", { address: "10.0.0.9" }, names.as(castanos))).status, 200);
+  assert.equal((await names.post("/address", { address: "10.0.0.9" }, names.as(castanos))).status, 200, "unchanged");
+  const before = names.cloudflare.records();
+  const { status, body } = await update(5);
+  assert.equal(status, 429);
+  assert.match(body.error, new RegExp(CASTANOS));
+  assert.equal((await names.post("/address", { address: "10.0.0.10" }, names.as(castanos))).status, 429);
+  assert.deepEqual(names.cloudflare.records(), before);
+  assert.equal((await names.post("/address", { address: "10.0.0.2" }, estrecho)).status, 200, "another code");
+  names.clock.ms += 60_000;
+  assert.equal((await update(5)).status, 200);
 });
 
 test("APS releases a code's name with its records; the old credential dies and the code can claim again", async () => {

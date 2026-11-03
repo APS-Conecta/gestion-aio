@@ -193,6 +193,10 @@ jobs:
     needs: images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # Every run shares the one CI deployment: one deploy-and-prove at a time.
+    concurrency:
+      group: aps-name-service-ci
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: read

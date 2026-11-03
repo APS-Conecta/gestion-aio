@@ -8,6 +8,8 @@ import { CloudflareError, dnsRecords } from "./cloudflare.mjs";
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/; // an ACME DNS-01 value (base64url SHA-256), as acme-dns checks it
+const IPV4_MAPPED = /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/; // an IPv4 address dressed as IPv6, normalized
+const CHANGES_PER_MINUTE = 5; // Cloudflare changes one code may make: a certificate takes one or two
 
 const answer = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -17,13 +19,15 @@ function secret() {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** The record an address goes in, with the address as Cloudflare stores it; null for anything else. */
+/** The record an address goes in, with the address as Cloudflare stores it; null for anything else, an
+IPv4-mapped IPv6 address included: its IPv4 address belongs in the A record. */
 function addressRecord(value) {
   if (typeof value !== "string") return null;
   if (IPV4.test(value)) return { type: "A", content: value };
   if (!/^[0-9A-Fa-f:.]+$/.test(value) || !value.includes(":")) return null;
   try {
-    return { type: "AAAA", content: new URL(`http://[${value}]/`).hostname.slice(1, -1) };
+    const content = new URL(`http://[${value}]/`).hostname.slice(1, -1);
+    return IPV4_MAPPED.test(content) ? null : { type: "AAAA", content };
   } catch {
     return null;
   }
@@ -49,6 +53,18 @@ const shaped = (body, ...keys) =>
 /** The DEIS code a claim or a release names, or null when the body is not {"code": "<code>"}. */
 const codeIn = (body) => (shaped(body, "code") && typeof body.code === "string" ? body.code : null);
 
+/** Whether `key` may make one more change: at most CHANGES_PER_MINUTE in the last minute of `now()`. */
+function rateLimiter(now) {
+  const recent = new Map();
+  return (key) => {
+    const since = now() - 60_000;
+    const times = (recent.get(key) ?? []).filter((t) => t > since);
+    if (times.length >= CHANGES_PER_MINUTE) return false;
+    recent.set(key, [...times, now()]);
+    return true;
+  };
+}
+
 /** Runs tasks with the same key one after another, so a read, its Cloudflare calls and its write never interleave. */
 function serializer() {
   const tails = new Map();
@@ -61,9 +77,11 @@ function serializer() {
   };
 }
 
-export function nameService({ storage, fetch, token, zone, suffix, slugs }) {
+export function nameService({ storage, fetch, token, zone, suffix, slugs, now = Date.now }) {
   const dns = dnsRecords({ fetch, token, zone });
   const exclusive = serializer();
+  const mayChange = rateLimiter(now);
+  const tooMany = (record) => answer(429, { error: `too many changes for ${fqdn(record.slug)}; retry in a minute` });
   const codeKey = (code) => `code:${code}`;
   const nameKey = (slug) => `name:${slug}`;
   const fqdn = (slug) => `${slug}.${suffix}`;
@@ -102,7 +120,9 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs }) {
       const reported = shaped(body, "address") && addressRecord(body.address);
       if (!reported) return answer(400, { error: 'an address update is {"address": "<IPv4 or IPv6 address>"}' });
       const addresses = { A: null, AAAA: null, [reported.type]: reported.content };
-      for (const type of ["A", "AAAA"].filter((t) => record[t] !== addresses[t])) {
+      const changed = ["A", "AAAA"].filter((t) => record[t] !== addresses[t]);
+      if (changed.length && !mayChange(code)) return tooMany(record);
+      for (const type of changed) {
         await dns.set(fqdn(record.slug), type, addresses[type] ? [addresses[type]] : []);
         await storage.put({ [codeKey(code)]: (record = { ...record, [type]: addresses[type] }) });
       }
@@ -117,6 +137,7 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs }) {
         return answer(400, { error: 'an update is {"subdomain": "<slug>", "txt": "<ACME challenge value>"}' });
       }
       if (body.subdomain !== record.slug) return answer(403, { error: `this credential changes only ${fqdn(record.slug)}` });
+      if (!mayChange(code)) return tooMany(record);
       const txt = [body.txt, ...record.txt.filter((value) => value !== body.txt)].slice(0, 2);
       await dns.set(`_acme-challenge.${fqdn(record.slug)}`, "TXT", txt);
       await storage.put({ [codeKey(code)]: { ...record, txt } });

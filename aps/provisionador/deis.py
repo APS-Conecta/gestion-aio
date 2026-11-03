@@ -147,10 +147,8 @@ def main():
     parser.add_argument("command", choices=["slugs"])
     parser.add_argument("directory", nargs="?", default=Path(__file__).resolve().parents[1] / "deis")
     args = parser.parse_args()
-    with open(newest(args.directory), encoding="utf-8", newline="") as fh:
-        rows = list(csv.DictReader(fh))
     try:
-        table = slugs(rows)
+        table = slugs(Register(newest(args.directory)).rows)
     except ValueError as e:
         print(f"deis: {e}", file=sys.stderr)
         return 1
