@@ -22,9 +22,9 @@ $isMastercontainerUpdateAvailable = $dockerActionManager->IsMastercontainerUpdat
 $isAnyUpdateAvailable = $dockerActionManager->isAnyUpdateAvailable();
 
 if ($isMastercontainerUpdateAvailable === true) {
-    $dockerActionManager->sendNotification($nextcloudContainer, 'Mastercontainer update available!', 'Please open your AIO interface to update it. If you do not want to do it manually each time, you can enable the daily backup feature from the AIO interface which also automatically updates the mastercontainer.');
+    $dockerActionManager->sendNotification($nextcloudContainer, '¡Hay una actualización del mastercontainer de APS Conecta Gestión!', 'Abra la interfaz de AIO de APS Conecta Gestión para actualizarlo. Si no desea hacerlo manualmente cada vez, active en esa interfaz la copia de seguridad diaria, que también actualiza automáticamente el mastercontainer.');
 }
 
 if ($isAnyUpdateAvailable === true) {
-    $dockerActionManager->sendNotification($nextcloudContainer, 'Container updates available!', 'Please open your AIO interface to update them. If you do not want to do it manually each time, you can enable the daily backup feature from the AIO interface which also automatically updates your containers and your Nextcloud apps.');
+    $dockerActionManager->sendNotification($nextcloudContainer, '¡Hay actualizaciones de contenedores de APS Conecta Gestión!', 'Abra la interfaz de AIO de APS Conecta Gestión para actualizarlos. Si no desea hacerlo manualmente cada vez, active en esa interfaz la copia de seguridad diaria, que también actualiza automáticamente sus contenedores y sus aplicaciones.');
 }

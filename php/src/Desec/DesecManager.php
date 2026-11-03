@@ -40,7 +40,7 @@ class DesecManager {
      */
     public function register(string $email, string $slug, string $password = ''): bool {
         if ($this->configurationManager->domain !== '') {
-            throw new \Exception('A domain is already configured. Reset the AIO instance first to register a new domain.');
+            throw new \Exception('Ya hay un dominio configurado. Restablezca primero la instancia de AIO para registrar un dominio nuevo.');
         }
 
         $validatedSlug = $this->validateSlug($slug);
@@ -157,7 +157,7 @@ class DesecManager {
     private function validateEmail(string $email): string {
         $email = trim($email);
         if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            throw new \Exception('Please provide a valid email address.');
+            throw new \Exception('Ingrese una dirección de correo válida.');
         }
         return $email;
     }
@@ -172,8 +172,8 @@ class DesecManager {
         $slug = trim($slug);
         if ($slug !== '' && !preg_match(self::SLUG_PATTERN, $slug)) {
             throw new \Exception(
-                'The desired subdomain must contain only lowercase letters, digits and hyphens, '
-                . 'be between 1 and 63 characters long, and must not start or end with a hyphen.'
+                'El subdominio solo puede contener letras minúsculas, dígitos y guiones, '
+                . 'debe tener entre 1 y 63 caracteres y no puede comenzar ni terminar con un guion.'
             );
         }
         return $slug;
@@ -197,13 +197,13 @@ class DesecManager {
                 'json' => ['email' => $email, 'password' => $password],
             ]);
         } catch (TransferException $e) {
-            throw new \Exception('Could not reach the deSEC API: ' . $e->getMessage());
+            throw new \Exception('No se pudo conectar con la API de deSEC: ' . $e->getMessage());
         }
 
         $code = $res->getStatusCode();
 
         if ($code !== 202) {
-            throw new \Exception('Unexpected response from deSEC during account registration (HTTP ' . $code . '): ' . $res->getBody()->getContents());
+            throw new \Exception('Respuesta inesperada de deSEC al registrar la cuenta (HTTP ' . $code . '): ' . $res->getBody()->getContents());
         }
     }
 
@@ -225,10 +225,10 @@ class DesecManager {
             return $this->loginAccount($email, $password);
         } catch (\Exception $e) {
             throw new \Exception(
-                'Could not log in to deSEC for ' . $email . ' yet. Two things to check:' . "\n"
-                . '• If deSEC emailed you a verification link, please click it and then try again.' . "\n"
-                . '• If this email already had a deSEC account, no new account was created. '
-                . 'In that case, enter your existing deSEC password in the password field below and try again.'
+                'Aún no se pudo iniciar sesión en deSEC con ' . $email . '. Revise dos cosas:' . "\n"
+                . '• Si deSEC le envió por correo un enlace de verificación, haga clic en él e inténtelo de nuevo.' . "\n"
+                . '• Si este correo ya tenía una cuenta de deSEC, no se creó una cuenta nueva. '
+                . 'En ese caso, ingrese su contraseña actual de deSEC en el campo de contraseña de abajo e inténtelo de nuevo.'
             );
         }
     }
@@ -244,23 +244,23 @@ class DesecManager {
                 'json' => ['email' => $email, 'password' => $password],
             ]);
         } catch (TransferException $e) {
-            throw new \Exception('Could not reach the deSEC API: ' . $e->getMessage());
+            throw new \Exception('No se pudo conectar con la API de deSEC: ' . $e->getMessage());
         }
 
         $code = $res->getStatusCode();
         $body = $res->getBody()->getContents();
 
         if ($code === 400 || $code === 403) {
-            throw new \Exception('Could not log in to deSEC: invalid email address or password.');
+            throw new \Exception('No se pudo iniciar sesión en deSEC: correo o contraseña no válidos.');
         }
 
         if ($code !== 200 && $code !== 201) {
-            throw new \Exception('Unexpected response from deSEC during login (HTTP ' . $code . '): ' . $body);
+            throw new \Exception('Respuesta inesperada de deSEC al iniciar sesión (HTTP ' . $code . '): ' . $body);
         }
 
         $data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($data) || !isset($data['token']) || !is_string($data['token'])) {
-            throw new \Exception('Could not extract the API token from the deSEC login response. Please try again.');
+            throw new \Exception('No se pudo obtener el token de la API en la respuesta de inicio de sesión de deSEC. Inténtelo de nuevo.');
         }
 
         return $data['token'];
@@ -294,7 +294,7 @@ class DesecManager {
                     'json'    => ['name' => $domain],
                 ]);
             } catch (TransferException $e) {
-                throw new \Exception('Could not reach the deSEC API: ' . $e->getMessage());
+                throw new \Exception('No se pudo conectar con la API de deSEC: ' . $e->getMessage());
             }
 
             $code = $res->getStatusCode();
@@ -312,12 +312,12 @@ class DesecManager {
                 }
                 if ($code === 403) {
                     throw new \Exception(
-                        'Your deSEC account has reached its domain limit and "' . $domain . '" is not '
-                        . 'one of your existing domains. Remove an unused domain at desec.io, or contact '
-                        . 'deSEC support to raise the limit, then try again.'
+                        'Su cuenta de deSEC alcanzó su límite de dominios y "' . $domain . '" no es '
+                        . 'uno de sus dominios existentes. Elimine un dominio que no use en desec.io, o pida '
+                        . 'al soporte de deSEC que aumente el límite, e inténtelo de nuevo.'
                     );
                 }
-                throw new \Exception('"' . $domain . '" is already taken. Please choose a different subdomain and try again.');
+                throw new \Exception('"' . $domain . '" ya está ocupado. Elija otro subdominio e inténtelo de nuevo.');
             }
 
             if ($code === 409) {
@@ -325,10 +325,10 @@ class DesecManager {
                 continue;
             }
 
-            throw new \Exception('Unexpected response from deSEC during domain registration (HTTP ' . $code . '): ' . $res->getBody()->getContents());
+            throw new \Exception('Respuesta inesperada de deSEC al registrar el dominio (HTTP ' . $code . '): ' . $res->getBody()->getContents());
         }
 
-        throw new \Exception('Could not register a free dedyn.io domain after ' . self::MAX_SLUG_ATTEMPTS . ' attempts. Please try again.');
+        throw new \Exception('No se pudo registrar un dominio gratuito de dedyn.io después de ' . self::MAX_SLUG_ATTEMPTS . ' intentos. Inténtelo de nuevo.');
     }
 
     /**
@@ -346,7 +346,7 @@ class DesecManager {
                 'headers' => ['Authorization' => 'Token ' . $token],
             ]);
         } catch (TransferException $e) {
-            throw new \Exception('Could not reach the deSEC API: ' . $e->getMessage());
+            throw new \Exception('No se pudo conectar con la API de deSEC: ' . $e->getMessage());
         }
 
         $code = $res->getStatusCode();
@@ -359,7 +359,7 @@ class DesecManager {
             return false;
         }
 
-        throw new \Exception('Unexpected response from deSEC while checking domain ownership (HTTP ' . $code . '): ' . $res->getBody()->getContents());
+        throw new \Exception('Respuesta inesperada de deSEC al comprobar la propiedad del dominio (HTTP ' . $code . '): ' . $res->getBody()->getContents());
     }
 
     /**
