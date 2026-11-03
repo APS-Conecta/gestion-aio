@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The APS name service's HTTP API: one name, <slug>.<suffix>, per DEIS code of the slug table, and for each a
 // credential that changes only that name's address records and, through acme-dns's POST /update, its
-// certificate's challenge record. Claims need no account, so a limit per client address and a rolling weekly
-// budget slow squatting but cannot prevent it; APS releases a name a squatter took (accepted risk).
+// certificate's challenge record, and that can release the name. Claims need no account, so a limit per client
+// address and a rolling weekly budget slow squatting but cannot prevent it; APS releases a name a squatter took
+// (accepted risk).
 
 import { CloudflareError, dnsRecords } from "./cloudflare.mjs";
 
@@ -157,8 +158,26 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs, claimL
     });
   }
 
-  /** APS frees a code's name: its records go, then the claim, so the code can claim again. */
+  /** Frees a code's name: its records go, then the claim, so the code can claim again. */
+  async function free(code, record) {
+    const name = fqdn(record.slug);
+    for (const type of ["A", "AAAA"]) await dns.set(name, type, []);
+    await dns.set(`_acme-challenge.${name}`, "TXT", []);
+    await storage.delete([codeKey(code), nameKey(record.slug)]);
+    return answer(200, { name });
+  }
+
+  /** A release, {"code": "<DEIS code>"}, frees that code's name. APS's token frees any code's; a credential, sent in
+   * the X-Api-User/X-Api-Key headers as to /address and /update, frees only its own. */
   async function release(request, body) {
+    if (request.headers.has("X-Api-User")) {
+      return withCredential(request, (code, record) => {
+        if (codeIn(body) === null) return answer(400, { error: 'a release is {"code": "<DEIS code>"}' });
+        if (codeIn(body) !== code) return answer(403, { error: `this credential releases only ${fqdn(record.slug)}` });
+        if (!mayChange(code)) return tooMany(record);
+        return free(code, record);
+      });
+    }
     const bearer = (request.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
     if (!token || !equalDigests(await sha256(bearer), await sha256(token))) return answer(401, { error: "release needs APS's token" });
     const code = codeIn(body);
@@ -166,11 +185,7 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs, claimL
     return exclusive(codeKey(code), async () => {
       const record = await storage.get(codeKey(code));
       if (!record) return answer(404, { error: `${code} holds no name` });
-      const name = fqdn(record.slug);
-      for (const type of ["A", "AAAA"]) await dns.set(name, type, []);
-      await dns.set(`_acme-challenge.${name}`, "TXT", []);
-      await storage.delete([codeKey(code), nameKey(record.slug)]);
-      return answer(200, { name });
+      return free(code, record);
     });
   }
 

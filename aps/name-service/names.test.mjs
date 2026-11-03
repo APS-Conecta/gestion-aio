@@ -34,14 +34,16 @@ function deployment({ suffix = "gestion.apsconecta.cl", table = SLUGS } = {}) {
     }));
     return { status: response.status, body: await response.json() };
   };
+  const as = (credential) => ({ "X-Api-User": credential.username, "X-Api-Key": credential.password });
   return {
-    cloudflare, storage, post, clock,
+    cloudflare, storage, post, clock, as,
     /** A redeploy, with the slug table of a later register if given. */
     restart(slugs = table) { serve = start(slugs); },
     serve: (request) => serve(request),
     claim: (code, ip = "198.51.100.1") => post("/claim", { code }, { "CF-Connecting-IP": ip }),
-    as: (credential) => ({ "X-Api-User": credential.username, "X-Api-Key": credential.password }),
     release: (code, token = TOKEN) => post("/release", { code }, { Authorization: `Bearer ${token}` }),
+    /** A release with a credential, in the headers /address and /update take, instead of APS's token. */
+    releaseAs: (credential, code = credential.username) => post("/release", { code }, as(credential)),
   };
 }
 
@@ -226,25 +228,62 @@ test("a code changes its records at most five times a minute; more answer 429 an
   assert.equal(status, 429);
   assert.match(body.error, new RegExp(CASTANOS));
   assert.equal((await names.post("/address", { address: "10.0.0.10" }, names.as(castanos))).status, 429);
+  assert.equal((await names.releaseAs(castanos)).status, 429, "a release");
   assert.deepEqual(names.cloudflare.records(), before);
   assert.equal((await names.post("/address", { address: "10.0.0.2" }, estrecho)).status, 200, "another code");
   names.clock.ms += 60_000;
   assert.equal((await update(5)).status, 200);
 });
 
-test("APS releases a code's name with its records; the old credential dies and the code can claim again", async () => {
+for (const [by, release] of [["APS's token", (names) => names.release("999001")],
+                             ["the name's own credential", (names, castanos) => names.releaseAs(castanos)]]) {
+  test(`a release with ${by} frees the code's name and its records; the old credential dies and the code can claim again`, async () => {
+    const names = deployment();
+    const castanos = (await names.claim("999001")).body;
+    const estrecho = (await names.claim("999002")).body;
+    for (const [credential, address] of [[castanos, "10.0.0.9"], [estrecho, "fd00::9"]]) {
+      await names.post("/address", { address }, names.as(credential));
+      await names.post("/update", { subdomain: credential.subdomain, txt: CHALLENGE(1) }, names.as(credential));
+    }
+    const { status, body } = await release(names, castanos);
+    assert.equal(status, 200);
+    assert.deepEqual(body, { name: CASTANOS });
+    assert.deepEqual(names.cloudflare.records(), [`AAAA ${ESTRECHO} fd00::9`, `TXT _acme-challenge.${ESTRECHO} ${CHALLENGE(1)}`]);
+    assert.equal((await names.post("/address", { address: "10.0.0.9" }, names.as(castanos))).status, 401);
+    assert.equal((await names.claim("999001")).status, 201);
+  });
+}
+
+test("a credential releases only its own name; another name's, a wrong key, none or a body that is not one code frees nothing", async () => {
   const names = deployment();
   const castanos = (await names.claim("999001")).body;
   const estrecho = (await names.claim("999002")).body;
-  for (const [credential, address] of [[castanos, "10.0.0.9"], [estrecho, "fd00::9"]]) {
-    await names.post("/address", { address }, names.as(credential));
-    await names.post("/update", { subdomain: credential.subdomain, txt: CHALLENGE(1) }, names.as(credential));
+  for (const credential of [castanos, estrecho]) await names.post("/address", { address: "10.0.0.2" }, names.as(credential));
+  const before = names.cloudflare.records();
+  const { status, body } = await names.releaseAs(castanos, "999002");
+  assert.equal(status, 403);
+  assert.match(body.error, new RegExp(`this credential releases only ${CASTANOS}`));
+  for (const credential of [{ ...estrecho, password: castanos.password }, { ...estrecho, password: "" },
+                            { ...estrecho, username: "999003" }]) {
+    assert.deepEqual(await names.releaseAs(credential, "999002"), { status: 401, body: { error: "unknown credential" } },
+                     "the refusal /address and /update give, whether the code holds a name or not");
   }
-  const { status, body } = await names.release("999001");
-  assert.equal(status, 200);
-  assert.deepEqual(body, { name: CASTANOS });
-  assert.deepEqual(names.cloudflare.records(), [`AAAA ${ESTRECHO} fd00::9`, `TXT _acme-challenge.${ESTRECHO} ${CHALLENGE(1)}`]);
-  assert.equal((await names.post("/address", { address: "10.0.0.9" }, names.as(castanos))).status, 401);
+  assert.equal((await names.post("/release", { code: "999002" })).status, 401, "no credential");
+  for (const release of [{}, { code: 999001 }, { code: "999001", name: CASTANOS }]) {
+    assert.equal((await names.post("/release", release, names.as(castanos))).status, 400, JSON.stringify(release));
+  }
+  assert.deepEqual(names.cloudflare.records(), before);
+  for (const code of ["999001", "999002"]) assert.equal((await names.claim(code)).status, 409, `${code} still holds its name`);
+  assert.deepEqual((await names.release("999002")).body, { name: ESTRECHO }, "APS's token still releases it");
+});
+
+test("a credential release waits for the code's changes in flight, so none of them outlives it", async () => {
+  const names = deployment();
+  const castanos = (await names.claim("999001")).body;
+  await Promise.all([names.post("/address", { address: "10.0.0.9" }, names.as(castanos)),
+                     names.post("/update", { subdomain: castanos.subdomain, txt: CHALLENGE(1) }, names.as(castanos)),
+                     names.releaseAs(castanos)]);
+  assert.deepEqual(names.cloudflare.records(), []);
   assert.equal((await names.claim("999001")).status, 201);
 });
 
