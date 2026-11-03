@@ -424,7 +424,7 @@ readonly class DockerController {
     private function getStreamingResponseHtmlStart() : string {
         return <<<END
         <!DOCTYPE html>
-        <html lang="en" class="overlay-iframe">
+        <html lang="es-CL" class="overlay-iframe">
             <head>
                 <link rel="stylesheet" href="../../style.css?v12" media="all" />
                 <script type="text/javascript" src="../../apply-theme.js?v1"></script>

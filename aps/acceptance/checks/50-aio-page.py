@@ -29,7 +29,7 @@ def check_page(page, name, texts):
     missing = [text for text in ["Código fuente (AGPL-3.0)", *texts] if text not in shown]
     page.screenshot(path=evidence / f"{name}.png", mask=[page.locator("#initial-nextcloud-password, #borg-backup-password")])
     print(f"{name}: title {title!r}, lang {lang!r}, missing {missing}, shows Nextcloud: {'Nextcloud' in shown}")
-    if title != "APS Conecta Gestión AIO" or lang != "es" or missing or "Nextcloud" in shown:
+    if title != "APS Conecta Gestión AIO" or lang != "es-CL" or missing or "Nextcloud" in shown:
         sys.exit(f"AIO's {name} page is not the Spanish «APS Conecta Gestión» one")
 
 
