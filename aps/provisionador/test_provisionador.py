@@ -684,6 +684,25 @@ class Recording(InstallTest):
         self.assertEqual(self.switched(memory_gib=RECORDING_THRESHOLD["memory_gib"] - 1), COMPONENTS)
 
 
+class TrustedCertificates(InstallTest):
+    """Nextcloud trusts what AIO's own folder of trusted CAs holds, which AIO also gives Talk: a test build's Let's
+    Encrypt staging roots, so server-side calls through the suite's name verify its staging certificate; a release
+    holds none and Nextcloud imports nothing."""
+
+    def test_in_a_test_build_nextcloud_imports_each_ca_aio_trusts(self):
+        self.suite.cacerts = ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"]
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.trusted, ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"])
+
+    def test_in_a_release_nextcloud_imports_none(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.trusted, self.suite.issuers), ([], ["www.ispch.gob.cl"]))
+
+
 class InterruptedInstall(InstallTest):
     """An install that a Provisionador restart cut short resumes by itself, from AIO's own state."""
 
