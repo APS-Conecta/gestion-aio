@@ -11,7 +11,9 @@ on:
       - .github/workflows/aps-release.yml
       - aps/acceptance/**
       - aps/bootstrap/**
+      - aps/deis/**
       - aps/images/**
+      - aps/provisionador/**
       - aps/release/**
       - Containers/mastercontainer/**
       - php/**
