@@ -17,8 +17,7 @@ AIO keeps on this server: its optional-containers form, its backup settings and 
 login once Apache runs. The passphrase leaves this process only in the passwords file. The containers' progress is
 AIO's own reading of their state, as its page lists them. Every later install step runs occ in the Nextcloud
 container. The apps step downloads App releases from GitHub, without a token, and unpacks the ones it verified into
-Nextcloud's custom_apps. The «Equipos» steps add accounts with their first password in occ's environment and put their
-folders and pages into group folders on Nextcloud's data folder, which Groupfolders then scans.
+Nextcloud's custom_apps.
 """
 
 import base64
