@@ -12,6 +12,37 @@ CONTEXT.md APS domain glossary
 .github/workflows/aps-gates.yml APS static gates and PR-title check
 .github/workflows/aps-acceptance.yml APS clean-machine acceptance run on a fresh Debian 12 VM
 .github/workflows/aps-release.yml APS release pipeline: our two images, the bundle, test pre-releases and the bootstrap proof
-php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image
+php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image; Spanish display names
 php/containers-schema.json an image_tag may be a sha256 digest pin
-php/src/Docker/DockerActionManager.php an image_tag that is a sha256 digest is requested as image@digest
+php/public/click-handlers.js Spanish «APS Conecta Gestión» text on AIO's page
+php/public/containers-form-submit.js Spanish «APS Conecta Gestión» text on AIO's page
+php/public/forms.js Spanish «APS Conecta Gestión» text on AIO's page
+php/public/img/favicon.svg APS Conecta Gestión favicon for AIO's page
+php/public/img/nextcloud-logo.svg APS Conecta Gestión logo under upstream's file name and symbol ids
+php/public/log-load.js Spanish «APS Conecta Gestión» text on AIO's page
+php/public/second-tab-warning.js Spanish «APS Conecta Gestión» text on AIO's page
+php/public/style.css APS palette, Nunito Sans and the source-code link on AIO's page
+php/src/Auth/AuthManager.php Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Controller/DockerController.php Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Controller/LoginController.php Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Cron/BackupNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
+php/src/Cron/CheckFreeDiskSpace.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
+php/src/Cron/OutdatedNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
+php/src/Cron/UpdateNotification.php AIO's notifications in Spanish, naming «APS Conecta Gestión»
+php/src/Data/ConfigurationManager.php Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Desec/DesecManager.php Spanish «APS Conecta Gestión» text on AIO's page
+php/src/Docker/DockerActionManager.php an image_tag that is a sha256 digest is requested as image@digest; Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/already-installed.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/components/container-state.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/containers.twig Spanish «APS Conecta Gestión» text on AIO's page; upstream's switch for the unused Nextcloud major upgrade turned off
+php/templates/desec.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/includes/aio-config.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/includes/backup-dirs.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/includes/community-containers.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/includes/desec-domain-notice.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/includes/desec-register.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/includes/optional-containers.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/layout.twig Spanish «APS Conecta Gestión» text on AIO's page, favicon and AGPL source-code link
+php/templates/log.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/login.twig Spanish «APS Conecta Gestión» text on AIO's page
+php/templates/setup.twig Spanish «APS Conecta Gestión» text on AIO's page

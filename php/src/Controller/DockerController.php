@@ -307,7 +307,7 @@ readonly class DockerController {
         }
 
         if ($addToStreamingResponseBody !== null) {
-            $addToStreamingResponseBody("Stopping container", $container);
+            $addToStreamingResponseBody("Deteniendo el contenedor", $container);
         }
 
         // Stop itself first and then all the dependencies
@@ -352,7 +352,7 @@ readonly class DockerController {
         $this->dockerActionManager->RunNextcloudUpgradeToLatestMajor($addToStreamingResponseBody);
 
         // We automatically reload after 10s so that the output can be read or copied if necessary 
-        $addToStreamingResponseBody("Automatically reloading the page after 10s."); 
+        $addToStreamingResponseBody("La página se recargará automáticamente en 10 s."); 
         sleep(10); 
  
         // End streaming response
