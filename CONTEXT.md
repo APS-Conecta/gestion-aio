@@ -63,7 +63,8 @@ hands it over; then the wizard closes.
 
 **Component** (componente):
 An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
-full-text search and the app server (HaRP). Every other optional container stays off.
+full-text search and the app server (HaRP), and Talk recording on a server that passes the recording threshold. Every
+other optional container stays off.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
