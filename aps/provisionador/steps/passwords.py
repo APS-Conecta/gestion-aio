@@ -3,7 +3,7 @@
 """The passwords file: the suite administrator's first password and AIO's passphrase, kept on the server readable by
 root alone and handed over at «Listo»."""
 
-from suite import Unreachable, write_root_only
+from suite import write_root_only
 
 NAME = "Archivo de contraseñas"
 NEEDS = ("start",)
@@ -25,8 +25,7 @@ def text(context):
 
 def run(context):
     write_root_only(context.folder / FILE, text(context))
-    for reason in check(context):
-        raise Unreachable(reason)
+    return check(context)
 
 
 def check(context):

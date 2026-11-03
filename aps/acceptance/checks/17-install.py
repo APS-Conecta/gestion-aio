@@ -97,19 +97,21 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.screenshot(path=evidence / "listo.png")
     print(f"reach: {page.inner_text('#reach')}")
     context.close()
-    carried = [e["request"]["url"] for e in json.loads(har.read_text(encoding="utf-8"))["log"]["entries"]
-               if passphrase in e["response"]["content"].get("text", "")
-               and not e["request"]["url"].endswith("/api/close")]
+    answers = [(e["request"]["url"], e["response"]["content"].get("text", ""))
+               for e in json.loads(har.read_text(encoding="utf-8"))["log"]["entries"]]
 
 unshown = [c for c in CHOSEN if c not in seen or seen[c][0] == "running" or seen[c][-1] != "running"]
 if unshown:
     sys.exit(f"the progress did not show these containers waiting or starting, then running: {unshown}")
-if carried:
-    sys.exit(f"these answers of the wizard carried AIO's passphrase: {carried}")
 
 config = json.loads(aio("configuration.json"))
+administrator = config["secrets"]["NEXTCLOUD_PASSWORD"]  # never printed; run.sh masks it once AIO made it
+carried = [url for url, text in answers
+           if (passphrase in text or administrator in text) and not url.endswith("/api/close")]
+if carried:
+    sys.exit(f"these answers of the wizard carried AIO's passphrase or the administrator's password: {carried}")
 kept = machine(f"sudo cat {KEPT}")
-if not (handed == kept and passphrase in kept and config["secrets"]["NEXTCLOUD_PASSWORD"] in kept):
+if not (handed == kept and passphrase in kept and administrator in kept):
     sys.exit("the passwords file «Listo» handed over is not the machine's copy with the administrator's first password "
              "and AIO's passphrase")
 reported = {key: config.get(key) for key in SWITCHES}

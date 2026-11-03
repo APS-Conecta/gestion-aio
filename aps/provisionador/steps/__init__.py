@@ -5,10 +5,12 @@
 A step module, whose name is its id, declares:
   NAME            its Spanish name, as the progress and the red list show it
   NEEDS           the ids of the steps that must be green before it runs
-  run(context)    its work, idempotent; it raises Unreachable, whose Spanish message the red list shows, when the
-                  suite does not do what was asked: no step reports success without doing its work
+  run(context)    its work, idempotent; it returns what went wrong as Spanish reasons, which the red list shows, and
+                  None or [] once the work is done: no step reports success without doing its work
   check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
-                  differences between the running suite and what the step declared, none when it is clean
+                  differences between the running suite and what the step declared, None or [] when it is clean
+Both answer the same way; only the suite port raises, Unreachable with its Spanish reason, and the runner turns that
+into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
 address (`inside`), the folder the Provisionador keeps its files in (`folder`) and the ids of the steps a
 Provisionador restart cut short (`interrupted`). A new step is a new module: no other file lists the steps.
@@ -16,8 +18,6 @@ Provisionador restart cut short (`interrupted`). A new step is a new module: no 
 
 import json
 import time
-
-from suite import Unreachable
 
 POLL = 1  # seconds between two readings of the suite while a step waits for it
 DIFFERS = ("Nextcloud no conserva estos ajustes: {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
@@ -43,7 +43,6 @@ def differences(suite, settings):
 
 
 def configure(suite, settings):
-    """Import the settings with occ, then make sure Nextcloud holds them."""
+    """Import the settings with occ; what Nextcloud then does not hold, as `differences` answers it."""
     suite.occ("config:import", stdin=json.dumps(settings))
-    for reason in differences(suite, settings):
-        raise Unreachable(reason)
+    return differences(suite, settings)

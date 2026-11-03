@@ -402,11 +402,13 @@ class Direccion(WizardTest):
 
 
 COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch", "harp"}
-STEPS = ["Componentes", "Copias de seguridad", "Inicio de la suite", "Archivo de contraseñas", "Certificado del ISP",
-         "Dirección de la suite", "Idioma y formato regional", "Sesiones y registro de auditoría",
-         "Tareas en segundo plano", "Zona horaria"]
+# This ticket's steps, by what they need of the suite: Nextcloud's command line, or AIO and the name service alone.
+# Later tickets add steps of their own; these tests go by these.
 NEEDS_NEXTCLOUD = {"Certificado del ISP", "Idioma y formato regional", "Sesiones y registro de auditoría",
                    "Tareas en segundo plano", "Zona horaria"}
+AIO_SIDE = {"Componentes", "Copias de seguridad", "Inicio de la suite", "Dirección de la suite",
+            "Archivo de contraseñas"}
+SECURITY = "Sesiones y registro de auditoría"
 
 
 class InstallTest(WizardTest):
@@ -464,6 +466,10 @@ class InstallTest(WizardTest):
         """Each step's status and reason, by its Spanish name."""
         return {s["name"]: (s["status"], s.get("reason")) for s in install["steps"]}
 
+    def named(self, install, status):
+        """The steps with that status."""
+        return {name for name, (now, _) in self.steps(install).items() if now == status}
+
 
 class Instalar(InstallTest):
     """«Revisar» and «Instalar»: one summary, then the install's steps, each once the steps it needs are green; the
@@ -492,7 +498,8 @@ class Instalar(InstallTest):
         status, body = self.install()
         self.assertEqual((status, body["install"]["status"]), (202, "installing"))
         install = self.until("done")
-        self.assertEqual(self.steps(install), {name: ("green", None) for name in STEPS})
+        self.assertLessEqual(NEEDS_NEXTCLOUD | AIO_SIDE, set(self.steps(install)))
+        self.assertEqual(self.named(install, "green"), set(self.steps(install)), "every step the API lists is green")
         self.assertEqual(self.suite.switched, COMPONENTS)
         self.assertEqual(self.suite.backup, ("/var/backups/aps-conecta", "06:00"))
         self.assertEqual(self.suite.starts, 1)
@@ -562,7 +569,7 @@ class Instalar(InstallTest):
         self.assertEqual((self.suite.starts, len(self.suite.commands)), (1, commands))
 
 
-class Pasos(InstallTest):
+class StepRunner(InstallTest):
     """The step runner: a failed step never stops the steps that do not need it, its dependents wait, each red step
     says why, and «Reintentar» reruns only those."""
 
@@ -578,7 +585,7 @@ class Pasos(InstallTest):
         self.assertEqual(steps["Inicio de la suite"],
                          ("waiting", "Espera a que se complete: «Componentes», «Copias de seguridad»."))
         self.assertEqual(steps["Dirección de la suite"], ("green", None), "it needs no other step")
-        for name in set(STEPS) - {"Componentes", "Copias de seguridad", "Inicio de la suite", "Dirección de la suite"}:
+        for name in NEEDS_NEXTCLOUD | {"Archivo de contraseñas"}:
             self.assertEqual(steps[name], ("waiting", "Espera a que se complete: «Inicio de la suite»."), name)
         self.assertEqual((self.suite.starts, self.suite.commands), (0, []))
         self.suite.down = set()
@@ -590,12 +597,11 @@ class Pasos(InstallTest):
         self.claim()
         del self.suite.apps["admin_audit"]
         self.install()
-        steps = self.steps(self.until("failed"))
-        status, reason = steps["Sesiones y registro de auditoría"]
+        install = self.until("failed")
+        status, reason = self.steps(install)[SECURITY]
         self.assertEqual(status, "failed")
         self.assertIn("occ app:enable admin_audit", reason)
-        self.assertEqual({name for name, (status, _) in steps.items() if status != "green"},
-                         {"Sesiones y registro de auditoría"})
+        self.assertLessEqual((NEEDS_NEXTCLOUD - {SECURITY}) | AIO_SIDE, self.named(install, "green"))
         self.assertNotIn("session_lifetime", self.suite.system, "no setting of a failed step is reported as made")
 
     def test_reintentar_reruns_only_the_failed_and_waiting_steps(self):
@@ -603,24 +609,25 @@ class Pasos(InstallTest):
         del self.suite.apps["admin_audit"]
         self.install()
         self.until("failed")
-        done, starts = len(self.suite.commands), self.suite.starts
+        imports, starts = len(self.suite.imports), self.suite.starts
         self.suite.apps["admin_audit"] = {}
         self.install()
-        self.assertEqual(self.steps(self.until("done"))["Sesiones y registro de auditoría"], ("green", None))
-        changes = [c for c in self.suite.commands[done:] if c != ("config:list",)]
-        self.assertEqual(changes, [("app:enable", "admin_audit"), ("config:import",)])
+        self.assertEqual(self.steps(self.until("done"))[SECURITY], ("green", None))
+        imported = {key for settings in self.suite.imports[imports:] for key in settings.get("system", {})}
+        self.assertIn("session_lifetime", imported)
+        self.assertFalse(imported & {"default_language", "default_timezone", "maintenance_window_start"},
+                         "a green step does not run again")
         self.assertEqual((self.suite.starts, self.suite.system["session_lifetime"]), (starts, 900))
 
     def test_a_nextcloud_that_does_not_answer_fails_every_step_that_needs_it(self):
         self.claim()
         self.suite.down = {"nextcloud"}
         self.install()
-        steps = self.steps(self.until("failed"))
+        install = self.until("failed")
+        self.assertLessEqual(NEEDS_NEXTCLOUD, self.named(install, "failed"))
         for name in NEEDS_NEXTCLOUD:
-            self.assertEqual(steps[name][0], "failed", name)
-            self.assertIn("contenedor de Nextcloud no responde", steps[name][1])
-        self.assertEqual({name for name, (status, _) in steps.items() if status == "green"},
-                         set(STEPS) - NEEDS_NEXTCLOUD)
+            self.assertIn("contenedor de Nextcloud no responde", self.steps(install)[name][1])
+        self.assertLessEqual(AIO_SIDE, self.named(install, "green"))
         self.assertEqual((self.suite.system, self.suite.issuers), ({}, []))
 
     def test_listo_waits_until_the_suite_answers_at_its_name_once_its_inside_address_is_published_again(self):
@@ -640,22 +647,21 @@ class Pasos(InstallTest):
         steps = self.steps(self.until("failed"))
         self.assertEqual(steps["Certificado del ISP"][0], "failed")
         self.assertIn("www.ispch.gob.cl", steps["Certificado del ISP"][1])
-        self.assertEqual(steps["Sesiones y registro de auditoría"][0], "green")
+        self.assertEqual(steps[SECURITY][0], "green")
         self.suite.system["session_lifetime"] = 86400
         self.suite.down = set()
         self.install()
-        steps = self.steps(self.until("failed"))
-        status, reason = steps["Sesiones y registro de auditoría"]
+        install = self.until("failed")
+        status, reason = self.steps(install)[SECURITY]
         self.assertEqual(status, "failed")
         self.assertIn("session_lifetime", reason)
-        self.assertEqual({name for name, (status, _) in steps.items() if status != "green"},
-                         {"Sesiones y registro de auditoría"})
+        self.assertLessEqual((NEEDS_NEXTCLOUD - {SECURITY}) | AIO_SIDE, self.named(install, "green"))
         self.install()
         self.until("done")
         self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
 
 
-class Reanudar(InstallTest):
+class InterruptedInstall(InstallTest):
     """An install that a Provisionador restart cut short resumes by itself, from AIO's own state."""
 
     def restart(self):

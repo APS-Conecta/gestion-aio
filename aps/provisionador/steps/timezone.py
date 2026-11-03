@@ -14,7 +14,7 @@ def settings(context):
 
 
 def run(context):
-    configure(context.suite, settings(context))
+    return configure(context.suite, settings(context))
 
 
 def check(context):

@@ -15,7 +15,7 @@ SETTINGS = {"system": {"remember_login_cookie_lifetime": 0, "session_lifetime": 
 
 def run(context):
     context.suite.occ("app:enable", AUDIT)
-    configure(context.suite, SETTINGS)
+    return configure(context.suite, SETTINGS)
 
 
 def check(context):

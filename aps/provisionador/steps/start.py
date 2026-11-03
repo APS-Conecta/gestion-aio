@@ -9,7 +9,7 @@ sent; while it does, the step waits for it instead of sending another one.
 
 from steps import until
 from steps.components import named
-from suite import NOT_STARTED, Unreachable
+from suite import NOT_STARTED
 
 NAME = "Inicio de la suite"
 NEEDS = ("components", "backups")
@@ -36,11 +36,10 @@ def run(context):
     listed = states(context.suite)
     if "start" in context.interrupted and any(c["state"] != "stopped" for c in listed.values()):
         if not started(until(lambda: states(context.suite), started, WAIT)):
-            raise Unreachable(NOT_STARTED)
+            return [NOT_STARTED]
     elif not started(listed):
         context.suite.start()
-    for reason in problems(until(lambda: states(context.suite), lambda now: not problems(now), WAIT)):
-        raise Unreachable(reason)
+    return problems(until(lambda: states(context.suite), lambda now: not problems(now), WAIT))
 
 
 def check(context):

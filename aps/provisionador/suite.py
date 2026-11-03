@@ -371,6 +371,7 @@ class FakeSuite:
         self.system = {}  # Nextcloud's system settings
         self.apps = {"core": {}, "admin_audit": {}}  # each installed app's settings
         self.commands = []  # every occ command, by its arguments
+        self.imports = []  # the settings each config:import brought
         self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
 
     def claim(self, code, name):
@@ -438,6 +439,7 @@ class FakeSuite:
             return json.dumps({"system": self.system, "apps": self.apps})
         if args == ("config:import",):
             settings = json.loads(stdin)
+            self.imports.append(settings)
             self.system.update(settings.get("system", {}))
             for app, values in settings.get("apps", {}).items():
                 self.apps.setdefault(app, {}).update(values)

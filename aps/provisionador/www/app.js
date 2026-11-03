@@ -285,8 +285,9 @@ async function listo(name) {
       + "contraseñas, con la del administrador de la suite y la frase de contraseña de la página de AIO, y guárdelo en "
       + "un lugar seguro. Una copia queda en el servidor, legible solo por root.");
   } catch {
-    status("closed", "El asistente de instalación ya se cerró. El archivo de contraseñas quedó en el servidor, legible "
-      + "solo por root: vuelva a ejecutar el comando de instalación para ver dónde.", true);
+    status("closed", "No se pudo confirmar el cierre del asistente. Vuelva a ejecutar el comando de instalación: si el "
+      + "asistente sigue abierto, imprimirá un enlace nuevo para descargar el archivo de contraseñas; si ya se cerró, "
+      + "indicará dónde quedó en el servidor.", true);
   }
 }
 

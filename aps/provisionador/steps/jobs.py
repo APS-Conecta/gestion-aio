@@ -14,7 +14,7 @@ SETTINGS = {"system": {"maintenance_window_start": MAINTENANCE_WINDOW},
 
 
 def run(context):
-    configure(context.suite, SETTINGS)
+    return configure(context.suite, SETTINGS)
 
 
 def check(context):

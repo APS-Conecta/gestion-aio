@@ -12,7 +12,7 @@ SETTINGS = {"system": {"default_language": "es", "force_language": "es", "defaul
 
 
 def run(context):
-    configure(context.suite, SETTINGS)
+    return configure(context.suite, SETTINGS)
 
 
 def check(context):
