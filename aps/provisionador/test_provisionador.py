@@ -148,7 +148,7 @@ class OneTimeLink(WizardTest):
         browser = Browser(self.link().url)
         for method, path in (("GET", "/api/state"), ("GET", "/api/register"),
                              ("GET", "/api/establishments?name=castanos"), ("POST", "/api/centre"),
-                             ("POST", "/api/address"), ("POST", "/api/install")):
+                             ("POST", "/api/address"), ("POST", "/api/teams"), ("POST", "/api/install")):
             status, body = browser.request(method, path, {} if method == "POST" else None)
             self.assertEqual(status, 401, path)
             self.assertIn("enlace", body["error"])
@@ -912,6 +912,146 @@ class Apps(InstallTest):
         self.until("done")
         self.assertEqual(self.lock()[app["id"]], locked, "a retry installs the tag the lock file records")
         self.assertIn(app["id"], self.enabled())
+
+
+TEAMS = {"sectors": ["Norte", "Sector Sur", "sector norte", " "],
+         "programs": ["Programa Atención Domiciliaria", "Salud Mental/Adulto"]}
+DECLARED = [
+    {"id": "sector-norte", "kind": "sector", "name": "Sector Norte", "folder": "Sectores/Sector Norte"},
+    {"id": "sector-sur", "kind": "sector", "name": "Sector Sur", "folder": "Sectores/Sector Sur"},
+    {"id": "prog-atencion-domiciliaria", "kind": "program", "name": "Programa Atención Domiciliaria",
+     "folder": "Programas/Atención Domiciliaria"},
+    {"id": "prog-salud-mental-adulto", "kind": "program", "name": "Programa Salud Mental-Adulto",
+     "folder": "Programas/Salud Mental-Adulto"}]
+CARGO = {"director", "subdirector", "jefe.farmacia", "jefe.some", "jefe.norte", "jefe.sur"}
+READ, READ_SHARE, EDIT, MANAGE = 1, 17, 7, 31  # Groupfolders' permission bits
+FOLDERS_STEP = "Carpetas de equipo y permisos"
+
+
+class Equipos(InstallTest):
+    """«Equipos»: each sector and program the operator types becomes a team, with its group and its folder, and each
+    sector a cargo account; «Revisar» follows them until «Instalar». The install creates the groups, the group folders
+    with their permissions, the welcome page every staff member lands on and the cargo accounts, whose first passwords
+    the passwords file lists."""
+
+    def teams(self, **body):
+        return self.browser.request("POST", "/api/teams", body)
+
+    def folders(self):
+        """Each group folder by its mount point: each group's permissions and the files seeded in it."""
+        return {f["mount"]: f for f in self.suite.group_folders.values()}
+
+    def test_each_sector_and_program_becomes_one_team_with_its_group_and_folder(self):
+        status, body = self.teams(**TEAMS)
+        self.assertEqual((status, body["teams"]), (200, DECLARED))
+        self.assertEqual(self.browser.get("/api/state")[1]["teams"], DECLARED)
+
+    def test_a_name_that_is_not_one_line_of_text_is_refused_and_changes_nothing(self):
+        for body in ({"sectors": "Norte"}, {"programs": [3]}, {"sectors": ["Nor\x00te"]}, {"programs": ["x" * 61]}):
+            status, answer = self.teams(**body)
+            self.assertEqual(status, 400, body)
+            self.assertTrue(answer["error"], body)
+        self.assertEqual(self.browser.get("/api/state")[1]["teams"], [])
+
+    def test_revisar_follows_the_teams_and_their_cargo_accounts_until_instalar_then_they_stay(self):
+        self.claim()
+        self.teams(**TEAMS)
+        state = self.browser.get("/api/state")[1]
+        self.assertEqual({a["user"] for a in state["cargo_accounts"]}, CARGO)
+        self.assertEqual(self.teams(sectors=["Oriente"], programs=[])[0], 200)
+        state = self.browser.get("/api/state")[1]
+        self.assertEqual([t["name"] for t in state["teams"]], ["Sector Oriente"])
+        self.assertEqual({a["user"] for a in state["cargo_accounts"]},
+                         CARGO - {"jefe.norte", "jefe.sur"} | {"jefe.oriente"})
+        self.install()
+        self.until("done")
+        status, body = self.teams(**TEAMS)
+        self.assertEqual(status, 409)
+        self.assertIn("«Instalar»", body["error"])
+        self.assertEqual([t["name"] for t in self.browser.get("/api/state")[1]["teams"]], ["Sector Oriente"])
+        self.assertIn("sector-oriente", self.suite.groups)
+
+    def test_instalar_creates_the_groups_and_the_group_folders_with_their_permissions(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.install()
+        self.until("done")
+        groups = {gid: group["name"] for gid, group in self.suite.groups.items()}
+        self.assertLessEqual({"all-staff": "Todo el personal", "cat-jefaturas": "Jefaturas", "cat-clinicos": "Clínicos",
+                              "cat-tecnicos": "Técnicos", "cat-administrativos": "Administrativos",
+                              "role-director-cesfam": "Director/a de CESFAM", "role-oirs": "Encargado/a OIRS",
+                              "sector-norte": "Sector Norte", "prog-salud-mental-adulto": "Programa Salud Mental-Adulto"
+                              }.items(), groups.items())
+        self.assertEqual(len([gid for gid in groups if gid.startswith("role-")]), 23)
+        folders = {mount: folder["groups"] for mount, folder in self.folders().items()}
+        self.assertLessEqual({
+            "Transversal": {"all-staff": READ, "cat-jefaturas": MANAGE},
+            "Sectores/Sector Norte": {"sector-norte": MANAGE, "cat-jefaturas": MANAGE},
+            "Programas/Atención Domiciliaria": {"prog-atencion-domiciliaria": MANAGE, "cat-jefaturas": MANAGE},
+            "Unidades/Farmacia": {"role-quimico-farmaceutico": MANAGE, "role-tens-farmacia": MANAGE,
+                                  "cat-jefaturas": READ_SHARE},
+            "Unidades/Dirección": {"cat-jefaturas": MANAGE}}.items(), folders.items())
+        self.assertEqual(len([m for m in folders if m.split("/")[0] in ("Sectores", "Programas", "Unidades")]), 10)
+        self.assertEqual(self.folders()["Transversal"]["files"], dict.fromkeys(
+            ["Protocolos", "Flujogramas", "Documentación", "Registro de redes", "Actas de reuniones"]))
+
+    def test_the_cargo_accounts_join_their_groups_and_the_passwords_file_lists_each_first_password(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.install()
+        self.until("done")
+        self.assertLessEqual(CARGO, set(self.suite.users))
+        members = {gid: group["members"] for gid, group in self.suite.groups.items()}
+        for user, groups in (("director", ("role-director-cesfam", "cat-jefaturas", "all-staff")),
+                             ("jefe.some", ("role-jefe-some", "cat-jefaturas", "all-staff")),
+                             ("jefe.norte", ("role-jefe-sector-mais", "sector-norte", "cat-jefaturas", "all-staff"))):
+            self.assertEqual({gid for gid, users in members.items() if user in users}, set(groups), user)
+        self.assertEqual(self.suite.users["jefe.norte"]["name"], "Jefe/a de Sector Norte")
+        passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
+        for user in CARGO:
+            self.assertIn(f"  Usuario: {user}\n  Contraseña: {self.suite.users[user]['password']}\n", passwords)
+        self.assertEqual(len({self.suite.users[user]["password"] for user in CARGO}), len(CARGO))
+
+    def test_every_staff_member_lands_on_the_welcome_page_which_names_the_establishment(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.system["defaultapp"], "intravox")
+        intranet = self.folders()["Intranet"]
+        self.assertLessEqual({"all-staff": READ, "cat-jefaturas": EDIT, "role-oirs": EDIT}.items(),
+                             intranet["groups"].items())
+        home = json.loads(intranet["files"]["es/home.json"])
+        self.assertEqual(home["title"], "Inicio")
+        self.assertIn("Centro de Salud Familiar Los Castaños", json.dumps(home, ensure_ascii=False))
+        self.assertEqual(json.loads(intranet["files"]["es/navigation.json"])["items"][0]["uniqueId"], home["uniqueId"])
+
+    def test_the_end_of_install_check_finds_an_undeclared_grant_and_reintentar_revokes_it_keeping_every_password(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        north = self.folders()["Sectores/Sector Norte"]
+        north["groups"]["all-staff"] = MANAGE
+        first = {user: self.suite.users[user]["password"] for user in CARGO}
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))[FOLDERS_STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn("Sectores/Sector Norte", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(north["groups"], {"sector-norte": MANAGE, "cat-jefaturas": MANAGE})
+        self.assertEqual({user: self.suite.users[user]["password"] for user in CARGO}, first)
+
+    def test_the_folder_and_welcome_steps_wait_for_the_apps_that_hold_them(self):
+        self.claim()
+        self.suite.store.remove("groupfolders")
+        self.install()
+        steps = self.steps(self.until("failed"))
+        for name in (FOLDERS_STEP, "Página de bienvenida"):
+            self.assertEqual(steps[name], ("waiting", "Espera a que se complete: «Aplicaciones»."), name)
+        self.assertEqual((steps["Grupos y equipos"][0], steps["Cuentas de cargo"][0]), ("green", "green"))
+        self.assertEqual(self.suite.group_folders, {})
 
 
 class InterruptedInstall(InstallTest):
