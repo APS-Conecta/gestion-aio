@@ -23,15 +23,13 @@ WAITING = "Espera a que se complete: {}."
 
 
 def discover():
-    """Every step module, by id, each after the steps it needs; steps of one rank by id. A step that needs a step this
-    build lacks keeps its place, and waits for it when it runs."""
+    """Every step module, by id, each after the steps it needs; steps of one rank by id."""
     found = {m.name: importlib.import_module(f"steps.{m.name}") for m in pkgutil.iter_modules(steps.__path__)}
     ordered = []
     while len(ordered) < len(found):
-        ready = sorted(name for name, step in found.items()
-                       if name not in ordered and set(step.NEEDS) & set(found) <= set(ordered))
+        ready = sorted(name for name, step in found.items() if name not in ordered and set(step.NEEDS) <= set(ordered))
         if not ready:
-            raise RuntimeError(f"steps that need circular steps: {sorted(set(found) - set(ordered))}")
+            raise RuntimeError(f"steps that need unknown or circular steps: {sorted(set(found) - set(ordered))}")
         ordered += ready
     return {name: found[name] for name in ordered}
 
@@ -76,8 +74,7 @@ def run(state, context):
         if name not in unfinished(install):
             continue
         status = {n: r["status"] for n, r in install["steps"].items()}
-        blocked = [f"«{STEPS[need].NAME if need in STEPS else need}»" for need in step.NEEDS
-                   if status.get(need) != "green"]
+        blocked = [f"«{STEPS[need].NAME}»" for need in step.NEEDS if status[need] != "green"]
         if blocked:
             record(state, name, "waiting", [WAITING.format(", ".join(blocked))])
             continue
