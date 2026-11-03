@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The pinned suite comes up: the mastercontainer starts it (through start-suite.sh until the Provisionador
-# does), every container it started runs an image the release pins by digest, and Nextcloud turns healthy.
+# The pinned suite comes up at the name «Dirección» claimed: the mastercontainer starts it (through start-suite.sh
+# until the Provisionador does), every container it started runs an image the release pins by digest, our Caddy
+# image as the reverse proxy included, and Nextcloud turns healthy.
 set -euo pipefail
-"$MACHINE" bash -s example.com < aps/acceptance/start-suite.sh
+"$MACHINE" bash -s < aps/acceptance/start-suite.sh
 lock="$("$MACHINE" cat /opt/aps-conecta/gestion/images.lock)"
 started="$("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" | { grep -vx nextcloud-aio-mastercontainer || true; })"
 for name in $started; do
@@ -12,7 +13,9 @@ for name in $started; do
   echo "$name $image"
   grep -qxF "$image" <<< "$lock" || { echo "$name runs $image, which $TAG does not pin" >&2; exit 1; }
 done
-grep -qx nextcloud-aio-nextcloud <<< "$started" || { echo "the mastercontainer did not start Nextcloud" >&2; exit 1; }
+for name in nextcloud-aio-nextcloud nextcloud-aio-caddy; do
+  grep -qx "$name" <<< "$started" || { echo "the mastercontainer did not start $name" >&2; exit 1; }
+done
 for _ in $(seq 90); do
   [ "$("$MACHINE" "sudo docker inspect -f '{{.State.Health.Status}}' nextcloud-aio-nextcloud")" = healthy ] && exit 0
   sleep 10

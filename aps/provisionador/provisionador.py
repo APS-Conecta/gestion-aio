@@ -6,6 +6,8 @@
   provisionador.py serve   serve the wizard over HTTPS (the systemd unit the bootstrap installs)
   provisionador.py link    print a fresh one-time link to the running wizard, its QR code and the
                            certificate's fingerprint (the bootstrap's last step, on every run)
+  provisionador.py publish publish the server's inside address at its claimed name (the host's timer,
+                           every 10 minutes)
 
 Its one public surface is the HTTP API under /api, which the page in www/ uses and the wizard-API tests
 drive. The state lives in one JSON file on the server, so a reload, a restart or a rerun resumes it.
@@ -33,7 +35,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 import deis
-from suite import Suite
+from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -41,9 +43,11 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset
 # The page and what it loads, by name: no request path is ever joined to a directory.
 STATIC = {f"/{p.name}": p for p in (HERE / "www").iterdir() if p.suffix in CONTENT_TYPES}
 STATIC["/"] = HERE / "www" / "index.html"
-CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; base-uri 'none'; form-action 'none'; "
-       "frame-ancestors 'none'")
+# connect-src: the browser-side check that this computer opens the suite at its name.
+CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; "
+       "connect-src 'self' https://*.gestion.apsconecta.cl; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
+SERVICES = HERE.parent / "services.json"  # the release's name service and ACME directory
 PORT = 8081  # clear of AIO's 80, 443, 3478, 8080 and 8443
 COOKIE = "__Host-session"
 MAX_BODY = 64 * 1024
@@ -52,6 +56,10 @@ NOT_JSON = "La solicitud no es JSON válido."
 NO_SESSION = "Abra el enlace que mostró el comando de instalación."
 LINK_REFUSED = ("Este enlace ya se usó o fue reemplazado. Para obtener uno nuevo, vuelva a ejecutar el "
                 "comando de instalación en el servidor.")
+NO_CENTRE = "Elija primero el centro: la dirección es la de su nombre."
+IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este establecimiento ya tenía una instalación, "
+          "APS Conecta puede liberarla; después presione «Reintentar».")
+CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 
 
 def digest(value):
@@ -138,6 +146,7 @@ class Provisionador:
     def __init__(self, state_dir, register, suite):
         self.state = State(state_dir)
         self.register = deis.Register(register)
+        self.slugs = deis.slugs(self.register.rows)
         self.suite = suite
         self.fingerprint = None
 
@@ -171,8 +180,20 @@ class Provisionador:
             s["sessions"] = s.get("sessions", []) + [digest(new_session)]
         return 200, {"ok": True}, new_session
 
+    def name(self, code):
+        """The establishment's name: its slug from the slug table under the name service's suffix."""
+        return f"{self.slugs[code]}.{self.suite.suffix}"
+
+    def address(self, state):
+        """The centre's name and whether it is claimed; once claimed, whether the suite answers at it."""
+        claimed, centre = state.get("address"), state.get("centre")
+        if claimed:
+            return {**claimed, "claimed": True, "answers": self.suite.answers(claimed["name"], lan_ip())}
+        return centre and {"name": self.name(centre["code"]), "claimed": False}
+
     def get_state(self, query, body):
-        return 200, {"fingerprint": self.fingerprint, "centre": self.state.read().get("centre")}
+        state = self.state.read()
+        return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -195,20 +216,48 @@ class Provisionador:
             return 400, {"error": "El punto del mapa debe tener una latitud entre -90 y 90 y una longitud "
                                   "entre -180 y 180."}
         centre = deis.centre(row, point)
+        claimed = self.suite.claimed()
+        if claimed and claimed["code"] != code:
+            return 409, {"error": CENTRE_KEPT.format(claimed["name"])}
         with self.state.change() as s:
             s["centre"] = centre
         return 200, {"centre": centre}
+
+    def post_address(self, query, body):
+        """POST /api/address: claim the centre's name through the suite port, which reuses a claim that succeeded
+        before, and publish the server's inside address. The name comes from the slug table; nothing is asked."""
+        with self.state.change() as s:
+            centre = s.get("centre")
+            if centre is None:
+                return 409, {"error": NO_CENTRE}
+            if not s.get("address"):
+                name = self.name(centre["code"])
+                try:
+                    claimed = self.suite.claim(centre["code"], name)
+                except Taken:
+                    return 409, {"error": IN_USE.format(name)}
+                self.suite.publish(lan_ip())
+                s["address"] = {"name": claimed}
+        return 200, {"address": self.address(self.state.read())}
 
     ROUTES = {
         ("GET", "/api/state"): get_state,
         ("GET", "/api/register"): get_register,
         ("GET", "/api/establishments"): get_establishments,
         ("POST", "/api/centre"): post_centre,
+        ("POST", "/api/address"): post_address,
     }
 
     def call(self, method, path, query, body):
+        """The route's answer; an outage of the suite's services is answered in Spanish, and the state stays as it
+        was."""
         route = self.ROUTES.get((method, path))
-        return route(self, query, body) if route else (404, {"error": "Ruta desconocida."})
+        if route is None:
+            return 404, {"error": "Ruta desconocida."}
+        try:
+            return route(self, query, body)
+        except Unreachable as outage:
+            return 503, {"error": str(outage)}
 
 
 class Server(ThreadingHTTPServer):
@@ -342,15 +391,27 @@ def print_link(state_dir):
     print("El enlace sirve una sola vez. Para obtener uno nuevo, vuelva a ejecutar el comando de instalación.")
 
 
+def publish(suite):
+    """Publish the inside address the server reports at the claimed name; nothing before the claim."""
+    try:
+        suite.publish(lan_ip())
+    except Unreachable as outage:
+        print(outage, file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("serve", "link"))
+    parser.add_argument("command", choices=("serve", "link", "publish"))
     parser.add_argument("--state", type=Path, default=STATE_DIR, help="state directory (default: %(default)s)")
     args = parser.parse_args(argv)
     if args.command == "link":
         print_link(args.state)
         return 0
-    Provisionador(args.state, deis.newest(HERE.parent / "deis"), Suite()).server().serve_forever()
+    if args.command == "publish":
+        return publish(Suite(SERVICES))
+    Provisionador(args.state, deis.newest(HERE.parent / "deis"), Suite(SERVICES)).server().serve_forever()
     return 0
 
 

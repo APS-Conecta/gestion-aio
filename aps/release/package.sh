@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Assembles a release's assets in <out-dir>:
 #   gestion-aio-<tag>.tar.gz          the bundle: VERSION, images.lock (every image the release runs, by digest),
-#                                     the Provisionador and the DEIS register
+#                                     services.json, the Provisionador and the DEIS register
 #   install.sh                        the stable-name bootstrap, with the tag and bundle checksum filled in
 #   gestion-aio-<tag>-install.sh      the same bootstrap under its versioned name
 #   SHA256SUMS                        checksums of the three
@@ -21,10 +21,19 @@ printf '%s\n' "$tag" > "$stage/VERSION"
   printf '%s\n' "$mastercontainer" "$nextcloud" "$caddy"
   jq -r '.aio_services_v1[] | select(.image_tag | startswith("sha256:")) | "\(.image)@\(.image_tag)"' php/containers.json
 } > "$stage/images.lock"
+# The one choice between test builds and releases: a test build claims names under ci.gestion.apsconecta.cl from
+# the name service's CI deployment and gets its certificates from Let's Encrypt's staging service.
+case "$tag" in
+  v0.0.0-ci.*) url=https://gestion-nombres-ci.apsconecta.workers.dev suffix=ci.gestion.apsconecta.cl
+               acme_ca=https://acme-staging-v02.api.letsencrypt.org/directory ;;
+  *) url=https://gestion-nombres.apsconecta.workers.dev suffix=gestion.apsconecta.cl
+     acme_ca=https://acme-v02.api.letsencrypt.org/directory ;;
+esac
+jq -n --arg url "$url" --arg suffix "$suffix" --arg acme_ca "$acme_ca" '{$url, $suffix, $acme_ca}' > "$stage/services.json"
 
 mkdir -p "$out"
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 --exclude='test_*.py' -czf "$out/$bundle" \
-  -C "$stage" VERSION images.lock -C "$PWD/aps" provisionador deis
+  -C "$stage" VERSION images.lock services.json -C "$PWD/aps" provisionador deis
 sha="$(sha256sum "$out/$bundle" | cut -d ' ' -f 1)"
 sed -e "s|^RELEASE_TAG=\"\"$|RELEASE_TAG=\"$tag\"|" \
     -e "s|^BUNDLE_SHA256=\"\"$|BUNDLE_SHA256=\"$sha\"|" aps/bootstrap/install.sh > "$out/install.sh"

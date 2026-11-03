@@ -8,9 +8,9 @@
 # The release pipeline fills RELEASE_TAG and BUNDLE_SHA256 (aps/release/package.sh); the committed copy
 # refuses to run. Order: check the host without changing it; verify the bundle's checksum; install
 # Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
-# from the digest the bundle names; start the Provisionador and print its one-time link. A rerun once
-# the mastercontainer exists changes nothing else: it makes sure the Provisionador runs and prints a
-# fresh link to the same wizard state.
+# from the digest the bundle names; start the Provisionador and the inside-address timer and print the
+# one-time link. A rerun once the mastercontainer exists changes nothing else: it makes sure the
+# Provisionador and the timer run and prints a fresh link to the same wizard state.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.
@@ -139,6 +139,36 @@ EOF
     || die "no se pudo iniciar el Provisionador. Revise su registro con: journalctl -u aps-provisionador"
 }
 
+# The name «Dirección» claimed follows the server's inside address: every 10 minutes the host publishes it with
+# the claim's root-only credential (until the claim, there is nothing to publish).
+start_address_timer() {
+  cat > /etc/systemd/system/aps-address.service <<EOF
+[Unit]
+Description=APS Conecta Gestión: publica la dirección interna del servidor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 $INSTALL_DIR/provisionador/provisionador.py publish
+EOF
+  cat > /etc/systemd/system/aps-address.timer <<EOF
+[Unit]
+Description=APS Conecta Gestión: publica la dirección interna del servidor cada 10 minutos
+
+[Timer]
+OnActiveSec=1min
+OnUnitActiveSec=10min
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now aps-address.timer >/dev/null 2>&1 \
+    || die "no se pudo activar la publicación de la dirección interna. Revise: systemctl status aps-address.timer"
+}
+
 # The link carries the wizard's secret: it goes to this console only.
 print_link() {
   say ""
@@ -153,6 +183,7 @@ main() {
   fi
   if command -v docker >/dev/null 2>&1 && docker container inspect nextcloud-aio-mastercontainer >/dev/null 2>&1; then
     start_provisionador
+    start_address_timer
     print_link
     return 0
   fi
@@ -164,6 +195,7 @@ main() {
   unpack
   start_mastercontainer
   start_provisionador
+  start_address_timer
   print_link
 }
 
