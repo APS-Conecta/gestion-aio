@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""«Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on to
-«Revisar», which summarises the centre's address, the components and the backups; «Instalar» shows each step and, once
-AIO runs our components, each container's progress live until «Listo» shows the suite's address. There the wizard hands
-over the passwords file, the same as the root-only copy on the machine, with the administrator's first password and
-AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's answer, the router
-change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after «Instalar»). AIO
-reports our components on, every other optional one off and nightly backups to the backup folder. AIO's passphrase
-reaches the browser only in the passwords file, and on the machine only root reads the file AIO keeps it in."""
+"""«Equipos», «Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on
+to «Equipos», where the operator types the sectors and programs and sees the team each becomes, then to «Revisar», which
+summarises the centre's address, the teams, the cargo accounts, the components and the backups; «Instalar» shows each
+step and, once AIO runs our components, each container's progress live until «Listo» shows the suite's address. There
+the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's first
+password and AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's answer,
+the router change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after
+«Instalar»). AIO reports our components on, every other optional one off and nightly backups to the backup folder.
+AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO keeps
+it in."""
 
 import json
 import os
@@ -20,25 +22,30 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
+import teams  # noqa: E402
 from browser import chromium, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import COMPONENTS  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 
+SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
+DECLARED = teams.declare(SECTORS, PROGRAMS)
 CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": True, "isTalkRecordingEnabled": False,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 AIO_DATA = "/mnt/docker-aio-config/data"
-KEPT = f"/var/lib/aps-conecta/provisionador/{FILE}"  # the passwords file's root-only copy
+FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the passwords file's root-only copy
+KEPT = f"{FOLDER}/{FILE}"
 
 
 def aio(file):
     return machine(f"sudo docker exec nextcloud-aio-mastercontainer cat {AIO_DATA}/{file}")
 
 
+centre = json.loads(machine(f"sudo cat {FOLDER}/state.json"))["centre"]  # as 15-wizard chose it
 config = json.loads(aio("configuration.json"))
 passphrase, name = config.get("password"), config["domain"]
 if not passphrase:  # it stays in memory: run.sh masks it in the log
@@ -57,8 +64,17 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page = context.new_page()
     page.goto(link)
     page.click("#continue")
+    expect(page.get_by_role("heading", name="Equipos")).to_be_visible()
+    page.fill("#sectors", "\n".join(SECTORS))
+    page.fill("#programs", "\n".join(PROGRAMS))
+    expect(page.locator("#teams li strong")).to_have_text([team["name"] for team in DECLARED])
+    page.screenshot(path=evidence / "equipos.png")
+    page.click("#teams-continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
     expect(page.locator("#summary-address")).to_have_text(f"https://{name}")
+    expect(page.locator("#summary-teams li")).to_have_text([team["name"] for team in DECLARED])
+    expect(page.locator("#summary-cargo li")).to_have_text(
+        [f"{account['name']} ({account['user']})" for account in teams.cargo_accounts(DECLARED, centre["type"])])
     expect(page.locator("#summary-components li")).to_have_text(CHOSEN)
     expect(page.locator("#summary-backups")).to_contain_text(BACKUP_FOLDER)
     page.screenshot(path=evidence / "revisar.png")

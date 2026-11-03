@@ -54,6 +54,8 @@ GITHUB_FAILED = ("No se pudo descargar {} desde GitHub. Revise la conexión a in
                  "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 GITHUB_LIMITED = ("GitHub limitó las consultas de este servidor al pedir {}. Presione «Reintentar» en una hora; si "
                   "vuelve a ocurrir, contacte a APS Conecta.")
+SEED_FAILED = ("Nextcloud no pudo recibir las carpetas y páginas de las carpetas de equipo. Presione «Reintentar»; si "
+               "vuelve a ocurrir, contacte a APS Conecta.")
 UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de la aplicación. Presione «Reintentar»; si vuelve a ocurrir, "
                  "contacte a APS Conecta.")
 ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
@@ -141,6 +143,38 @@ openssl x509 -inform DER -in "$dir/issuer" -out "$dir/$name" 2> /dev/null \
   || openssl x509 -in "$dir/issuer" -out "$dir/$name"
 openssl verify -untrusted "$dir/$name" -verify_hostname "$host" "$dir/leaf"
 php /var/www/html/occ security:certificates:import "$dir/$name"
+"""
+
+
+# In the Nextcloud container, the account $1 named $2, unless it exists, with the first password on stdin, which occ
+# reads from its environment.
+ADD_USER = r"""
+set -eu
+php /var/www/html/occ --no-ansi user:info "$1" > /dev/null 2>&1 && exit 0
+OC_PASS=$(cat)
+export OC_PASS
+php /var/www/html/occ --no-ansi --no-interaction user:add --password-from-env --display-name="$2" "$1" > /dev/null
+"""
+
+
+# In the Nextcloud container, the group folder $1's missing folders and files, from the JSON object on stdin that holds
+# each file's text, or null for a folder, by its path in the group folder; whatever the folder holds stays. Groupfolders
+# then scans the folder, so Nextcloud lists what was added.
+SEED = r"""
+set -eu
+files="$(php /var/www/html/occ --no-ansi config:system:get datadirectory)/__groupfolders/$1/files"
+php -r '
+foreach (json_decode(stream_get_contents(STDIN), true, 3, JSON_THROW_ON_ERROR) as $path => $text) {
+    $target = $argv[1] . "/" . $path;
+    $folder = $text === null ? $target : dirname($target);
+    if (in_array("..", explode("/", $path), true) || !(is_dir($folder) || mkdir($folder, 0755, true))) {
+        exit(1);
+    }
+    if ($text !== null && !file_exists($target) && file_put_contents($target, $text) === false) {
+        exit(1);
+    }
+}' -- "$files"
+php /var/www/html/occ --no-ansi groupfolders:scan "$1" > /dev/null
 """
 
 
@@ -333,6 +367,16 @@ class Suite:
         self.execute(NEXTCLOUD, ("sh", "-c", UNPACK, "sh", app), base64.b64encode(tarball).decode(),
                      UNPACK_FAILED.format(app))
 
+    def add_user(self, user, name, password):
+        """The account, with its name and first password, unless it exists: an existing account keeps its own."""
+        self.execute(NEXTCLOUD, ("sh", "-c", ADD_USER, "sh", user, name), password,
+                     OCC_FAILED.format(f"user:add {user}"))
+
+    def seed(self, folder, files):
+        """The group folder holds each of the files it does not hold yet: their text by their path in it, None for a
+        folder. What it holds stays as staff left it."""
+        self.execute(NEXTCLOUD, ("sh", "-c", SEED, "sh", str(folder)), json.dumps(files), SEED_FAILED)
+
     def secrets(self):
         """AIO's passphrase and the first password of the suite's administrator, `admin`, as AIO keeps them here."""
         config = json.loads(self.mastercontainer("cat", AIO_CONFIG))
@@ -403,6 +447,7 @@ class FakeSuite:
     nextcloud = 34  # the major version of the Nextcloud it runs
     ADMINISTRATOR = "primera-contraseña-del-administrador"
     PASSPHRASE = "frase de contraseña de AIO"
+    PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
 
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
@@ -414,6 +459,9 @@ class FakeSuite:
         self.credential = None  # the stored claim
         self.domain = None  # the name AIO is set to
         self.published = []  # the inside addresses published
+        self.users = {"admin": {"name": "admin", "password": self.ADMINISTRATOR}}  # each account, by its username
+        self.groups = {"admin": {"name": "admin", "members": {"admin"}}}  # each group, by its id: its name and members
+        self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
         self.answering = True  # whether the suite's reverse proxy answers at its name
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
@@ -491,9 +539,12 @@ class FakeSuite:
         return [{"id": id_, "name": name, "state": state} for id_, (name, state) in self.states.items()]
 
     def occ(self, *args, stdin=""):
-        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on."""
+        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on, and
+        the teams' groups, folders and welcome page."""
         self._outage_guard("nextcloud")
         self.commands.append(args)
+        if args[0].split(":")[0] in ("group", "groupfolders", "intravox"):
+            return self._teams(*args)
         if args == ("config:list",):
             return json.dumps({"system": self.system, "apps": self.apps})
         if args == ("config:import",):
@@ -540,3 +591,65 @@ class FakeSuite:
     def secrets(self):
         self._outage_guard()
         return {"passphrase": self.PASSPHRASE, "administrator": self.ADMINISTRATOR}
+
+    def _teams(self, command, *args):
+        """occ's groups, Groupfolders' folders and IntraVox's setup, as the «Equipos» steps run them. An app's commands
+        fail while it is not enabled, as occ does not know them then."""
+        failed = Unreachable(OCC_FAILED.format(" ".join((command, *args))))
+        app = command.split(":")[0]
+        if app != "group" and self.apps.get(app, {}).get("enabled") != "yes":
+            raise failed
+        mounts = {folder["mount"]: id_ for id_, folder in self.group_folders.items()}
+        if (command, args) == ("group:list", ("--output=json",)):
+            return json.dumps({gid: sorted(group["members"]) for gid, group in self.groups.items()})
+        if command == "group:add" and len(args) == 2 and args[0].startswith("--display-name="):
+            if args[1] in self.groups:
+                raise failed
+            self.groups[args[1]] = {"name": args[0].removeprefix("--display-name="), "members": set()}
+        elif command == "group:adduser" and len(args) == 2:
+            if args[0] not in self.groups or args[1] not in self.users:
+                raise failed
+            self.groups[args[0]]["members"].add(args[1])
+        elif (command, args) == ("groupfolders:list", ("--output=json",)):
+            return json.dumps([{"id": id_, "mountPoint": folder["mount"], "groups_list": folder["groups"] or []}
+                               for id_, folder in self.group_folders.items()])
+        elif command == "groupfolders:create" and len(args) == 1:
+            if args[0] in mounts:
+                raise failed
+            return f"{self._group_folder(args[0], {})}\n"
+        elif command == "groupfolders:group" and len(args) >= 2:
+            folder, group, *words = args
+            granted = self.group_folders[int(folder)]["groups"]
+            if words == ["--delete"]:
+                granted.pop(group, None)
+            elif group in self.groups and set(words) <= self.PERMISSIONS.keys():
+                granted[group] = 1 | sum(self.PERMISSIONS[word] for word in words)
+            else:
+                raise failed
+        elif (command, args) == ("intravox:setup", ("--skip-demo",)):
+            if self.apps.get("groupfolders", {}).get("enabled") != "yes":
+                raise failed
+            for group in ("IntraVox Admins", "IntraVox Editors", "IntraVox Users"):
+                self.groups.setdefault(group, {"name": group, "members": set()})
+            mount = self.apps[app].get("groupfolder_name", "IntraVox")
+            if mount not in mounts:
+                self._group_folder(mount, {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7,
+                                           "IntraVox Users": 1})
+        elif (command, args) != ("intravox:reindex", ()):
+            raise AssertionError(f"the fake suite runs no occ {(command, *args)}")
+        return ""
+
+    def _group_folder(self, mount, groups):
+        id_ = len(self.group_folders) + 1
+        self.group_folders[id_] = {"mount": mount, "groups": groups, "files": {}}
+        return id_
+
+    def add_user(self, user, name, password):
+        self._outage_guard("nextcloud")
+        self.users.setdefault(user, {"name": name, "password": password})
+
+    def seed(self, folder, files):
+        self._outage_guard("nextcloud")
+        held = self.group_folders[folder]["files"]
+        for path, text in files.items():
+            held.setdefault(path, text)
