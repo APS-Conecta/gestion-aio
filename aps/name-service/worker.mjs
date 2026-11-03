@@ -13,6 +13,7 @@ export class Names extends DurableObject {
     this.serve = nameService({
       storage: ctx.storage, fetch: (input, init) => fetch(input, init), token: env.CLOUDFLARE_API_TOKEN,
       zone: env.ZONE, suffix: env.NAME_SUFFIX, slugs,
+      claimLimits: { perIpPerDay: env.CLAIMS_PER_IP_PER_DAY, perWeek: env.CLAIMS_PER_WEEK },
     });
   }
 

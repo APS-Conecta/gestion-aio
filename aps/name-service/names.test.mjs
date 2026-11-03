@@ -15,14 +15,18 @@ const SLUGS = { 999001: "cesfam-los-castanos", 999002: "cecosf-estrecho" };
 const CASTANOS = "cesfam-los-castanos.gestion.apsconecta.cl";
 const ESTRECHO = "cecosf-estrecho.gestion.apsconecta.cl";
 const CHALLENGE = (n) => String(n).padEnd(43, "x");
+const LIMITS = { perIpPerDay: 3, perWeek: 50 }; // production's, from wrangler.jsonc
+const DAY = 86_400_000;
+const MANY = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [String(999100 + i), `centro-${i}`]));
 
-function deployment({ suffix = "gestion.apsconecta.cl" } = {}) {
+function deployment({ suffix = "gestion.apsconecta.cl", table = SLUGS } = {}) {
   const cloudflare = fakeCloudflare({ token: TOKEN, zone: ZONE });
   const storage = fakeStorage();
   const clock = { ms: 0 };
   const start = (slugs) =>
-    nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs, now: () => clock.ms });
-  let serve = start(SLUGS);
+    nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs, claimLimits: LIMITS,
+                  now: () => clock.ms });
+  let serve = start(table);
   const post = async (path, body, headers = {}) => {
     const response = await serve(new Request(ORIGIN + path, {
       method: "POST", headers: { "Content-Type": "application/json", ...headers },
@@ -33,9 +37,9 @@ function deployment({ suffix = "gestion.apsconecta.cl" } = {}) {
   return {
     cloudflare, storage, post, clock,
     /** A redeploy, with the slug table of a later register if given. */
-    restart(slugs = SLUGS) { serve = start(slugs); },
+    restart(slugs = table) { serve = start(slugs); },
     serve: (request) => serve(request),
-    claim: (code) => post("/claim", { code }),
+    claim: (code, ip = "198.51.100.1") => post("/claim", { code }, { "CF-Connecting-IP": ip }),
     as: (credential) => ({ "X-Api-User": credential.username, "X-Api-Key": credential.password }),
     release: (code, token = TOKEN) => post("/release", { code }, { Authorization: `Bearer ${token}` }),
   };
@@ -75,6 +79,31 @@ test("a claimed name stays the code's when a later register renames it or gives 
   assert.deepEqual(names.cloudflare.records(), [`A ${CASTANOS} 10.0.0.9`, `TXT _acme-challenge.${CASTANOS} ${CHALLENGE(1)}`]);
   assert.deepEqual((await names.release("999001")).body, { name: CASTANOS });
   assert.deepEqual(names.cloudflare.records(), []);
+});
+
+test("an address claims at most three names a day; the fourth answers 429 and claims nothing", async () => {
+  const names = deployment({ table: MANY });
+  for (const code of ["999100", "999101", "999102"]) assert.equal((await names.claim(code, "203.0.113.5")).status, 201);
+  const { status, body } = await names.claim("999103", "203.0.113.5");
+  assert.equal(status, 429);
+  assert.match(body.error, /3 names today/);
+  assert.equal((await names.claim("999103", "203.0.113.6")).status, 201, "another address");
+  names.restart();
+  assert.equal((await names.claim("999104", "203.0.113.5")).status, 429, "after a restart too");
+  names.clock.ms += DAY;
+  assert.equal((await names.claim("999104", "203.0.113.5")).status, 201);
+});
+
+test("all addresses together claim at most 50 names a rolling week, and a release gives none back", async () => {
+  const names = deployment({ table: MANY });
+  for (let i = 0; i < 50; i++) assert.equal((await names.claim(String(999100 + i), `10.0.${i}.1`)).status, 201);
+  assert.equal((await names.release("999100")).status, 200);
+  names.restart();
+  const { status, body } = await names.claim("999150", "10.1.0.1");
+  assert.equal(status, 429);
+  assert.match(body.error, /50 names this week/);
+  names.clock.ms += 7 * DAY;
+  assert.equal((await names.claim("999150", "10.1.0.1")).status, 201);
 });
 
 test("concurrent claims for one code hand out one credential", async () => {

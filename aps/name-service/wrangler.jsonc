@@ -3,19 +3,25 @@
 // The APS name service. Production deploys from main to gestion-nombres.apsconecta.workers.dev; the `ci` environment
 // is the separate deployment PR runs use, gestion-nombres-ci.apsconecta.workers.dev, whose names live under
 // ci.gestion.apsconecta.cl. Its callers are the installer and Caddy, never a browser, so it is served on workers.dev,
-// outside the apsconecta.cl zone's website protection.
+// outside the apsconecta.cl zone's website protection. Each deployment keeps its own claim limits and log, so PR
+// runs never spend production's budget.
 {
   "name": "gestion-nombres",
   "main": "worker.mjs",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "preview_urls": false,
-  "vars": { "ZONE": "apsconecta.cl", "NAME_SUFFIX": "gestion.apsconecta.cl" },
+  "vars": {
+    "ZONE": "apsconecta.cl", "NAME_SUFFIX": "gestion.apsconecta.cl", "CLAIMS_PER_IP_PER_DAY": 3, "CLAIMS_PER_WEEK": 50
+  },
   "durable_objects": { "bindings": [{ "name": "NAMES", "class_name": "Names" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Names"] }],
   "env": {
     "ci": {
-      "vars": { "ZONE": "apsconecta.cl", "NAME_SUFFIX": "ci.gestion.apsconecta.cl" },
+      "vars": {
+        "ZONE": "apsconecta.cl", "NAME_SUFFIX": "ci.gestion.apsconecta.cl", "CLAIMS_PER_IP_PER_DAY": 10,
+        "CLAIMS_PER_WEEK": 1000
+      },
       "durable_objects": { "bindings": [{ "name": "NAMES", "class_name": "Names" }] }
     }
   }

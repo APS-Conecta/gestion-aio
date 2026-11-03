@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The APS name service's HTTP API: one name, <slug>.<suffix>, per DEIS code of the slug table, and for each a
 // credential that changes only that name's address records and, through acme-dns's POST /update, its
-// certificate's challenge record.
+// certificate's challenge record. Claims need no account, so a limit per client address and a rolling weekly
+// budget slow squatting but cannot prevent it; APS releases a name a squatter took (accepted risk).
 
 import { CloudflareError, dnsRecords } from "./cloudflare.mjs";
 
@@ -10,6 +11,8 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/; // an ACME DNS-01 value (base64url SHA-256), as acme-dns checks it
 const IPV4_MAPPED = /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/; // an IPv4 address dressed as IPv6, normalized
 const CHANGES_PER_MINUTE = 5; // Cloudflare changes one code may make: a certificate takes one or two
+const DAY = 86_400_000;
+const WEEK = 7 * DAY;
 
 const answer = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -77,7 +80,7 @@ function serializer() {
   };
 }
 
-export function nameService({ storage, fetch, token, zone, suffix, slugs, now = Date.now }) {
+export function nameService({ storage, fetch, token, zone, suffix, slugs, claimLimits, now = Date.now }) {
   const dns = dnsRecords({ fetch, token, zone });
   const exclusive = serializer();
   const mayChange = rateLimiter(now);
@@ -86,7 +89,8 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs, now = 
   const nameKey = (slug) => `name:${slug}`;
   const fqdn = (slug) => `${slug}.${suffix}`;
 
-  /** A code takes its name once: neither the code nor the name may be held already. */
+  /** A code takes its name once: neither the code nor the name may be held already. Each claim is logged (its
+   * time and a hash of the client address) for a week, to keep within claimLimits; a release gives none back. */
   async function claim(request, body) {
     const code = codeIn(body);
     if (code === null) return answer(400, { error: 'a claim is {"code": "<DEIS code>"}' });
@@ -95,9 +99,17 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs, now = 
     return exclusive("claims", async () => {
       const held = (await storage.get(codeKey(code)))?.slug ?? ((await storage.get(nameKey(slug))) && slug);
       if (held) return answer(409, { error: `${fqdn(held)} is already claimed; APS Conecta can release it` });
+      const log = ((await storage.get("claims")) ?? []).filter(([at]) => at > now() - WEEK);
+      const client = (await sha256(request.headers.get("CF-Connecting-IP") ?? "")).slice(0, 16);
+      if (log.filter(([at, by]) => by === client && at > now() - DAY).length >= claimLimits.perIpPerDay) {
+        return answer(429, { error: `this address claimed ${claimLimits.perIpPerDay} names today; retry tomorrow` });
+      }
+      if (log.length >= claimLimits.perWeek) {
+        return answer(429, { error: `the name service gave out ${claimLimits.perWeek} names this week; retry later` });
+      }
       const password = secret();
       await storage.put({ [codeKey(code)]: { slug, hash: await sha256(password), txt: [], A: null, AAAA: null },
-                          [nameKey(slug)]: code });
+                          [nameKey(slug)]: code, claims: [...log, [now(), client]] });
       return answer(201, { name: fqdn(slug), username: code, password, subdomain: slug,
                            server_url: new URL(request.url).origin });
     });
