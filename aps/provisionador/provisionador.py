@@ -5,14 +5,16 @@
 
   provisionador.py serve   serve the wizard over HTTPS (the systemd unit the bootstrap installs)
   provisionador.py link    print a fresh one-time link to the running wizard, its QR code and the
-                           certificate's fingerprint (the bootstrap's last step, on every run)
+                           certificate's fingerprint (the bootstrap's last step, on every run); once the
+                           wizard closed at «Listo», the suite's address instead
   provisionador.py publish publish the server's inside address at its claimed name (the host's timer,
                            every 10 minutes)
 
 Its one public surface is the HTTP API under /api, which the page in www/ uses and the wizard-API tests
 drive. The state lives in one JSON file on the server, so a reload, a restart or a rerun resumes it.
 The link's secret and the sessions are stored only as SHA-256 hashes, and only `link` prints a secret,
-to the operator's console.
+to the operator's console. At «Listo» the wizard hands over the passwords file and closes: the link and
+every session stop working, and the Provisionador stops for good.
 """
 
 import argparse
@@ -31,12 +33,14 @@ import subprocess
 import sys
 import threading
 import time
-import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs
 
 import deis
+import runner
+from steps import backups, components, passwords
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -63,14 +67,9 @@ IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este estab
           "APS Conecta puede liberarla; después presione «Reintentar».")
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
-UNEXPECTED = ("La instalación se detuvo por un error inesperado. Presione «Reintentar»; si vuelve a ocurrir, "
-              "contacte a APS Conecta e indique el registro del servidor: journalctl -u aps-provisionador")
-
-# The optional containers the suite runs, by AIO's switch, with the name «Revisar» shows. Every other one stays off.
-COMPONENTS = {"talk": "Talk", "eurooffice": "Euro-Office", "imaginary": "Imaginary", "clamav": "ClamAV (antivirus)",
-              "fulltextsearch": "Búsqueda de texto completo", "harp": "HaRP (servidor de aplicaciones externas)"}
-BACKUP_FOLDER = "/var/backups/aps-conecta"  # the backup folder: AIO's nightly backup keeps its repository here
-BACKUP_TIME = "06:00"  # UTC, as AIO's clock runs: 02:00 or 03:00 in continental Chile
+NOT_LISTO = "El archivo de contraseñas se entrega en «Listo», cuando la instalación terminó."
+CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gestión está instalada en https://{}.\n"
+          "El archivo de contraseñas quedó en este servidor, legible solo por root: {}")
 
 
 def digest(value):
@@ -162,6 +161,7 @@ class Provisionador:
         self.fingerprint = None
         self.install_lock = threading.Lock()
         self.worker = None  # the install running in the background, if any
+        self.closed = False  # set by the answer that closes the wizard
 
     def server(self, address=("0.0.0.0", PORT)):
         """Bind the wizard, make its certificate and record where it answers, for `link`."""
@@ -171,6 +171,9 @@ class Provisionador:
         httpd.tls, self.fingerprint = certificate(self.state.dir, host)
         with self.state.change() as s:
             s["server"] = {"host": host, "port": port, "fingerprint": self.fingerprint}
+            install = s.get("install")
+        if install and runner.unfinished(install):
+            self.run_install({name for name, step in install["steps"].items() if step["status"] == "running"})
         return httpd
 
     def has_session(self, session):
@@ -198,16 +201,16 @@ class Provisionador:
         return f"{self.slugs[code]}.{self.suite.suffix}"
 
     def address(self, state):
-        """The centre's name and whether it is claimed; once claimed, whether the suite answers at it."""
+        """The centre's name and whether it is claimed."""
         claimed, centre = state.get("address"), state.get("centre")
         if claimed:
-            return {**claimed, "claimed": True, "answers": self.suite.answers(claimed["name"], lan_ip())}
+            return {**claimed, "claimed": True}
         return centre and {"name": self.name(centre["code"]), "claimed": False}
 
     def get_state(self, query, body):
         state = self.state.read()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
-                     "components": list(COMPONENTS.values()), "backup_folder": BACKUP_FOLDER,
+                     "components": list(components.COMPONENTS.values()), "backup_folder": backups.BACKUP_FOLDER,
                      "install": self.progress(state)}
 
     def get_register(self, query, body):
@@ -259,52 +262,53 @@ class Provisionador:
         return self.worker is not None and self.worker.is_alive()
 
     def progress(self, state):
-        """None before «Instalar»; a failure's Spanish reason; otherwise each container as AIO reports it, a component's
-        under its «Revisar» name, «done» once AIO started them and every one runs. A reading that fails says why, and
-        the next one asks again."""
+        """None before «Instalar»; otherwise each step, and, once AIO runs only our components, each container as AIO
+        reports it, a component's under its «Revisar» name. «done» means «Listo». A reading of the containers that fails
+        says why, and the next one asks again."""
         install = state.get("install")
-        if not (install or self.busy()):
+        if not install:
             return None
-        if install and "error" in install:
-            return {"status": "failed", "error": install["error"]}
-        try:
-            containers = self.suite.containers()
-        except Unreachable as outage:
-            return {"status": "installing", "containers": [], "error": str(outage)}
-        done = bool(install) and all(c["state"] == "running" for c in containers)
-        named = [{"name": COMPONENTS.get(c["id"].removeprefix("nextcloud-aio-"), c["name"]), "state": c["state"]}
-                 for c in containers]
-        return {"status": "done" if done else "installing", "containers": named}
+        running = self.busy() or runner.unfinished(install)
+        answer = {"status": "done" if install.get("listo") else "installing" if running else "failed",
+                  "steps": runner.progress(install)}
+        if install["steps"].get("components", {}).get("status") == "green":
+            try:
+                answer["containers"] = [{"name": components.named(c), "state": c["state"]}
+                                        for c in self.suite.containers()]
+            except Unreachable as outage:
+                answer.update(containers=[], error=str(outage))
+        return answer
+
+    def run_install(self, interrupted=()):
+        """The install's steps, in the background, with what they need to know."""
+        state = self.state.read()
+        context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
+                                  inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted))
+        self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
+        self.worker.start()
 
     def post_install(self, query, body):
-        """POST /api/install, «Instalar»: the install runs in the background and GET /api/state shows its progress.
-        While it runs, or once AIO started the suite, pressing it again starts nothing more; after a failure it runs
-        again («Reintentar»)."""
+        """POST /api/install, «Instalar» and «Reintentar»: the steps not green yet run in the background and GET
+        /api/state shows their progress. While they run, or at «Listo», pressing it again starts nothing more."""
         with self.install_lock:
             state = self.state.read()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
-            if not (self.busy() or state.get("install", {}).get("started")):
-                with self.state.change() as s:
-                    s.pop("install", None)
-                self.worker = threading.Thread(target=self.install, daemon=True)
-                self.worker.start()
+            if not (self.busy() or state.get("install", {}).get("listo")):
+                runner.begin(self.state)
+                self.run_install()
         return 202, {"install": self.progress(self.state.read())}
 
-    def install(self):
-        """Through the suite port: AIO's optional containers, its nightly backup, then its start."""
-        try:
-            self.suite.switch(COMPONENTS)
-            self.suite.back_up(BACKUP_FOLDER, BACKUP_TIME)
-            self.suite.start()
-            outcome = {"started": True}
-        except Unreachable as failure:
-            outcome = {"error": str(failure)}
-        except Exception:  # a defect: the journal gets the traceback, the operator a reason
-            traceback.print_exc()
-            outcome = {"error": UNEXPECTED}
+    def post_close(self, query, body):
+        """POST /api/close, at «Listo»: the passwords file, whose copy stays on the server. The wizard then closes: the
+        link and every session stop working and the Provisionador stops."""
         with self.state.change() as s:
-            s["install"] = outcome
+            if not s.get("install", {}).get("listo"):
+                return 409, {"error": NOT_LISTO}
+            kept = (self.state.dir / passwords.FILE).read_text(encoding="utf-8")
+            s.update(link=None, sessions=[], closed=True)
+        self.closed = True
+        return 200, {"passwords": kept, "file": passwords.FILE}
 
     ROUTES = {
         ("GET", "/api/state"): get_state,
@@ -313,6 +317,7 @@ class Provisionador:
         ("POST", "/api/centre"): post_centre,
         ("POST", "/api/address"): post_address,
         ("POST", "/api/install"): post_install,
+        ("POST", "/api/close"): post_close,
     }
 
     def call(self, method, path, query, body):
@@ -384,6 +389,8 @@ class Handler(BaseHTTPRequestHandler):
             status, answer = app.call(method, path, query, body)
         cookie = f"{COOKIE}={new_session}; Path=/; Secure; HttpOnly; SameSite=Strict" if new_session else None
         self.send_json(status, answer, cookie)
+        if app.closed:
+            threading.Thread(target=self.server.shutdown, daemon=True).start()  # the closing answer is sent
 
     def session(self):
         try:
@@ -440,8 +447,17 @@ def running_server(state, timeout=60):
         time.sleep(0.5)
 
 
+def closed(state):
+    """Once the wizard closed at «Listo», what the console says instead of a link."""
+    data = state.read()
+    return data.get("closed") and CLOSED.format(data["address"]["name"], state.dir / passwords.FILE)
+
+
 def print_link(state_dir):
     state = State(state_dir)
+    if done := closed(state):
+        print(done)
+        return
     server = running_server(state)
     code = random_code()
     with state.change() as s:
@@ -478,7 +494,12 @@ def main(argv=None):
         return 0
     if args.command == "publish":
         return publish(Suite(SERVICES))
-    Provisionador(args.state, deis.newest(HERE.parent / "deis"), Suite(SERVICES)).server().serve_forever()
+    if done := closed(State(args.state)):
+        print(done)
+        return 0
+    httpd = Provisionador(args.state, deis.newest(HERE.parent / "deis"), Suite(SERVICES)).server()
+    httpd.serve_forever()
+    httpd.server_close()
     return 0
 
 

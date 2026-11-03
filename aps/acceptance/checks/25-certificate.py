@@ -4,8 +4,8 @@
 """Our Caddy image gets the suite's certificate through the name service's DNS challenge with no inbound port: the
 machine sits behind the runner's NAT, out of the internet's reach, and the test build points the proxy at Let's
 Encrypt's staging service (its DNS has no answer for the production one). A browser that adds trust for the staging
-roots alone opens the suite at its name. The wizard, which opens on «Listo», then says on «Dirección» that this
-computer opens the name and, behind a resolver that drops the answer, shows the router change in Spanish."""
+roots alone opens the suite at its name, with the wizard closed at «Listo» (17-install checks what its page says
+then about this computer and the router)."""
 
 import json
 import os
@@ -13,10 +13,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import chromium, machine, verified, wizard_link  # noqa: E402
+from browser import chromium, machine  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 
 address = os.environ["ADDRESS"]
@@ -55,20 +54,3 @@ with chromium() as browser:
     if not response.ok:
         sys.exit(f"https://{name}/login answers {response.status}")
     expect(page.locator("input[type=password]")).to_be_visible()
-
-# The wizard on «Dirección», in a browser on a network whose resolver answers the name and in one whose resolver
-# drops the answer.
-for case, args, shown in (
-        ("reach", [], f"Este equipo abre https://{name} correctamente."),
-        ("router", [f"--host-resolver-rules=MAP {name} ~NOTFOUND"],
-         f"En el router, permita esas respuestas para {name.split('.', 1)[1]}")):
-    link, printed = wizard_link(machine("sudo python3 /opt/aps-conecta/gestion/provisionador/provisionador.py link"))
-    url = urlsplit(link)
-    with chromium(pinned=[verified(url.hostname, url.port, printed)], args=args) as browser:
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
-        page.goto(link)
-        expect(page.get_by_role("heading", name="Listo")).to_be_visible()
-        page.click('.step-link[data-step="direccion"]')
-        expect(page.locator("#reach")).to_contain_text(shown, timeout=60_000)
-        page.screenshot(path=evidence / f"{case}.png")
-        print(f"{case}: {page.inner_text('#reach')}")

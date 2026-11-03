@@ -77,13 +77,12 @@
         <button type="button" id="retry" hidden>Reintentar</button>
         <button type="button" class="primary" id="continue" hidden>Continuar</button>
       </div>
-      <p class="message" id="reach" aria-live="polite"></p>
     </section>
 
     <section id="revisar" hidden>
       <h1>Revisar</h1>
       <p class="lead">Revise lo que se instalará y presione «Instalar». La instalación sigue por sí sola y esta página
-        muestra su avance.</p>
+        muestra el avance de cada paso.</p>
       <dl class="summary">
         <dt>Centro</dt><dd id="summary-centre"></dd>
         <dt>Dirección</dt><dd id="summary-address"></dd>
@@ -92,6 +91,7 @@
       </dl>
       <div class="actions"><button type="button" class="primary" id="install" hidden>Instalar</button></div>
       <p class="message" id="install-status" role="status"></p>
+      <ul class="progress" id="steps" aria-label="Avance de la instalación"></ul>
       <ul class="progress" id="progress" aria-label="Avance de los contenedores"></ul>
     </section>
 
@@ -99,6 +99,9 @@
       <h1>Listo</h1>
       <p class="lead">APS Conecta Gestión quedó instalada. El personal del establecimiento la abre en esta dirección:</p>
       <p class="address"><a id="suite-address"></a></p>
+      <p class="message" id="reach" aria-live="polite"></p>
+      <div class="actions"><a class="button primary" id="passwords" hidden>Descargar el archivo de contraseñas</a></div>
+      <p class="message" id="closed" role="status"></p>
     </section>
   </main>
 </div>
