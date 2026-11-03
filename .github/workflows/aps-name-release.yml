@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 APS Conecta
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# APS releases the name a DEIS code holds, with its records, so the establishment can claim it again.
+name: APS name release
+
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: DEIS code whose name to release
+        required: true
+        type: string
+      deployment:
+        description: Name-service deployment
+        type: choice
+        options: [production, ci]
+        default: production
+
+permissions: {}
+
+jobs:
+  release:
+    name: Release a DEIS code's name, with its records
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Release the name
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CODE: ${{ inputs.code }}
+          DEPLOYMENT: ${{ inputs.deployment }}
+        run: aps/name-service/names.sh "$DEPLOYMENT" release "$CODE"

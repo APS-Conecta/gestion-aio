@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Behaviour of the static gates, driven through their command lines against throwaway repos."""
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -165,6 +166,54 @@ class DeisCodeCheck(unittest.TestCase):
         code, out = run_gate("deis_codes.py", self.repo)
         self.assertNotEqual(code, 0, out)
         self.assertIn("no DEIS register", out)
+
+
+DEIS = GATES.parent / "provisionador" / "deis.py"
+HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
+
+
+def slug_table(rows):
+    """Runs the slug-table command on a register of `rows` (code, type, name, comuna)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        lines = [f"{c},{t},{n},Calle 1,13101,{comuna},13,Metropolitana,Servicio,Municipal,-33.4,-70.6"
+                 for c, t, n, comuna in rows]
+        Path(tmp, "establecimientos-deis-2026-07-23.csv").write_text(HEADER + "\n".join(lines) + "\n")
+        r = subprocess.run([sys.executable, "-I", str(DEIS), "slugs", tmp], capture_output=True, text=True)
+    return r.returncode, r.stdout, r.stderr
+
+
+class SlugTable(unittest.TestCase):
+    def test_each_code_gets_its_short_name_folded_and_hyphenated(self):
+        code, out, err = slug_table([
+            ("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago"),
+            ("999002", "CECOSF", "Centro Comunitario de Salud Familiar Estrecho", "Punta Arenas"),
+            ("999003", "SAPU", "SAPU Rapa Nui", "Isla de Pascua"),
+            ("999004", "CESFAM", "Centro de Salud Familiar Dr. Juan Pérez (ex Ñuble)", "Santiago"),
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), {"999001": "cesfam-los-castanos", "999002": "cecosf-estrecho",
+                                           "999003": "sapu-rapa-nui", "999004": "cesfam-dr-juan-perez-ex-nuble"})
+
+    def test_short_names_that_fold_the_same_add_their_comuna(self):
+        code, out, err = slug_table([
+            ("999001", "CESFAM", "Centro de Salud Familiar Bellavista", "Tomé"),
+            ("999002", "CESFAM", "CESFAM Bellavista", "La Florida"),
+            ("999003", "CESFAM", "Centro de Salud Familiar Bellavista Norte", "Tomé"),
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), {"999001": "cesfam-bellavista-tome", "999002": "cesfam-bellavista-la-florida",
+                                           "999003": "cesfam-bellavista-norte"})
+
+    def test_two_codes_left_with_one_slug_fail_naming_both(self):
+        code, out, err = slug_table([
+            ("999001", "CESFAM", "Centro de Salud Familiar Bellavista", "Tomé"),
+            ("999002", "CESFAM", "CESFAM Bellavista", "Tome"),
+        ])
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("cesfam-bellavista-tome", err)
+        self.assertIn("999001", err)
+        self.assertIn("999002", err)
+        self.assertEqual(out, "")
 
 
 if __name__ == "__main__":
