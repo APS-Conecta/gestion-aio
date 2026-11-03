@@ -23,13 +23,10 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest import mock
 from urllib.parse import urlencode, urlsplit
 
 import brand
 import provisionador
-import runner
 from steps import apps
 from suite import FakeSuite
 
@@ -433,18 +430,6 @@ SECURITY = "Sesiones y registro de auditoría"
 MENU = "Menú personalizado"
 
 
-def install_apps(context):
-    context.suite.apps.setdefault("side_menu", {"enabled": "yes"})
-
-
-# #11's apps step installs the Suite manifest's apps, the custom menu's app among them. Until this build has it, a
-# stand-in runs in its place once the suite started: it installs the custom menu's app unless a test put it there first.
-if "apps" not in runner.STEPS:
-    runner.STEPS = {**{name: step for name, step in runner.STEPS.items() if name != "menu"},
-                    "apps": SimpleNamespace(NAME="Aplicaciones", NEEDS=("start",), run=install_apps),
-                    "menu": runner.STEPS["menu"]}
-
-
 def openssl(*args, data=None):
     return subprocess.run(["openssl", *map(str, args)], input=data, check=True, capture_output=True).stdout
 
@@ -755,17 +740,6 @@ class StepRunner(InstallTest):
         self.until("done")
         self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
 
-    def test_a_step_that_needs_a_step_this_build_lacks_waits_saying_so_and_the_others_go_on(self):
-        later = SimpleNamespace(NAME="Paso de otra versión", NEEDS=("absent",), run=mock.Mock())
-        self.claim()
-        with mock.patch.dict(runner.STEPS, {"later": later}):
-            self.install()
-            install = self.until("failed")
-        self.assertEqual(self.steps(install)["Paso de otra versión"],
-                         ("waiting", "Espera a que se complete: «absent»."))
-        later.run.assert_not_called()
-        self.assertEqual(self.named(install, "green"), set(self.steps(install)) - {"Paso de otra versión"})
-
 
 class Apps(InstallTest):
     """The Suite manifest's apps: every default app and the optional apps ticked on «Revisar». An own or fork app comes
@@ -1056,8 +1030,8 @@ class Branding(InstallTest):
 
 
 class CustomMenu(InstallTest):
-    """The custom menu, which the apps step installs, wears the brand's dark violet; without its app, its step fails
-    loudly and installs nothing."""
+    """The custom menu, which the apps step installs, wears the brand's dark violet; without its app, the apps step
+    fails naming it and the menu waits."""
 
     def test_the_custom_menu_takes_the_brand_token_files_dark_violet(self):
         self.claim()
@@ -1066,17 +1040,16 @@ class CustomMenu(InstallTest):
         menu = self.suite.apps["side_menu"]
         self.assertEqual((menu["background-color"], menu["background-color-to"]), (TOKENS["--aps-violet-dark"],) * 2)
 
-    def test_without_its_app_the_custom_menu_fails_loudly_and_every_other_step_goes_on(self):
-        self.suite.apps["side_menu"] = {"enabled": "no"}
+    def test_without_its_app_the_apps_step_fails_naming_the_menu_which_waits_and_every_other_step_goes_on(self):
+        self.suite.store.remove("side_menu")
         self.claim()
         self.install()
-        install = self.until("failed")
-        status, reason = self.steps(install)[MENU]
-        self.assertEqual(status, "failed")
-        self.assertIn("menú personalizado", reason)
-        self.assertIn("Reintentar", reason)
-        self.assertEqual(self.named(install, "green"), set(self.steps(install)) - {MENU})
-        self.assertEqual(self.suite.apps["side_menu"], {"enabled": "no"}, "the step installs and enables nothing")
+        steps = self.steps(install := self.until("failed"))
+        self.assertEqual(steps[APPS_STEP][0], "failed")
+        self.assertIn(f"«{MENU}»", steps[APPS_STEP][1])
+        self.assertEqual(steps[MENU], ("waiting", f"Espera a que se complete: «{APPS_STEP}»."))
+        self.assertEqual(self.named(install, "green"), set(steps) - {APPS_STEP, MENU})
+        self.assertNotIn("side_menu", self.suite.apps, "nothing configures an app that is not there")
 
 
 class Listo(InstallTest):
