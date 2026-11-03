@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 APS Conecta
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# The clean-machine acceptance run (Seam 1): the one command from a pre-release on a fresh Debian 12 VM,
+# then every check module (aps/acceptance/run.sh documents their interface). The release pipeline calls
+# it for every release candidate; a maintainer can dispatch it for any pre-release.
+name: APS acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Pre-release to install, such as v0.0.0-ci.6
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
+jobs:
+  clean-machine:
+    name: The one command on a fresh Debian 12 VM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free unused disk on the runner for the VM
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/share/swift
+          df -h /
+      - name: Install the VM tools and the browser driver (Playwright with Chromium)
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y qemu-system-x86 qemu-utils cloud-image-utils dnsmasq-base python3-venv > /dev/null
+          python3 -m venv "$RUNNER_TEMP/browser"
+          "$RUNNER_TEMP/browser/bin/pip" install --quiet playwright==1.64.1
+          "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium > /dev/null
+          echo "$RUNNER_TEMP/browser/bin" >> "$GITHUB_PATH"
+      - name: Run the one command on the VM, then every check
+        env:
+          TAG: ${{ inputs.tag }}
+        run: aps/acceptance/run.sh "$TAG"
+      - name: Attach the evidence (the failing check's container logs and disk usage)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: acceptance-evidence
+          path: ${{ runner.temp }}/acceptance/evidence

@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # A test build: our two images built from the release commit, the official images checked against
 # upstream's v14.4.3 set, the bundle and the pre-release v0.0.0-ci.<run>; then the bootstrap
-# is run from that pre-release on fresh runners.
+# is run from that pre-release on fresh runners and in the clean-machine acceptance run.
 name: APS release
 
 on:
   pull_request:
     paths:
+      - .github/workflows/aps-acceptance.yml
       - .github/workflows/aps-release.yml
       - aps/acceptance/**
       - aps/bootstrap/**
@@ -130,10 +131,6 @@ jobs:
       TAG: ${{ needs.images.outputs.tag }}
       RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.images.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: aps/acceptance
       - name: Make the runner a clean machine (no Docker, room for the images)
         run: |
           sudo systemctl stop docker.socket docker.service containerd.service || true
@@ -162,42 +159,22 @@ jobs:
           [ -z "$(command -v docker)" ]
       - name: Run the one command, as an operator would
         run: curl -fsSL "$RELEASE_URL/install.sh" | sudo bash
-      - name: Docker Engine came from Docker's packages and the mastercontainer runs our pinned image
-        env:
-          PINNED_MASTERCONTAINER: ${{ needs.images.outputs.mastercontainer }}
-        run: |
-          apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
-          [ "$(sudo docker inspect -f '{{.State.Running}}' nextcloud-aio-mastercontainer)" = true ]
-          [ "$(sudo docker inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer)" = "$MASTERCONTAINER:$TAG" ]
-          sudo docker image inspect -f '{{join .RepoDigests "\n"}}' "$MASTERCONTAINER:$TAG" | grep -xF "$PINNED_MASTERCONTAINER" > /dev/null
-      - name: Start the suite through the mastercontainer
-        run: aps/acceptance/start-suite.sh example.com
-      - name: Every container the mastercontainer started runs a pinned image of the release
-        run: |
-          started="$(sudo docker ps -a --filter name=nextcloud-aio- --format '{{.Names}}' | grep -vx nextcloud-aio-mastercontainer)"
-          for name in $started; do
-            image="$(sudo docker inspect -f '{{.Config.Image}}' "$name")"
-            echo "$name $image"
-            grep -qxF "$image" /opt/aps-conecta/gestion/images.lock \
-              || { echo "::error::$name runs $image, which is not pinned by $TAG"; exit 1; }
-          done
-          echo "$started" | grep -qx nextcloud-aio-nextcloud
-      - name: Nextcloud accepts more than 100 users
-        run: |
-          for _ in $(seq 90); do
-            [ "$(sudo docker inspect -f '{{.State.Health.Status}}' nextcloud-aio-nextcloud)" = healthy ] && break
-            sleep 10
-          done
-          sudo docker exec --user www-data nextcloud-aio-nextcloud bash -c '
-            OC_PASS="$(head -c 24 /dev/urandom | base64)"; export OC_PASS
-            for i in $(seq 101); do php occ user:add --password-from-env "prueba$i" > /dev/null || exit 1; done'
-          sudo docker exec --user www-data nextcloud-aio-nextcloud php occ user:list --output=json | jq -e 'length > 101'
+      - name: Docker Engine came from Docker's packages
+        run: apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
       - name: Show the containers and the logs
         if: failure()
         run: |
           sudo docker ps -a || true
           sudo docker logs nextcloud-aio-mastercontainer 2>&1 | tail -n 100 || true
-          sudo docker logs nextcloud-aio-nextcloud 2>&1 | tail -n 100 || true
+
+  acceptance:
+    name: Clean-machine acceptance
+    needs: [images, release]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/aps-acceptance.yml
+    with:
+      tag: ${{ needs.images.outputs.tag }}
 
   host-checks:
     name: A machine below the minimum is refused before it is changed
