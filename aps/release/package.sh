@@ -7,18 +7,18 @@
 #   install.sh                        the stable-name bootstrap, with the tag and bundle checksum filled in
 #   gestion-aio-<tag>-install.sh      the same bootstrap under its versioned name
 #   SHA256SUMS                        checksums of the three
-# Usage: package.sh <tag> <mastercontainer image@digest> <nextcloud image@digest> <out-dir>
+# Usage: package.sh <tag> <mastercontainer image@digest> <nextcloud image@digest> <caddy image@digest> <out-dir>
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-[ "$#" -eq 4 ] || { echo "usage: $0 <tag> <mastercontainer-ref> <nextcloud-ref> <out-dir>" >&2; exit 2; }
-tag=$1 mastercontainer=$2 nextcloud=$3 out=$4
+[ "$#" -eq 5 ] || { echo "usage: $0 <tag> <mastercontainer-ref> <nextcloud-ref> <caddy-ref> <out-dir>" >&2; exit 2; }
+tag=$1 mastercontainer=$2 nextcloud=$3 caddy=$4 out=$5
 bundle="gestion-aio-$tag.tar.gz"
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 printf '%s\n' "$tag" > "$stage/VERSION"
 {
-  printf '%s\n' "$mastercontainer" "$nextcloud"
+  printf '%s\n' "$mastercontainer" "$nextcloud" "$caddy"
   jq -r '.aio_services_v1[] | select(.image_tag | startswith("sha256:")) | "\(.image)@\(.image_tag)"' php/containers.json
 } > "$stage/images.lock"
 

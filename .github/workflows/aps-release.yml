@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# A test build: our two images built from the release commit, the official images checked against
+# A test build: our three images built from the release commit, the official images checked against
 # upstream's v14.4.3 set, the bundle and the pre-release v0.0.0-ci.<run>; then the bootstrap
-# is run from that pre-release on fresh runners and in the clean-machine acceptance run.
+# is run from that pre-release on fresh runners and in the clean-machine acceptance run, and the
+# thin Caddy image gets a staging certificate through the name service's CI deployment.
 name: APS release
 
 on:
@@ -14,6 +15,7 @@ on:
       - aps/bootstrap/**
       - aps/deis/**
       - aps/images/**
+      - aps/name-service/**
       - aps/provisionador/**
       - aps/release/**
       - Containers/mastercontainer/**
@@ -33,6 +35,7 @@ concurrency:
 env:
   MASTERCONTAINER: ghcr.io/aps-conecta/gestion-mastercontainer
   NEXTCLOUD: ghcr.io/aps-conecta/gestion-nextcloud
+  CADDY: ghcr.io/aps-conecta/gestion-caddy
 
 jobs:
   images:
@@ -46,6 +49,7 @@ jobs:
       commit: ${{ steps.release.outputs.commit }}
       mastercontainer: ${{ steps.mastercontainer.outputs.pinned }}
       nextcloud: ${{ steps.nextcloud.outputs.pinned }}
+      caddy: ${{ steps.caddy.outputs.pinned }}
     steps:
       - name: Name the test build (on a pull request, its commit is the merge preview)
         id: release
@@ -65,6 +69,12 @@ jobs:
                 case "$pinned" in *@sha256:*) ;; *) echo "::error::$pinned is not pinned by digest"; exit 1 ;; esac
                 aps/release/revision.sh "$pinned" "$base"
               done
+      - name: Every base of our images is pinned by digest
+        run: |
+          for dockerfile in aps/images/*/Dockerfile; do
+            awk '/^FROM / { if (!($2 in stages) && $2 !~ /@sha256:[0-9a-f]{64}$/) bad = bad " " $2; if (toupper($3) == "AS") stages[$4] }
+                 END { if (bad) { print "::error::" FILENAME " has bases not pinned by digest:" bad; exit 1 } }' "$dockerfile"
+          done
       - name: Log in to ghcr.io and set up buildx
         env:
           TOKEN: ${{ github.token }}
@@ -78,6 +88,14 @@ jobs:
           COMMIT: ${{ steps.release.outputs.commit }}
         run: |
           pinned="$(aps/release/build-image.sh "$NEXTCLOUD" aps/images/nextcloud/Dockerfile aps/images/nextcloud "$TAG" "$COMMIT")"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+      - name: Build the thin Caddy image
+        id: caddy
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          pinned="$(aps/release/build-image.sh "$CADDY" aps/images/caddy/Dockerfile aps/images/caddy "$TAG" "$COMMIT")"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
       - name: Build the mastercontainer with the Nextcloud image pinned
         id: mastercontainer
@@ -110,7 +128,8 @@ jobs:
         env:
           PINNED_MASTERCONTAINER: ${{ needs.images.outputs.mastercontainer }}
           PINNED_NEXTCLOUD: ${{ needs.images.outputs.nextcloud }}
-        run: aps/release/package.sh "$TAG" "$PINNED_MASTERCONTAINER" "$PINNED_NEXTCLOUD" dist
+          PINNED_CADDY: ${{ needs.images.outputs.caddy }}
+        run: aps/release/package.sh "$TAG" "$PINNED_MASTERCONTAINER" "$PINNED_NEXTCLOUD" "$PINNED_CADDY" dist
       - name: Publish the pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,6 +187,49 @@ jobs:
         run: |
           sudo docker ps -a || true
           sudo docker logs nextcloud-aio-mastercontainer 2>&1 | tail -n 100 || true
+
+  certificate:
+    name: A staging certificate through the name service, with no open port
+    needs: images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Right before the proof, so another PR's deployment has the least time to replace it.
+      - name: Deploy the name service's CI deployment, nombres-ci.apsconecta.cl, from this commit
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: aps/name-service/deploy.sh ci
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Claim a CI name and get its staging certificate with the thin Caddy image
+        id: certificate
+        env:
+          PINNED_CADDY: ${{ needs.images.outputs.caddy }}
+        run: aps/release/certificate.sh "$PINNED_CADDY"
+      - name: Release the CI name, and its challenge record is gone
+        if: always() && steps.certificate.outputs.code != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CODE: ${{ steps.certificate.outputs.code }}
+          NAME: ${{ steps.certificate.outputs.name }}
+        run: |
+          aps/name-service/names.sh ci release "$CODE"
+          ns="$(dig +short NS apsconecta.cl | head -n 1)"
+          for _ in $(seq 12); do
+            left="$(dig +short TXT "_acme-challenge.$NAME" "@$ns")"
+            [ -z "$left" ] && exit 0
+            sleep 5
+          done
+          echo "::error::_acme-challenge.$NAME outlived the release: $left"
+          exit 1
 
   acceptance:
     name: Clean-machine acceptance

@@ -37,11 +37,18 @@ The single web wizard that runs the install, opened through the one-time link.
 The link the bootstrap prints. Its secret opens a Provisionador session until the wizard closes.
 
 **Suite port**:
-The one adapter through which the Provisionador talks to AIO, deSEC and Nextcloud's command line. It
-has a real implementation and a fake one for tests.
+The one adapter through which the Provisionador talks to AIO, the name service and Nextcloud's command
+line. It has a real implementation and a fake one for tests.
 
-**Free domain** (dirección):
-The establishment's deSEC `dedyn.io` name. It points to the server's inside address.
+**Name service** (servicio de nombres):
+APS's Cloudflare Worker at `nombres.apsconecta.cl`, the only holder of APS's Cloudflare token. A DEIS code
+claims its dirección once and gets a credential that changes only that name's address record and, through
+acme-dns, its certificate's challenge record. PR runs use a separate CI deployment.
+
+**Dirección**:
+The establishment's name, `<slug>.gestion.apsconecta.cl`, one per DEIS code. The slug is the short name,
+lowercase with accents and «ñ» folded and hyphens, plus the comuna when two short names fold the same.
+It points to the server's inside address.
 
 **Install step**:
 One idempotent unit of the install, with the steps it depends on.
