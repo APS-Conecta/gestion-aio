@@ -168,6 +168,57 @@ class DeisCodeCheck(unittest.TestCase):
         self.assertIn("no DEIS register", out)
 
 
+MANIFEST = [
+    {"id": "inicio", "name": "Inicio", "source": "fork", "repo": "APS-Conecta/inicio"},
+    {"id": "propia", "name": "Propia", "source": "own", "repo": "APS-Conecta/propia"},
+    {"id": "tienda", "name": "Tienda", "source": "store"},
+    {"id": "opcional", "name": "Opcional", "source": "own", "repo": "APS-Conecta/opcional", "optional": True,
+     "summary": "Lo que «Revisar» dice de ella."},
+]
+
+
+class SuiteManifestGate(unittest.TestCase):
+    def check(self, manifest):
+        repo = Repo({"aps/provisionador/apps.json": manifest if isinstance(manifest, str) else json.dumps(manifest)})
+        self.addCleanup(repo.close)
+        return run_gate("manifest.py", repo)
+
+    def test_own_fork_store_and_optional_apps_pass(self):
+        code, out = self.check(MANIFEST)
+        self.assertEqual(code, 0, out)
+
+    def test_each_planted_defect_fails_naming_its_app(self):
+        defects = {
+            "a version": ({**MANIFEST[1], "version": "la última"}, "unknown fields ['version']"),
+            "an id that is not an app id": ({**MANIFEST[2], "id": "Tienda"}, "not a Nextcloud app id"),
+            "an id listed twice": ({**MANIFEST[2], "id": "inicio"}, "id is listed twice"),
+            "no name": ({**MANIFEST[2], "name": " "}, "no Spanish name"),
+            "an unknown source": ({**MANIFEST[2], "source": "zip"}, "not own, fork or store"),
+            "an own app without its repo": ({k: v for k, v in MANIFEST[1].items() if k != "repo"},
+                                            "an own app needs its APS-Conecta repo"),
+            "a repo outside the org": ({**MANIFEST[1], "repo": "nextcloud/propia"}, "an own app needs its APS-Conecta"),
+            "a repo listed twice": ({**MANIFEST[1], "repo": "APS-Conecta/inicio"}, "repo is listed twice"),
+            "a store app with a repo": ({**MANIFEST[2], "repo": "APS-Conecta/tienda"}, "a store app has no repo"),
+            "optional off": ({**MANIFEST[3], "optional": False}, "optional is true or left out"),
+            "an optional app without its summary": ({k: v for k, v in MANIFEST[3].items() if k != "summary"},
+                                                    "needs the summary"),
+            "a default app with a summary": ({**MANIFEST[1], "summary": "x"}, "only an optional app has a summary"),
+        }
+        for defect, (app, message) in defects.items():
+            with self.subTest(defect):
+                code, out = self.check([MANIFEST[0], app])
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"app 2 ({app.get('id')}): ", out)
+                self.assertIn(message, out)
+
+    def test_a_manifest_that_is_not_a_list_of_apps_fails(self):
+        for manifest in ("[{", {"apps": MANIFEST}, [], ["inicio"]):
+            with self.subTest(manifest):
+                code, out = self.check(manifest)
+                self.assertEqual(code, 1, out)
+                self.assertNotIn("Traceback", out)
+
+
 DEIS = GATES.parent / "provisionador" / "deis.py"
 HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 

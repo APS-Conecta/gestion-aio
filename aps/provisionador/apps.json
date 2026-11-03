@@ -1,0 +1,13 @@
+[
+  {"id": "intravox", "name": "Inicio", "source": "fork", "repo": "APS-Conecta/IntraVox"},
+  {"id": "epidemiologia", "name": "Epidemiología", "source": "own", "repo": "APS-Conecta/epidemiologia"},
+  {"id": "territorio", "name": "Territorio", "source": "own", "repo": "APS-Conecta/territorio"},
+  {"id": "files_upload_guard", "name": "Protección de cargas de archivos", "source": "own", "repo": "APS-Conecta/files-upload-guard"},
+  {"id": "groupfolders", "name": "Carpetas de equipo", "source": "store"},
+  {"id": "calendar", "name": "Calendario", "source": "store"},
+  {"id": "contacts", "name": "Contactos", "source": "store"},
+  {"id": "side_menu", "name": "Menú personalizado", "source": "store"},
+  {"id": "farmacia", "name": "Farmacia", "source": "own", "repo": "APS-Conecta/farmacia", "optional": true, "summary": "Arsenal farmacológico del establecimiento con información de seguridad clínica."},
+  {"id": "estadistica", "name": "Estadística", "source": "own", "repo": "APS-Conecta/estadistica", "optional": true, "summary": "Cifras REM frente al promedio nacional y de pares, y avance de las Metas Sanitarias."},
+  {"id": "totem", "name": "Tótem", "source": "own", "repo": "APS-Conecta/totem", "optional": true, "summary": "Turnos de atención en la sala de espera: el paciente toma su turno y la pantalla lo llama."}
+]
