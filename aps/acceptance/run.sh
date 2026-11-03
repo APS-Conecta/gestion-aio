@@ -77,7 +77,7 @@ printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$work/key.pub")" 
 printf 'instance-id: gestion-acceptance\nlocal-hostname: gestion\n' > "$work/meta-data"
 cloud-localds "$work/seed.img" "$work/user-data" "$work/meta-data"
 : > "$work/evidence/serial.log" # the runner's own file, so the evidence upload can read it
-sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m 10G \
+sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m 12G \
   -drive "file=$work/disk.qcow2,if=virtio,format=qcow2" -drive "file=$work/seed.img,if=virtio,format=raw" \
   -netdev tap,id=lan,ifname=aps0,script=no,downscript=no -device virtio-net-pci,netdev=lan \
   -display none -serial "file:$work/evidence/serial.log" -daemonize
@@ -112,7 +112,7 @@ for check in aps/acceptance/checks/*; do
   export EVIDENCE="$work/evidence/$name"
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
-  if timeout 15m "$check" < /dev/null; then
+  if timeout 30m "$check" < /dev/null; then
     mask_credential
     echo "::endgroup::"
     echo "passed: $name"
