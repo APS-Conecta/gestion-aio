@@ -16,10 +16,10 @@
 #   ADDRESS   the VM's address on the shared network, where the runner's browser reaches it
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
-# Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log (the name's
-# credential and AIO's passphrase blanked out) and the disk usage, and the workflow attaches it to the run. The
-# check that has the wizard claim a CI name writes its DEIS code as code= to $GITHUB_OUTPUT first, and the workflow
-# releases it.
+# Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
+# Provisionador's journal (the name's credential and AIO's passphrase blanked out) and the disk usage, and the
+# workflow attaches it to the run. The check that has the wizard claim a CI name writes its DEIS code as code= to
+# $GITHUB_OUTPUT first, and the workflow releases it.
 # Usage: run.sh <tag>
 set -euo pipefail
 [[ "$#" -eq 1 && "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "usage: $0 <tag>" >&2; exit 2; }
@@ -40,18 +40,24 @@ mask_secrets() { # once «Dirección» claimed the name: its credential and AIO'
   secret password 'sudo cat /var/lib/aps-conecta/name-service.json'
   secret passphrase 'sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
 }
-collect() { # <dir>: every container's log, without the name's credential and AIO's passphrase, and the disk usage
-  local name log
+collect() { # <dir>: every container's log and the Provisionador's journal, without the name's credential and AIO's
+  # passphrase, and the disk usage
+  local name
   mkdir -p "$1"
   df -h > "$1/runner-disk.txt"
   "$MACHINE" 'df -h; sudo docker system df; sudo docker ps --all' > "$1/machine.txt" 2>&1 || true
   mask_secrets
   for name in $("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" 2> /dev/null || true); do
-    log="$("$MACHINE" "sudo docker logs --timestamps $name" 2>&1 || true)"
-    [ -z "$password" ] || log="${log//"$password"/[credential]}"
-    [ -z "$passphrase" ] || log="${log//"$passphrase"/[passphrase]}"
-    printf '%s\n' "$log" > "$1/$name.log"
+    blanked "sudo docker logs --timestamps $name" > "$1/$name.log"
   done
+  blanked 'sudo journalctl --unit aps-provisionador --no-pager' > "$1/aps-provisionador.log"
+}
+blanked() { # <command>: what it printed on the machine, without the name's credential and AIO's passphrase
+  local log
+  log="$("$MACHINE" "$1" 2>&1 || true)"
+  [ -z "$password" ] || log="${log//"$password"/[credential]}"
+  [ -z "$passphrase" ] || log="${log//"$passphrase"/[passphrase]}"
+  printf '%s\n' "$log"
 }
 on_exit() { # a failure outside the checks names its stage and collects the same evidence
   local rc=$?
