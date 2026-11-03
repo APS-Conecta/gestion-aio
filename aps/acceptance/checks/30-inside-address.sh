@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The name's address record holds the server's inside address and follows a change: the host's timer runs the
-# updater every 10 minutes (run once here, as the timer does), it publishes the new address through the name
-# service, and apsconecta.cl's own nameserver answers it. From inside the suite's containers, HTTPS to the name
-# reaches the suite even while the host drops what its containers send it.
+# The name's address record holds the server's inside address and follows a change: the host's timer has run the
+# updater on its own schedule (a minute after the install, then every 10 minutes) and it succeeded; run once more
+# here, as the timer does, it publishes the new address through the name service, and apsconecta.cl's own
+# nameserver answers it. From inside the suite's containers, HTTPS to the name reaches the suite even while the host
+# drops what its containers send it.
 set -euo pipefail
 name="$("$MACHINE" 'sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json' | jq -r '.domain // empty')"
 [ -n "$name" ] || { echo "the suite has no name: «Dirección» claimed none" >&2; exit 1; }
@@ -22,10 +23,13 @@ record() { # <address>: the zone's nameserver answers it for the name within two
 }
 update() { "$MACHINE" 'sudo systemctl start aps-address.service'; }
 
-timer="$("$MACHINE" 'systemctl is-active aps-address.timer; systemctl show aps-address.timer --property=TimersMonotonic')"
+timer="$("$MACHINE" 'systemctl is-active aps-address.timer
+  systemctl show aps-address.timer --property=TimersMonotonic,LastTriggerUSec
+  systemctl show aps-address.service --property=Result')"
 echo "$timer"
-if ! grep -qx active <<< "$timer" || ! grep -q 'OnUnitActiveUSec=10min' <<< "$timer"; then
-  echo "the inside-address timer does not run every 10 minutes" >&2
+if ! grep -qx active <<< "$timer" || ! grep -q 'OnUnitActiveUSec=10min' <<< "$timer" \
+    || ! grep -qE '^LastTriggerUSec=[A-Z][a-z]{2} [0-9]{4}-' <<< "$timer" || ! grep -qx Result=success <<< "$timer"; then
+  echo "the inside-address timer has not run the updater on its own, successfully, every 10 minutes" >&2
   exit 1
 fi
 record "$ADDRESS"

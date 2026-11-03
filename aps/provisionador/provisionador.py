@@ -216,10 +216,10 @@ class Provisionador:
             return 400, {"error": "El punto del mapa debe tener una latitud entre -90 y 90 y una longitud "
                                   "entre -180 y 180."}
         centre = deis.centre(row, point)
+        claimed = self.suite.claimed()
+        if claimed and claimed["code"] != code:
+            return 409, {"error": CENTRE_KEPT.format(claimed["name"])}
         with self.state.change() as s:
-            claimed = s.get("address")
-            if claimed and s["centre"]["code"] != code:
-                return 409, {"error": CENTRE_KEPT.format(claimed["name"])}
             s["centre"] = centre
         return 200, {"centre": centre}
 
@@ -233,11 +233,11 @@ class Provisionador:
             if not s.get("address"):
                 name = self.name(centre["code"])
                 try:
-                    self.suite.claim(centre["code"], name)
+                    claimed = self.suite.claim(centre["code"], name)
                 except Taken:
                     return 409, {"error": IN_USE.format(name)}
                 self.suite.publish(lan_ip())
-                s["address"] = {"name": name}
+                s["address"] = {"name": claimed}
         return 200, {"address": self.address(self.state.read())}
 
     ROUTES = {

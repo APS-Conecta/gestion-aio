@@ -388,6 +388,17 @@ class Direccion(WizardTest):
         self.assertEqual((state["centre"]["code"], state["centre"]["point"], state["address"]["name"]),
                          ("999001", moved, NAME))
 
+    def test_a_stored_claim_locks_the_centre_and_names_the_suite_even_before_the_wizard_records_it(self):
+        self.choose()
+        self.suite.down = {"address"}
+        self.assertEqual(self.claim()[0], 503)
+        status, body = self.choose("999002")
+        self.assertEqual(status, 409)
+        self.assertIn(NAME, body["error"])
+        self.suite.down = set()
+        status, body = self.claim()
+        self.assertEqual((status, body["address"]["name"], self.suite.domain), (200, NAME, NAME))
+
     def test_the_state_says_when_the_suite_answers_at_its_name(self):
         self.choose()
         self.claim()

@@ -28,6 +28,7 @@ UNREACHABLE = ("No se pudo conectar con el servicio de nombres de APS Conecta. R
                "servidor y presione «Reintentar».")
 LIMITED = ("El servicio de nombres de APS Conecta limita las direcciones que se obtienen desde una misma red cada día y "
            "cada semana. Presione «Reintentar» más tarde.")
+REFUSED = "El servicio de nombres de APS Conecta rechazó la solicitud (HTTP {code}). Contacte a APS Conecta."
 SUITE_DOWN = "El contenedor maestro de la suite no responde. Revise que Docker esté en marcha y presione «Reintentar»."
 
 
@@ -36,8 +37,8 @@ class Taken(Exception):
 
 
 class Unreachable(Exception):
-    """The name service, the internet or the mastercontainer did not answer; the Spanish message says which, and the
-    operator retries."""
+    """The name service, the internet or the mastercontainer did not do what was asked; the Spanish message says
+    why."""
 
     def __init__(self, message=UNREACHABLE):
         super().__init__(message)
@@ -71,7 +72,8 @@ class Suite:
         self.credential = Path(credential)
 
     def call(self, path, body, headers=()):
-        """The name service's JSON answer; its refusals are logged, never a credential."""
+        """The name service's JSON answer. A name in use is Taken; the claim limits, any other refusal, a server error
+        or a network failure is Unreachable with its Spanish message. Refusals are logged, never a credential."""
         request = urllib.request.Request(
             self.services["url"] + path, data=json.dumps(body).encode(), method="POST",
             headers={"Content-Type": "application/json", "User-Agent": "aps-conecta-gestion", **dict(headers)})
@@ -82,7 +84,9 @@ class Suite:
             print(f"name service {path}: {error.code} {error.read(500).decode(errors='replace')}", file=sys.stderr)
             if error.code == 409:
                 raise Taken() from error
-            raise Unreachable(LIMITED if error.code == 429 else UNREACHABLE) from error
+            if error.code == 429 and path == "/claim":
+                raise Unreachable(LIMITED) from error
+            raise Unreachable(REFUSED.format(code=error.code) if error.code < 500 else UNREACHABLE) from error
         except (OSError, ValueError) as error:
             print(f"name service {path}: {error}", file=sys.stderr)
             raise Unreachable() from error
@@ -93,6 +97,11 @@ class Suite:
         except FileNotFoundError:
             return None
 
+    def claimed(self):
+        """The stored claim's DEIS code and name, or None before the claim."""
+        credential = self.stored()
+        return credential and {"code": credential["username"], "name": credential["name"]}
+
     def store(self, credential):
         self.credential.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.credential.with_suffix(".tmp")
@@ -102,8 +111,8 @@ class Suite:
         os.replace(tmp, self.credential)
 
     def claim(self, code, name):
-        """Claim the DEIS code's name, `name` (the name service's slug table is the same register's), unless a claim
-        is stored, and set AIO to it."""
+        """Claim the DEIS code's name unless a claim is stored, set AIO to the stored claim's name and return it. The
+        name service answers the name; `name`, the slug table's, is what the fake answers."""
         credential = self.stored()
         if credential is None:
             credential = self.call("/claim", {"code": code})
@@ -114,22 +123,21 @@ class Suite:
         try:
             run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data",
                                   "nextcloud-aio-mastercontainer", "php", "-r", CONFIGURE],
-                                 input=json.dumps({"domain": name, "secrets": values}), capture_output=True,
-                                 text=True, timeout=120, check=False)
+                                 input=json.dumps({"domain": credential["name"], "secrets": values}),
+                                 capture_output=True, text=True, timeout=120, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise Unreachable(SUITE_DOWN) from error
         if run.returncode:
             print(f"AIO did not take the name: {run.stdout}{run.stderr}", file=sys.stderr)
             raise Unreachable(SUITE_DOWN)
+        return credential["name"]
 
     def publish(self, address):
-        """Point the claimed name at `address`. Returns False when no name is claimed yet."""
+        """Point the claimed name at `address`; nothing before the claim."""
         credential = self.stored()
-        if credential is None:
-            return False
-        self.call("/address", {"address": address},
-                  {"X-Api-User": credential["username"], "X-Api-Key": credential["password"]})
-        return True
+        if credential is not None:
+            self.call("/address", {"address": address},
+                      {"X-Api-User": credential["username"], "X-Api-Key": credential["password"]})
 
     def answers(self, name, address):
         """Whether the suite's reverse proxy presents a certificate for the name at the server's inside address. The
@@ -171,15 +179,18 @@ class FakeSuite:
                 raise Taken()
             self.claims.append(code)
             self.credential = {"username": code, "name": name}
-        self.domain = name
+        self.domain = self.credential["name"]
+        return self.domain
+
+    def claimed(self):
+        return self.credential and {"code": self.credential["username"], "name": self.credential["name"]}
 
     def publish(self, address):
         if self.credential is None:
-            return False
+            return
         if "address" in self.down:
             raise Unreachable()
         self.published.append(address)
-        return True
 
     def answers(self, name, address):
         return self.answering and name == self.domain

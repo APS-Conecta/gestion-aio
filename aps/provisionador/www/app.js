@@ -36,7 +36,8 @@ function show(step) {
   for (const link of document.querySelectorAll(".step-link")) {
     const current = link.dataset.step === step;
     $(link.dataset.step).hidden = !current;
-    link.parentElement.toggleAttribute("aria-current", current);
+    if (current) link.parentElement.setAttribute("aria-current", "step");
+    else link.parentElement.removeAttribute("aria-current");
     if (current) link.disabled = false;
   }
   if (step === "centro") map.invalidateSize();
