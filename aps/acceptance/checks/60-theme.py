@@ -5,7 +5,8 @@
 load the theme's stylesheet, theming's colours are the brand token file's, Nunito Sans is the font Nextcloud serves,
 and the login page names the establishment. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
 the login page, the dashboard, Files, Talk or the personal settings, which link the suite's source code and its
-licence. The theme survives a restart of Nextcloud's container."""
+licence. The custom menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of
+Nextcloud's container, and the support app stays off."""
 
 import json
 import os
@@ -101,6 +102,9 @@ with chromium() as browser:
         problems.append("the personal settings do not link the source code")
     if not page.locator('a[href="https://www.gnu.org/licenses/agpl-3.0.html"]').is_visible():
         problems.append("the personal settings do not link the licence")
+    menu = page.context.request.get(f"{suite}/apps/side_menu/css/stylesheet").text()
+    if f"--side-menu-background-color: {tokens['--aps-violet-dark']}" not in menu:
+        problems.append("the custom menu's stylesheet does not paint it in the token file's dark violet")
 
     machine("sudo docker restart nextcloud-aio-nextcloud")
     deadline = time.monotonic() + 10 * 60
@@ -116,6 +120,10 @@ with chromium() as browser:
         time.sleep(10)
     page.context.clear_cookies()
     problems += login_page(page, "login-after-restart")
+    support = machine("sudo docker exec --user www-data nextcloud-aio-nextcloud php occ config:app:get support enabled")
+    print(f"support app after the restart: {support.strip()}")
+    if support.strip() != "no":
+        problems.append("the support app is on again after Nextcloud's restart")
 
 if problems:
     sys.exit("\n".join(problems))

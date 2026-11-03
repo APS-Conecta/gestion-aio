@@ -3,8 +3,8 @@
 """Brand gate: a brand colour is written in the brand token file only.
 
 The brand colours are the hex colours the token file (aps/brand/tokens.css) declares. A tracked file that writes one,
-in hex of any case or length or in rgb() notation, fails. Our own stylesheets, whose palette comes from the token file
-only, fail on any colour literal at all.
+in hex of any case or length, with or without alpha, or in rgb() notation, fails. Our own stylesheets, whose palette
+comes from the token file only, fail on any hex or functional colour literal.
 """
 
 import argparse
@@ -15,14 +15,14 @@ from pathlib import Path
 
 TOKENS = "aps/brand/tokens.css"
 OWN_STYLESHEETS = ("aps/provisionador/www/app.css", "aps/theme/")
-HEX = re.compile(r"#([0-9a-f]{6}|[0-9a-f]{3})(?![0-9a-z_-])", re.I)
+HEX = re.compile(r"#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![0-9a-z_-])", re.I)
 RGB = re.compile(r"rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})", re.I)
-LITERAL = re.compile(HEX.pattern + r"|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(", re.I)
+LITERAL = re.compile(HEX.pattern + r"|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(", re.I)
 
 
 def normal(hex_digits):
-    """A hex colour as six lowercase digits."""
-    digits = hex_digits.lower()
+    """A hex colour as six lowercase digits, without its alpha."""
+    digits = hex_digits.lower()[:6 if len(hex_digits) > 4 else 3]
     return "".join(c * 2 for c in digits) if len(digits) == 3 else digits
 
 

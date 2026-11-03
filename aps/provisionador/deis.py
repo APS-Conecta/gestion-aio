@@ -104,12 +104,13 @@ def establishment(row):
 
 
 def centre(row, moved=None):
-    """The centre the install stores: the establishment's identity, its official point, the point the
-    operator confirmed and the timezone."""
+    """The centre the install stores: the establishment's identity and short name, its official point, the point
+    the operator confirmed and the timezone."""
     found = establishment(row)
-    return {**found, "comuna_code": row["comuna_codigo"], "region_code": row["region_codigo"],
-            "health_service": row["servicio_salud"], "dependency": row["dependencia"],
-            "official_point": found["point"], "point": moved or found["point"], "timezone": timezone(row)}
+    return {**found, "short_name": short_name(row), "comuna_code": row["comuna_codigo"],
+            "region_code": row["region_codigo"], "health_service": row["servicio_salud"],
+            "dependency": row["dependencia"], "official_point": found["point"], "point": moved or found["point"],
+            "timezone": timezone(row)}
 
 
 class Register:

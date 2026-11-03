@@ -278,8 +278,8 @@ class CentroChoice(WizardTest):
         official = {"latitude": -33.47, "longitude": -70.64}
         self.assertEqual(body["centre"], {
             "code": "999004", "type": "CESFAM", "name": "Centro de Salud Familiar Doctor Juan Pérez",
-            "address": "Calle Cuatro 400, Villa Sur", "comuna_code": "13101", "comuna": "Santiago",
-            "region_code": "13", "region": "Metropolitana de Santiago",
+            "short_name": "CESFAM Doctor Juan Pérez", "address": "Calle Cuatro 400, Villa Sur", "comuna_code": "13101",
+            "comuna": "Santiago", "region_code": "13", "region": "Metropolitana de Santiago",
             "health_service": "Servicio de Salud Metropolitano Central", "dependency": "Municipal",
             "official_point": official, "point": official, "timezone": "America/Santiago"})
         self.assertEqual(browser.get("/api/state")[1]["centre"], body["centre"])
@@ -1035,7 +1035,7 @@ class Branding(InstallTest):
     def test_nextclouds_announcements_slides_survey_support_help_signup_and_update_banners_are_off(self):
         self.assertEqual({app: self.suite.apps[app]["enabled"] for app in OFF}, dict.fromkeys(OFF, "no"))
         self.assertLessEqual({"knowledgebaseenabled": False, "simpleSignUpLink.shown": False, "updatechecker": False,
-                              "skeletondirectory": ""}.items(), self.suite.system.items())
+                              "skeletondirectory": "", "customclient_ios_appid": ""}.items(), self.suite.system.items())
         self.assertNotIn("nextcloud.com", self.suite.apps["theming"]["url"])
 
     def test_text_overrides_say_aps_conecta_gestion_where_nextclouds_spanish_names_the_suite_nextcloud(self):
