@@ -118,7 +118,7 @@ for check in aps/acceptance/checks/*; do
   export EVIDENCE="$work/evidence/$name"
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
-  if timeout 30m "$check" < /dev/null; then
+  if timeout 15m "$check" < /dev/null; then
     mask_secrets
     echo "::endgroup::"
     echo "passed: $name"

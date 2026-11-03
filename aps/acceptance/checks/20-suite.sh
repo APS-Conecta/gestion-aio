@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The suite «Instalar» started runs at the name «Dirección» claimed: AIO started exactly the core, our Caddy image as
 # the reverse proxy and the chosen components, each from an image the release pins by digest, and every one runs,
-# healthy where it has a health check.
+# healthy where it has a health check. The machine's memory use is printed then.
 set -euo pipefail
 chosen=(nextcloud-aio-apache nextcloud-aio-caddy nextcloud-aio-clamav nextcloud-aio-database nextcloud-aio-eurooffice
   nextcloud-aio-fulltextsearch nextcloud-aio-harp nextcloud-aio-imaginary nextcloud-aio-nextcloud
@@ -24,6 +24,7 @@ for _ in $(seq 90); do
   states="$("$MACHINE" "sudo docker inspect -f '$format' ${chosen[*]}")"
   if ! grep -qvE ' running (healthy|-)$' <<< "$states"; then
     echo "$states"
+    "$MACHINE" free --mebi
     exit 0
   fi
   sleep 10

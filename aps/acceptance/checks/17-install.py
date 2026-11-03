@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
 
     page.click("#install")
     seen = {}  # each container's states, in the order the page showed them
-    deadline = time.monotonic() + 25 * 60
+    deadline = time.monotonic() + 12 * 60
     while not page.locator("#listo").is_visible():
         for container, state in page.eval_on_selector_all(
                 "#progress li", "items => items.map(i => [i.querySelector('strong').textContent, i.dataset.state])"):
@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
                 seen[container].append(state)
         if page.locator("#install").is_visible() or time.monotonic() > deadline:
             page.screenshot(path=evidence / "revisar-failed.png")
-            sys.exit(f"no «Listo» within 25 minutes: {page.inner_text('#install-status')}")
+            sys.exit(f"no «Listo» within 12 minutes: {page.inner_text('#install-status')}")
         if {"running", "stopped"} <= {s[-1] for s in seen.values()} and not (evidence / "progress.png").exists():
             page.screenshot(path=evidence / "progress.png")
         page.wait_for_timeout(2000)
