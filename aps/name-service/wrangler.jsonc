@@ -1,0 +1,22 @@
+// SPDX-FileCopyrightText: 2026 APS Conecta
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The APS name service. Production deploys from main at nombres.apsconecta.cl; the `ci` environment is the
+// separate deployment PR runs use, at nombres-ci.apsconecta.cl, whose names live under ci.gestion.apsconecta.cl.
+{
+  "name": "nombres",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "nombres.apsconecta.cl", "custom_domain": true }],
+  "vars": { "ZONE": "apsconecta.cl", "NAME_SUFFIX": "gestion.apsconecta.cl" },
+  "durable_objects": { "bindings": [{ "name": "NAMES", "class_name": "Names" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Names"] }],
+  "env": {
+    "ci": {
+      "routes": [{ "pattern": "nombres-ci.apsconecta.cl", "custom_domain": true }],
+      "vars": { "ZONE": "apsconecta.cl", "NAME_SUFFIX": "ci.gestion.apsconecta.cl" },
+      "durable_objects": { "bindings": [{ "name": "NAMES", "class_name": "Names" }] }
+    }
+  }
+}
