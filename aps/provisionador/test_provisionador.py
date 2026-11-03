@@ -1088,6 +1088,17 @@ class SearchAndAntivirus(InstallTest):
         self.assertEqual(self.named(install, "failed"), {SEARCH, ANTIVIRUS})
         self.assertFalse(self.suite.indexed)
 
+    def test_a_corrupted_fork_release_fails_the_search_step_naming_the_fork_and_why(self):
+        fork, package = apps.BY_ID["files_fulltextsearch"], "files_fulltextsearch.tar.gz"
+        tag, assets = next(iter(self.suite.app_releases[fork["repo"]].items()))
+        self.suite.app_releases[fork["repo"]] = {tag: {**assets, package: assets[package] + b"\0"}}
+        self.claim()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[SEARCH]
+        self.assertEqual(status, "failed")
+        self.assertRegex(reason, f"^«{fork['name']}»: [^«]*suma de verificación")
+        self.assertFalse(self.suite.indexed)
+
 
 class Listo(InstallTest):
     """«Listo» hands over the passwords file, kept root-only on the server, and the wizard closes: the link and every

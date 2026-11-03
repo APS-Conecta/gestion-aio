@@ -16,7 +16,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import chromium, machine, person, suite_name  # noqa: E402
+from browser import chromium, machine, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 from steps.theme import THEME  # noqa: E402
 
@@ -114,7 +114,7 @@ with chromium() as browser:
         time.sleep(10)
     page.context.clear_cookies()
     problems += login_page(page, "login-after-restart")
-    support = machine("sudo docker exec --user www-data nextcloud-aio-nextcloud php occ config:app:get support enabled")
+    support = occ("config:app:get support enabled")
     print(f"support app after the restart: {support.strip()}")
     if support.strip() != "no":
         problems.append("the support app is on again after Nextcloud's restart")
