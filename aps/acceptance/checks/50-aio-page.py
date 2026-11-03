@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
 from browser import chromium, machine  # noqa: E402
-from provisionador import BACKUP_FOLDER  # noqa: E402
+from steps.backups import BACKUP_FOLDER  # noqa: E402
 
 aio = f"https://{os.environ['ADDRESS']}:8080"
 evidence = Path(os.environ["EVIDENCE"])

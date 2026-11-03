@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# The thin Nextcloud image: upstream v14.4.3's Nextcloud image without AIO's one-click 100-user cap and
-# with AIO's notifications and admin section in Spanish.
+# The thin Nextcloud image: upstream v14.4.3's Nextcloud image without AIO's one-click 100-user cap,
+# with AIO's notifications and admin section in Spanish and Nextcloud's maintenance window at night.
 # The cap is the block between upstream's "AIO one-click settings" markers in /entrypoint.sh and the
 # one-click keys of the image's aio.config.php; the build fails if any of it is left.
 FROM ghcr.io/nextcloud-releases/aio-nextcloud:20261029_150718@sha256:4e955a9bd3e34d66dd2cd7a30ad0c21559848fa3b9d6304b065c5a1253dbd2ac
@@ -21,3 +21,7 @@ RUN set -eux; \
     sed -i -f /tmp/aio-texts.sed /entrypoint.sh "$admin"; \
     if grep -xFf /tmp/upstream-lines /entrypoint.sh "$admin"; then exit 1; fi; \
     rm /tmp/aio-texts.sed /tmp/upstream-lines
+
+# The hour (UTC) Nextcloud's heavy daily jobs start, which upstream's entrypoint sets at every start; the jobs install
+# step (aps/provisionador/steps/jobs.py) declares the same one.
+ENV NEXTCLOUD_MAINTENANCE_WINDOW=5
