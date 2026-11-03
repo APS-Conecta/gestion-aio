@@ -9,14 +9,16 @@
 # runner, from the repo root, with:
 #   TAG       the pre-release under test
 #   COMMAND   the one command, as the manual prints it
-#   CONSOLE   a file holding what the first run of COMMAND printed
+#   CONSOLE   a file holding what the first run of COMMAND printed, one-time link included; it stays out of
+#             the evidence, and one-command.sh runs COMMAND again with the link's secret masked
 #   MACHINE   runs one shell command line on the VM as the operator, whose sudo needs no password; like
 #             ssh, it passes stdin through: "$MACHINE" "sudo docker ps"
 #   ADDRESS   the VM's address on the shared network, where the runner's browser reaches it
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
-# python3 has Playwright with Chromium (aps-acceptance.yml installs it). Exit 0 passes. A failing check
-# is named in the log, its EVIDENCE gets every container's log and the disk usage, and the workflow
-# attaches it to the run.
+# python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
+# Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log (the name's
+# credential blanked out) and the disk usage, and the workflow attaches it to the run. The check that has the
+# wizard claim a CI name writes its DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it.
 # Usage: run.sh <tag>
 set -euo pipefail
 [[ "$#" -eq 1 && "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "usage: $0 <tag>" >&2; exit 2; }
@@ -24,16 +26,20 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 work="$RUNNER_TEMP/acceptance"
 mkdir -p "$work/evidence"
-export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/evidence/console.txt"
+export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt"
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
 
-collect() { # <dir>: every container's log and the disk usage
-  local name
+collect() { # <dir>: every container's log, without the name's credential, and the disk usage
+  local name log password
   mkdir -p "$1"
   df -h > "$1/runner-disk.txt"
   "$MACHINE" 'df -h; sudo docker system df; sudo docker ps --all' > "$1/machine.txt" 2>&1 || true
+  password="$("$MACHINE" 'sudo cat /var/lib/aps-conecta/name-service.json' 2> /dev/null | jq -r '.password // empty' 2> /dev/null || true)"
+  [ -z "$password" ] || echo "::add-mask::$password"
   for name in $("$MACHINE" "sudo docker ps --all --format '{{.Names}}'" 2> /dev/null || true); do
-    "$MACHINE" "sudo docker logs --timestamps $name" > "$1/$name.log" 2>&1 || true
+    log="$("$MACHINE" "sudo docker logs --timestamps $name" 2>&1 || true)"
+    [ -z "$password" ] || log="${log//"$password"/[credential]}"
+    printf '%s\n' "$log" > "$1/$name.log"
   done
 }
 on_exit() { # a failure outside the checks names its stage and collects the same evidence
@@ -49,7 +55,8 @@ echo "0464b5d4ae3aa4f658468d88da83af7857b71548b30d46dcb6282770955a747fb95a983476
   | sha512sum --check --quiet
 qemu-img create -q -f qcow2 -F qcow2 -b "$work/debian.qcow2" "$work/disk.qcow2" 60G
 
-# The shared network: a tap device, DHCP and DNS from dnsmasq, NAT to the internet.
+# The shared network: a tap device, DHCP and DNS from dnsmasq, NAT to the internet. Its DNS has no answer for
+# Let's Encrypt's production service: the suite gets its certificate from the staging one (checks/25-certificate.py).
 sudo ip tuntap add dev aps0 mode tap
 sudo ip address add 192.168.77.1/24 dev aps0
 sudo ip link set aps0 up
@@ -57,7 +64,8 @@ sudo sysctl -qw net.ipv4.ip_forward=1
 sudo iptables -t nat -A POSTROUTING -s 192.168.77.0/24 ! -o aps0 -j MASQUERADE
 sudo iptables -I FORWARD -i aps0 -j ACCEPT
 sudo iptables -I FORWARD -o aps0 -j ACCEPT
-sudo dnsmasq --interface=aps0 --except-interface=lo --bind-interfaces --dhcp-range="$ADDRESS,$ADDRESS,12h"
+sudo dnsmasq --interface=aps0 --except-interface=lo --bind-interfaces --dhcp-range="$ADDRESS,$ADDRESS,12h" \
+  --address=/acme-v02.api.letsencrypt.org/
 
 ssh-keygen -q -t ed25519 -N '' -C acceptance -f "$work/key"
 printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$work/key.pub")" > "$work/user-data"
@@ -90,7 +98,7 @@ for _ in $(seq 60); do "$MACHINE" true 2> /dev/null && break; sleep 5; done
 
 stage="the one command"
 echo "$COMMAND"
-timeout 15m "$MACHINE" "$COMMAND" 2>&1 | tee "$CONSOLE"
+aps/acceptance/one-command.sh "$CONSOLE"
 
 stage=""
 failed=()

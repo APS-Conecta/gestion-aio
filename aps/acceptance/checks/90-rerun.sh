@@ -16,7 +16,9 @@ dpkg-query --show
 STATE
 }
 before="$(snapshot)"
-"$MACHINE" "$COMMAND"
+console="$(mktemp)" # the fresh one-time link stays out of the log and the evidence
+aps/acceptance/one-command.sh "$console"
+rm -f "$console"
 after="$(snapshot)"
 diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || { echo "the second run changed the machine (above)" >&2; exit 1; }
 echo "the second run changed nothing"

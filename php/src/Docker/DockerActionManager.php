@@ -503,6 +503,9 @@ readonly class DockerActionManager {
         // Special things for the caddy community container
         } elseif ($container->identifier === 'nextcloud-aio-caddy') {
             $requestBody['HostConfig']['ExtraHosts'] = ['host.docker.internal:host-gateway'];
+            // APS: inside the suite the domain resolves to its reverse proxy, so server-side calls never depend on
+            // the host's firewall
+            $requestBody['NetworkingConfig']['EndpointsConfig']['nextcloud-aio']['Aliases'] = [$this->configurationManager->domain];
 
         // Special things for the collabora container which should not be exposed in the containers.json
         } elseif ($container->identifier === 'nextcloud-aio-collabora') {
