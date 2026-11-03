@@ -23,8 +23,9 @@ DEDYN = ".dedyn.io"
 LOGIN_REFUSED = "deSEC no aceptó el correo y la contraseña de esa cuenta. Revíselos e intente nuevamente."
 DOMAIN_LIMIT = ("Su cuenta de deSEC alcanzó su límite de direcciones. Elimine en desec.io una que no use, o use el "
                 "correo y la contraseña de otra cuenta.")
-ONE_PER_ACCOUNT = ("deSEC no registró esta dirección con esa cuenta: cada cuenta puede tener una sola dirección "
-                   "dedyn.io. Si la cuenta ya tiene una, escriba esa dirección.")
+NOT_REGISTERED = ("deSEC no registró esta dirección aunque está libre: deSEC permite una sola dirección dedyn.io por "
+                  "cuenta, y a veces suspende el registro de direcciones nuevas. Si la cuenta ya tiene una, escriba esa "
+                  "dirección; si no, presione «Registrar dirección» más tarde.")
 REFUSED = "deSEC no pudo registrar la dirección. Intente nuevamente en unos minutos."
 SUITE_DOWN = "El contenedor maestro de la suite no responde. Revise que Docker esté en marcha e intente nuevamente."
 
@@ -113,9 +114,10 @@ class Suite:
         if result["awaiting"]:
             return "awaiting"
         error = refusal(result["error"])
-        # Upstream words deSEC's one-dedyn.io-name-per-account refusal as "already taken"; the name is free.
+        # Upstream words every deSEC refusal of a chosen name as "already taken", the one-name-per-account rule and
+        # a suspended registration included; a free name was refused for one of those.
         if isinstance(error, Taken) and not self.name_taken(name):
-            raise Refused(ONE_PER_ACCOUNT)
+            raise Refused(NOT_REGISTERED)
         raise error
 
     def answers(self, domain, address):
