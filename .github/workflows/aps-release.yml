@@ -16,6 +16,7 @@ on:
       - aps/images/**
       - aps/provisionador/**
       - aps/release/**
+      - community-containers/**
       - Containers/mastercontainer/**
       - php/**
   workflow_dispatch:
@@ -177,6 +178,9 @@ jobs:
     uses: ./.github/workflows/aps-acceptance.yml
     with:
       tag: ${{ needs.images.outputs.tag }}
+    secrets:
+      DESEC_TEST_EMAIL: ${{ secrets.DESEC_TEST_EMAIL }}
+      DESEC_TEST_PASSWORD: ${{ secrets.DESEC_TEST_PASSWORD }}
 
   host-checks:
     name: A machine below the minimum is refused before it is changed

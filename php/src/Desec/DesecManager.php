@@ -400,7 +400,7 @@ class DesecManager {
     }
 
     /**
-     * Updates the deSEC dynamic-DNS record with the current public IP.
+     * Updates the deSEC dynamic-DNS record with the server's current inside address (APS).
      * Does nothing when the configured domain is not a deSEC-managed dedyn.io domain.
      */
     public function updateIpIfDesecDomain(): void {
@@ -410,10 +410,15 @@ class DesecManager {
 
         $domain = $this->configurationManager->domain;
         $token  = $this->configurationManager->desecToken;
+        $insideAddress = $this->getInsideAddress();
+        if ($insideAddress === '') {
+            error_log('Could not determine the inside address to publish for ' . $domain);
+            return;
+        }
 
         try {
             $res    = $this->guzzleClient->get($this->configurationManager->desecUpdateUrl, [
-                'query'   => ['hostname' => $domain],
+                'query'   => ['hostname' => $domain, 'myipv4' => $insideAddress, 'myipv6' => ''],
                 'headers' => ['Authorization' => 'Token ' . $token],
             ]);
             $status = trim($res->getBody()->getContents());
@@ -426,5 +431,15 @@ class DesecManager {
         } catch (\Exception $e) {
             error_log('Could not update deSEC DNS record for ' . $domain . ': ' . $e->getMessage());
         }
+    }
+
+    /**
+     * APS: the server's inside address, the source the host's kernel picks for a route out (as the dnsmasq
+     * community container finds it), read in the host's network by a throwaway run of this image.
+     */
+    private function getInsideAddress(): string {
+        $image = trim((string)shell_exec("docker inspect --format '{{.Config.Image}}' nextcloud-aio-mastercontainer"));
+        $route = (string)shell_exec('docker run --rm --pull never --network host --entrypoint ip ' . escapeshellarg($image) . ' -4 route get 192.0.2.1');
+        return preg_match('/ src (\d+\.\d+\.\d+\.\d+)/', $route, $match) === 1 ? $match[1] : '';
     }
 }

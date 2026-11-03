@@ -22,6 +22,7 @@ import hmac
 import http.cookies
 import json
 import os
+import re
 import shutil
 import socket
 import ssl
@@ -33,7 +34,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 import deis
-from suite import Suite
+from suite import DEDYN, Refused, Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -41,8 +42,9 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset
 # The page and what it loads, by name: no request path is ever joined to a directory.
 STATIC = {f"/{p.name}": p for p in (HERE / "www").iterdir() if p.suffix in CONTENT_TYPES}
 STATIC["/"] = HERE / "www" / "index.html"
-CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; base-uri 'none'; form-action 'none'; "
-       "frame-ancestors 'none'")
+# connect-src: the browser-side check that this computer reaches the suite at its free domain.
+CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self' https://*.dedyn.io; "
+       "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
 PORT = 8081  # clear of AIO's 80, 443, 3478, 8080 and 8443
 COOKIE = "__Host-session"
@@ -52,6 +54,17 @@ NOT_JSON = "La solicitud no es JSON válido."
 NO_SESSION = "Abra el enlace que mostró el comando de instalación."
 LINK_REFUSED = ("Este enlace ya se usó o fue reemplazado. Para obtener uno nuevo, vuelva a ejecutar el "
                 "comando de instalación en el servidor.")
+
+NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")  # a dedyn.io name, as upstream's DesecManager checks it
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+NO_CENTRE = "Elija primero el centro: la dirección se sugiere a partir de su nombre."
+INVALID_NAME = ("La dirección solo puede tener letras minúsculas sin tilde, números y guiones, hasta 63 caracteres, "
+                "sin guion al comienzo ni al final.")
+INVALID_EMAIL = "Escriba un correo electrónico válido; deSEC le enviará ahí el enlace de verificación."
+INVALID_PASSWORD = "La contraseña de deSEC debe ser texto."
+TAKEN = "La dirección {} ya está registrada. Elija otra, por ejemplo la sugerida."
+UNREACHABLE = ("No se pudo conectar con deSEC, el servicio de las direcciones gratuitas. Revise la conexión a "
+               "internet del servidor y presione «Reintentar».")
 
 
 def digest(value):
@@ -80,6 +93,15 @@ def fingerprint(pem):
     """A certificate's SHA-256 fingerprint, AA:BB:…, as browsers show it."""
     h = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
     return ":".join(h[i:i + 2] for i in range(0, len(h), 2))
+
+
+def suggested_name(centre):
+    """The centre's short name as a dedyn.io name: «Centro de Salud Familiar Los Castaños» is «CESFAM Los
+    Castaños», so cesfam-los-castanos."""
+    name, long_type = centre["name"], deis.TYPES.get(centre["type"], "")
+    if long_type and deis.fold(name[:len(long_type)]) == deis.fold(long_type):
+        name = centre["type"] + name[len(long_type):]
+    return re.sub(r"[^a-z0-9]+", "-", deis.fold(name)).strip("-")[:63].rstrip("-")
 
 
 def lan_ip():
@@ -172,7 +194,11 @@ class Provisionador:
         return 200, {"ok": True}, new_session
 
     def get_state(self, query, body):
-        return 200, {"fingerprint": self.fingerprint, "centre": self.state.read().get("centre")}
+        state = self.state.read()
+        address = state.get("address")
+        if address and address["status"] == "registered":
+            address = {**address, "answers": self.suite.answers(address["domain"], lan_ip())}
+        return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": address}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -199,16 +225,71 @@ class Provisionador:
             s["centre"] = centre
         return 200, {"centre": centre}
 
+    def availability(self, name):
+        """Whether a valid name is free; a taken one comes with the first free suffix, for the operator to edit."""
+        answer = {"name": name, "domain": name + DEDYN, "available": not self.suite.name_taken(name)}
+        if not answer["available"]:
+            free = (f"{name[:59]}-{n}" for n in range(2, 10) if not self.suite.name_taken(f"{name[:59]}-{n}"))
+            answer["suggestion"] = next(free, None)
+        return answer
+
+    def get_address(self, query, body):
+        """GET /api/address?name=: whether a dedyn.io name is free; without a name, the one the centre suggests."""
+        name = parse_qs(query, keep_blank_values=True).get("name", [None])[0]
+        if name is None:
+            centre = self.state.read().get("centre")
+            if centre is None:
+                return 409, {"error": NO_CENTRE}
+            name = suggested_name(centre)
+        return (200, self.availability(name)) if NAME.fullmatch(name) else (400, {"error": INVALID_NAME})
+
+    def post_address(self, query, body):
+        """POST /api/address {"name", "email", "password"?}: register the free domain through the suite port with
+        the operator's email, or resume a registration waiting for deSEC's verification, which the page asks
+        again until it is done. A registered domain is never registered again. The password of an existing
+        deSEC account goes to the suite only and is never kept."""
+        name, email, password = body.get("name"), body.get("email"), body.get("password", "")
+        if not (isinstance(name, str) and NAME.fullmatch(name)):
+            return 400, {"error": INVALID_NAME}
+        if not (isinstance(email, str) and EMAIL.fullmatch(email)):
+            return 400, {"error": INVALID_EMAIL}
+        if not isinstance(password, str):
+            return 400, {"error": INVALID_PASSWORD}
+        with self.state.change() as s:
+            address = s.get("address")
+            if address and address["status"] == "registered":
+                return 200, {"address": address}
+            try:
+                # A new account holds no name yet: a taken one is refused before deSEC is asked for anything.
+                if not (address or password) and self.suite.name_taken(name):
+                    raise Taken()
+                status = self.suite.register(email, name, password)
+            except Taken:
+                return 409, {"error": TAKEN.format(name + DEDYN), **self.availability(name)}
+            s["address"] = {"name": name, "domain": name + DEDYN, "email": email, "status": status}
+            return 200, {"address": s["address"]}
+
     ROUTES = {
         ("GET", "/api/state"): get_state,
         ("GET", "/api/register"): get_register,
         ("GET", "/api/establishments"): get_establishments,
         ("POST", "/api/centre"): post_centre,
+        ("GET", "/api/address"): get_address,
+        ("POST", "/api/address"): post_address,
     }
 
     def call(self, method, path, query, body):
+        """The route's answer; an outage or a refusal of the suite's services is answered in Spanish, and the
+        state stays as it was."""
         route = self.ROUTES.get((method, path))
-        return route(self, query, body) if route else (404, {"error": "Ruta desconocida."})
+        if route is None:
+            return 404, {"error": "Ruta desconocida."}
+        try:
+            return route(self, query, body)
+        except Unreachable:
+            return 503, {"error": UNREACHABLE}
+        except Refused as refused:
+            return 422, {"error": str(refused)}
 
 
 class Server(ThreadingHTTPServer):
