@@ -102,6 +102,10 @@ An app offered in the Provisionador, off by default.
 A GitHub Release of an own or fork app with four assets: `<id>.tar.gz`, `info.xml`, `SHA256SUMS` and
 `SHA256SUMS.minisig`, signed with the app key.
 
+**App key** (clave de aplicaciones):
+The key that signs every App release. Its public half ships in each Suite release, and the install verifies each own
+and fork app against it before unpacking it.
+
 **Suite manifest**:
 The only list of the suite's apps.
 

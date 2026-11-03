@@ -16,9 +16,11 @@ every 10 minutes (`provisionador.py publish`).
 AIO keeps on this server: its optional-containers form, its backup settings and its start button. AIO closes that
 login once Apache runs. The passphrase leaves this process only in the passwords file. The containers' progress is
 AIO's own reading of their state, as its page lists them. Every later install step runs occ in the Nextcloud
-container.
+container. The apps step downloads App releases from GitHub, without a token, and unpacks the ones it verified into
+Nextcloud's custom_apps.
 """
 
+import base64
 import http.client
 import json
 import os
@@ -34,6 +36,7 @@ import urllib.request
 from pathlib import Path
 
 CREDENTIAL = Path("/var/lib/aps-conecta/name-service.json")
+APP_KEY = Path(__file__).resolve().parent / "apps.pub"  # the app key's public half, in signify's format
 UNREACHABLE = ("No se pudo conectar con el servicio de nombres de APS Conecta. Revise la conexión a internet del "
                "servidor y presione «Reintentar».")
 LIMITED = ("El servicio de nombres de APS Conecta limita las direcciones que se obtienen desde una misma red cada día y "
@@ -47,6 +50,10 @@ NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores d
 NEXTCLOUD_DOWN = ("El contenedor de Nextcloud no responde. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
                   "Conecta.")
 OCC_FAILED = "Nextcloud no pudo completar «occ {}». Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta."
+GITHUB_FAILED = ("No se pudo descargar {} desde GitHub. Revise la conexión a internet del servidor y presione "
+                 "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a "
+                 "APS Conecta.")
 ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
                  "servidor y presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
@@ -135,6 +142,12 @@ php /var/www/html/occ security:certificates:import "$dir/$name"
 """
 
 
+# In the Nextcloud container, the app $1's tarball, in base64 on stdin, in place of any copy in custom_apps.
+UNPACK = """set -eu
+rm -rf "/var/www/html/custom_apps/$1"
+base64 -d | tar -xzf - -C /var/www/html/custom_apps"""
+
+
 def write_root_only(path, text):
     """Replace the file with `text`, readable by its owner (root, on the server) alone."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +218,7 @@ class Suite:
         self.services = json.loads(Path(services).read_text(encoding="utf-8"))
         self.suffix = self.services["suffix"]
         self.credential = Path(credential)
+        self.app_key = APP_KEY.read_text(encoding="ascii")
 
     def call(self, path, body, headers=()):
         """The name service's JSON answer. A name in use is Taken; the claim limits, any other refusal, a server error
@@ -280,6 +294,34 @@ class Suite:
         Nextcloud's trusted certificates."""
         self.execute(NEXTCLOUD, ("sh", "-c", ISSUER, "sh", host), failed=ISSUER_FAILED.format(host))
 
+    @staticmethod
+    def download(url, what):
+        """What GitHub serves at the URL; a failure is Unreachable, naming `what`."""
+        request = urllib.request.Request(url, headers={"User-Agent": "aps-conecta-gestion"})
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read()
+        except (OSError, http.client.HTTPException) as error:
+            print(f"GitHub {url}: {error}", file=sys.stderr)
+            raise Unreachable(GITHUB_FAILED.format(what)) from error
+
+    def releases(self, repo):
+        """The tags of the repo's published releases, newest first, from one call to GitHub's API."""
+        listed = self.download(f"https://api.github.com/repos/{repo}/releases?per_page=100", f"las versiones de {repo}")
+        try:
+            return [r["tag_name"] for r in json.loads(listed) if not (r["draft"] or r["prerelease"])]
+        except (ValueError, TypeError, KeyError) as error:
+            raise Unreachable(GITHUB_FAILED.format(f"las versiones de {repo}")) from error
+
+    def asset(self, repo, tag, name):
+        """One file of the repo's release."""
+        return self.download(f"https://github.com/{repo}/releases/download/{tag}/{name}", name)
+
+    def unpack(self, app, tarball):
+        """Unpack the app's tarball into Nextcloud's custom_apps, in place of any copy there."""
+        self.execute(NEXTCLOUD, ("sh", "-c", UNPACK, "sh", app), base64.b64encode(tarball).decode(),
+                     UNPACK_FAILED.format(app))
+
     def secrets(self):
         """AIO's passphrase and the first password of the suite's administrator, `admin`, as AIO keeps them here."""
         config = json.loads(self.mastercontainer("cat", AIO_CONFIG))
@@ -347,6 +389,7 @@ class FakeSuite:
     """The in-memory suite of the wizard-API tests, with the name service it claims from."""
 
     suffix = "gestion.apsconecta.cl"
+    nextcloud = 34  # the major version of the Nextcloud it runs
     ADMINISTRATOR = "primera-contraseña-del-administrador"
     PASSPHRASE = "frase de contraseña de AIO"
 
@@ -373,6 +416,10 @@ class FakeSuite:
         self.commands = []  # every occ command, by its arguments
         self.imports = []  # the settings each config:import brought
         self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
+        self.app_key = ""  # the app key the suite ships; the tests sign their App releases with their own
+        self.app_releases = {}  # GitHub's App releases, by repo, newest first: {tag: {file name: bytes}}
+        self.store = set()  # the ids of the apps the open app store offers
+        self.unpacked = []  # each app id and tarball unpacked into custom_apps, in turn
 
     def claim(self, code, name):
         if self.credential is None:
@@ -444,12 +491,28 @@ class FakeSuite:
             for app, values in settings.get("apps", {}).items():
                 self.apps.setdefault(app, {}).update(values)
             return ""
+        if args == ("status", "--output=json"):
+            return json.dumps({"installed": True, "version": f"{self.nextcloud}.0.0.0"})
         if args[0] == "app:enable" and len(args) == 2:
-            if args[1] not in self.apps:
+            if args[1] not in self.apps and args[1] not in self.store:
                 raise Unreachable(OCC_FAILED.format(" ".join(args)))
-            self.apps[args[1]]["enabled"] = "yes"
+            self.apps.setdefault(args[1], {})["enabled"] = "yes"
             return ""
         raise AssertionError(f"the fake suite runs no occ {args}")
+
+    def releases(self, repo):
+        return list(self.app_releases.get(repo, {}))
+
+    def asset(self, repo, tag, name):
+        """A file the release does not hold fails to download."""
+        if name not in self.app_releases.get(repo, {}).get(tag, {}):
+            raise Unreachable(GITHUB_FAILED.format(name))
+        return self.app_releases[repo][tag][name]
+
+    def unpack(self, app, tarball):
+        self._outage_guard("nextcloud")
+        self.unpacked.append((app, tarball))
+        self.apps.setdefault(app, {})
 
     def trust_issuer(self, host):
         self._outage_guard("nextcloud")

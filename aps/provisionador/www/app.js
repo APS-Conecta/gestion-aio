@@ -217,11 +217,23 @@ async function revisar() {
     $("summary-centre").textContent = `${centre.name} (${centre.comuna}, ${centre.region})`;
     $("summary-address").textContent = `https://${address.name}`;
     $("summary-components").replaceChildren(...state.components.map((name) => element("li", name)));
+    $("summary-apps").replaceChildren(...state.apps.map((name) => element("li", name)));
+    $("optional-apps").replaceChildren(...state.optional_apps.map(choice));
     $("summary-backups").textContent = `Cada noche, en la carpeta ${state.backup_folder} del servidor.`;
     follow(state, false);
   } catch (e) {
     status("install-status", e.message, true);
   }
+}
+
+// An optional app, off unless the operator ticked it; the choice of the first «Instalar» stays.
+function choice(app) {
+  const box = Object.assign(document.createElement("input"), {type: "checkbox", value: app.id, checked: app.chosen});
+  const label = element("label", "");
+  label.append(box, element("strong", app.name), element("span", app.summary));
+  const node = element("li", "");
+  node.append(label);
+  return node;
 }
 
 function item(name, state, label, reason) {
@@ -238,6 +250,7 @@ function follow(state, jump = true) {
   const install = state.install;
   $("install").hidden = Boolean(install) && install.status !== "failed";
   $("install").textContent = install?.status === "failed" ? "Reintentar" : "Instalar";
+  for (const box of $("optional-apps").querySelectorAll("input")) box.disabled = Boolean(install);
   $("steps").replaceChildren(...(install?.steps || []).map(
     (step) => item(step.name, step.status, STEP_STATES[step.status], step.reason)));
   $("progress").replaceChildren(...(install?.containers || []).map((c) => item(c.name, c.state, STATES[c.state])));
@@ -260,7 +273,8 @@ async function install() {
   $("install").hidden = true;
   status("install-status", "");
   try {
-    await api("POST", "/api/install", {});
+    const optional = [...$("optional-apps").querySelectorAll("input:checked")].map((box) => box.value);
+    await api("POST", "/api/install", {optional});
     follow(await api("GET", "/api/state"));
   } catch (e) {
     $("install").hidden = false;
