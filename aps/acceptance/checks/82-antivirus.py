@@ -10,10 +10,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import as_person, machine, person, suite_name  # noqa: E402
+from browser import NEXTCLOUD, as_person, machine, occ, person, suite_name  # noqa: E402
 
 USER, UPLOADED, UNSCANNED = "prueba.antivirus", "eicar-subido.txt", "eicar-sin-revisar.txt"
-NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"
 EICAR = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR" + r"-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"  # halved: no repo file holds it
 
 files = f"https://{suite_name()}/remote.php/dav/files/{USER}"
@@ -32,10 +31,10 @@ if 200 <= status < 300 or held(UPLOADED):
 
 # Written into the person's folder on the server, then listed by Nextcloud's own scan: the upload's scan never saw it.
 machine(f"{NEXTCLOUD} sh -c 'cat > \"$(php occ config:system:get datadirectory)/{USER}/files/{UNSCANNED}\"'", EICAR)
-machine(f"{NEXTCLOUD} php occ files:scan --path=/{USER}/files")
+occ(f"files:scan --path=/{USER}/files")
 if not held(UNSCANNED):
     sys.exit(f"{UNSCANNED}, written into the person's folder, is not in their files")
-print(machine(f"{NEXTCLOUD} php occ --no-ansi files_antivirus:background-scan").strip())
+print(occ("files_antivirus:background-scan").strip())
 if held(UNSCANNED):
     sys.exit("the antivirus's background scan did not delete the EICAR test file")
 print("the uploaded EICAR test file was refused and deleted, and the background scan deleted the one it found")

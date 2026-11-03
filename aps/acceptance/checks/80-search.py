@@ -14,12 +14,11 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import as_person, machine, person, suite_name  # noqa: E402
+from browser import as_person, occ, person, suite_name  # noqa: E402
 
 USER, FILE = "prueba.busqueda", "acta-de-busqueda.docx"
-OCC = "sudo docker exec --user www-data nextcloud-aio-nextcloud php occ --no-ansi"
 JOB = r"OCA\FullTextSearch\Cron\Index"  # vanilla's index job
-XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
 PARTS = {  # a DOCX's parts but its text
     "[Content_Types].xml": '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default '
                            'Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
@@ -40,7 +39,7 @@ def docx(text):
     packed = io.BytesIO()
     with zipfile.ZipFile(packed, "w", zipfile.ZIP_DEFLATED) as document:
         for part, xml in {**PARTS, "word/document.xml": TEXT.format(text)}.items():
-            document.writestr(part, XML + xml)
+            document.writestr(part, DECLARATION + xml)
     return packed.getvalue()
 
 
@@ -52,13 +51,13 @@ status, _ = as_person(USER, password, "PUT", f"{suite}/remote.php/dav/files/{USE
 if status != 201:
     sys.exit(f"uploading {FILE} answered {status}")
 
-jobs = json.loads(machine(f"{OCC} background-job:list --class='{JOB}' --output=json"))
+jobs = json.loads(occ(f"background-job:list --class='{JOB}' --output=json"))
 if not jobs:
     sys.exit(f"vanilla's index job {JOB} is not registered")
 search = f"{suite}/ocs/v2.php/search/providers/fulltextsearch/search?format=json&term={word}"
 deadline = time.monotonic() + 3 * 60
 while True:
-    machine(f"{OCC} background-job:execute --force-execute {jobs[0]['id']}")
+    occ(f"background-job:execute --force-execute {jobs[0]['id']}")
     status, body = as_person(USER, password, "GET", search)
     entries = json.loads(body)["ocs"]["data"]["entries"] if status == 200 else []
     print(f"searching {word!r} answered {status}: {[(e['title'], e['subline']) for e in entries]}")

@@ -30,6 +30,7 @@ from playwright.sync_api import sync_playwright
 
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
 AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its configuration and its other files
+NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
 
 
 def machine(command, stdin=""):
@@ -65,9 +66,19 @@ def wizard_link(output):
     return links[-1], printed[-1]
 
 
+def aio_file(name):
+    """One of AIO's files on the machine, as its mastercontainer holds it."""
+    return machine(f"sudo docker exec nextcloud-aio-mastercontainer cat {AIO_DATA}/{name}")
+
+
 def aio_config():
     """AIO's configuration on the machine, with its passphrase and secrets, which a check keeps in memory, unprinted."""
-    return json.loads(machine(f"sudo docker exec nextcloud-aio-mastercontainer cat {AIO_DATA}/configuration.json"))
+    return json.loads(aio_file("configuration.json"))
+
+
+def occ(command, stdin=""):
+    """What Nextcloud's command line printed for `command`, its arguments as one shell command line."""
+    return machine(f"{NEXTCLOUD} php occ --no-ansi {command}", stdin)
 
 
 def suite_name():
@@ -82,9 +93,8 @@ def person(user, display_name):
     """A new staff account, made with occ, its password on stdin only and masked in the log; its password."""
     password = secrets.token_urlsafe(18)
     print(f"::add-mask::{password}", flush=True)
-    machine(f"sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud sh -c 'read -r OC_PASS && "
-            f"export OC_PASS && php occ user:add --password-from-env --display-name \"{display_name}\" {user}'",
-            stdin=f"{password}\n")
+    machine(f"{NEXTCLOUD} sh -c 'read -r OC_PASS && export OC_PASS && "
+            f"php occ user:add --password-from-env --display-name \"{display_name}\" {user}'", stdin=f"{password}\n")
     return password
 
 

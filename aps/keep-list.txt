@@ -45,13 +45,6 @@ php/templates/layout.twig Spanish «APS Conecta Gestión» text on AIO's page, f
 php/templates/log.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/login.twig Spanish «APS Conecta Gestión» text on AIO's page
 php/templates/setup.twig Spanish «APS Conecta Gestión» text on AIO's page
-#
-# Apps that change what upstream does, kept only while they fix a real vanilla problem (Suite manifest,
-# aps/provisionador/apps.json):
-# files_fulltextsearch: kept, as the fork APS-Conecta/files-fulltextsearch. The store's newest release for Nextcloud 34
-#   (34.0.2) escapes the username as a regex before it looks up each file found, so a person whose username has a dot
-#   (as cargo accounts' do) gets no file result. The fix (nextcloud/files_fulltextsearch#463) is merged into stable34 but
-#   not released; drop the fork once the store's release carries it.
-# files_upload_guard: kept, as an own app. Nextcloud 34 writes an overwrite straight onto the existing file instead of a
-#   .part file (nextcloud/server#62853, open), so a rejected infected overwrite deletes the previous clean file; the app
-#   keeps the overwrite staged. Drop it once a Nextcloud 34 release stages overwrites.
+# Apps that change upstream's, kept only while they fix a real vanilla problem (Suite manifest, aps/provisionador/apps.json):
+# files_fulltextsearch: kept as the fork APS-Conecta/files-fulltextsearch; the store's Nextcloud 34 release finds no file for a username with a dot (nextcloud/files_fulltextsearch#463, unreleased); drop it once the store's release carries the fix.
+# files_upload_guard: kept as an own app; a rejected infected overwrite deletes the previous clean file (nextcloud/server#62853, open); drop it once a Nextcloud 34 release stages overwrites.

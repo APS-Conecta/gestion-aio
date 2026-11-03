@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import AIO_DATA, aio_config, chromium, machine, suite_name, verified, wizard_link  # noqa: E402
+from browser import aio_config, aio_file, chromium, machine, suite_name, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import COMPONENTS  # noqa: E402
@@ -109,7 +109,7 @@ if not (handed == kept and passphrase in kept and administrator in kept):
     sys.exit("the passwords file «Listo» handed over is not the machine's copy with the administrator's first password "
              "and AIO's passphrase")
 reported = {key: config.get(key) for key in SWITCHES}
-backup = machine(f"sudo docker exec nextcloud-aio-mastercontainer cat {AIO_DATA}/daily_backup_time").splitlines()
+backup = aio_file("daily_backup_time").splitlines()
 print(f"AIO reports {reported}; daily backup {backup}")
 if reported != SWITCHES or backup[:2] != [BACKUP_TIME, "automaticUpdatesAreNotEnabled"]:
     sys.exit(f"AIO does not report our components, every other one off, and nightly backups to {BACKUP_FOLDER}")

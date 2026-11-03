@@ -17,8 +17,7 @@ OFF = ("AIO desactivó el antivirus porque ClamAV no respondió a tiempo cuando 
 
 
 def run(context):
-    configure(context.suite, SETTINGS)
-    return check(context)
+    return [OFF] if APP not in enabled(context.suite) else configure(context.suite, SETTINGS)
 
 
 def check(context):
