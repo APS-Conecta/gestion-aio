@@ -7,8 +7,8 @@ A step module, whose name is its id, declares:
   NEEDS           the ids of the steps that must be green before it runs
   run(context)    its work, idempotent; it raises Unreachable, whose Spanish message the red list shows, when the
                   suite does not do what was asked: no step reports success without doing its work
-  check(context)  optional, its part of the end-of-install check: the Spanish differences between the running suite
-                  and what the step declared, none when it is clean
+  check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
+                  differences between the running suite and what the step declared, none when it is clean
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
 address (`inside`), the folder the Provisionador keeps its files in (`folder`) and the ids of the steps a
 Provisionador restart cut short (`interrupted`). A new step is a new module: no other file lists the steps.

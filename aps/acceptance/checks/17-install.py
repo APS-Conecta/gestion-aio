@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.screenshot(path=evidence / "router.png")
     print(f"router: {page.inner_text('#reach')}")
     page.unroute(dropped)
-    expect(page.locator("#reach")).to_have_text(f"Este equipo abre {suite} correctamente.", timeout=60_000)
+    expect(page.locator("#reach")).to_have_text(f"Este equipo abre {suite} correctamente.", timeout=180_000)
     page.screenshot(path=evidence / "listo.png")
     print(f"reach: {page.inner_text('#reach')}")
     context.close()

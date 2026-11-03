@@ -3,8 +3,8 @@
 """The install step runner: «Instalar» runs every step under steps/ whose needs are green, in an order where each comes
 after the steps it needs. A step that fails gets its Spanish reason; its dependents wait, and say for what; a step that
 does not need it still runs. «Reintentar» runs the failed and waiting steps again, never a green one. Once every step
-is green, the end-of-install check compares the running suite with what each step declared, and turns a step whose
-part differs red again. «Listo» needs every step green and a clean check.
+is green, the end-of-install check compares the running suite with what each step declared, step by step, and turns a
+step whose part differs red again. «Listo» needs every step green and a clean check.
 
 Each step's status is kept in the wizard's state as it changes: pending, running, green, failed or waiting. A step still
 running when the Provisionador starts was cut short by a restart, and the install resumes by itself.
@@ -83,12 +83,15 @@ def run(state, context):
         record(state, name, "failed" if found else "green", found)
     if any(r["status"] != "green" for r in state.read()["install"]["steps"].values()):
         return
-    differing = {name: problems(step.check, context) for name, step in STEPS.items() if hasattr(step, "check")}
-    for name, found in differing.items():
-        if found:
-            record(state, name, "failed", found)
+    clean = True
+    for name, step in STEPS.items():
+        if hasattr(step, "check"):
+            record(state, name, "running")
+            found = problems(step.check, context)
+            record(state, name, "failed" if found else "green", found)
+            clean = clean and not found
     with state.change() as s:
-        s["install"]["listo"] = not any(differing.values())
+        s["install"]["listo"] = clean
 
 
 def progress(install):

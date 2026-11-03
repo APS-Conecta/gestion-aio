@@ -449,6 +449,16 @@ class InstallTest(WizardTest):
             time.sleep(0.02)
         return install
 
+    def until_checked(self, name):
+        """The install's progress once the end-of-install check reached the step: it runs, every other one is green."""
+        deadline = time.monotonic() + 10
+        while True:
+            install = self.progress()
+            if {n: s for n, (s, _) in self.steps(install).items() if s != "green"} == {name: "running"}:
+                return install
+            self.assertLess(time.monotonic(), deadline, install)
+            time.sleep(0.02)
+
     @staticmethod
     def steps(install):
         """Each step's status and reason, by its Spanish name."""
@@ -567,7 +577,8 @@ class Pasos(InstallTest):
             self.assertIn("Reintentar", steps[name][1])
         self.assertEqual(steps["Inicio de la suite"],
                          ("waiting", "Espera a que se complete: «Componentes», «Copias de seguridad»."))
-        for name in set(STEPS) - {"Componentes", "Copias de seguridad", "Inicio de la suite"}:
+        self.assertEqual(steps["Dirección de la suite"], ("green", None), "it needs no other step")
+        for name in set(STEPS) - {"Componentes", "Copias de seguridad", "Inicio de la suite", "Dirección de la suite"}:
             self.assertEqual(steps[name], ("waiting", "Espera a que se complete: «Inicio de la suite»."), name)
         self.assertEqual((self.suite.starts, self.suite.commands), (0, []))
         self.suite.down = set()
@@ -612,13 +623,14 @@ class Pasos(InstallTest):
                          set(STEPS) - NEEDS_NEXTCLOUD)
         self.assertEqual((self.suite.system, self.suite.issuers), ({}, []))
 
-    def test_listo_waits_until_the_suite_answers_at_its_name(self):
+    def test_listo_waits_until_the_suite_answers_at_its_name_once_its_inside_address_is_published_again(self):
         self.claim()
         self.suite.answering = False
         self.install()
-        self.assertEqual(self.until_step("Dirección de la suite", "running")["status"], "installing")
+        self.assertEqual(self.until_checked("Dirección de la suite")["status"], "installing")
         self.suite.answering = True
         self.until("done")
+        self.assertEqual(self.suite.published, [provisionador.lan_ip()] * 2)
 
     def test_the_end_of_install_check_finds_what_changed_after_its_step_and_reintentar_sets_it_again(self):
         """A setting that changed once its step went green keeps «Listo» away until «Reintentar» reruns that step."""
@@ -697,7 +709,7 @@ class Listo(InstallTest):
         self.claim()
         self.suite.answering = False
         self.install()
-        self.until_step("Dirección de la suite", "running")
+        self.until_checked("Dirección de la suite")
         status, body = self.browser.request("POST", "/api/close", {})
         self.assertEqual(status, 409)
         self.assertIn("«Listo»", body["error"])
