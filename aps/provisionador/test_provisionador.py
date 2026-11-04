@@ -1607,8 +1607,8 @@ class Branding(InstallTest):
         texts = {path: json.loads(data)["translations"] for path, data in self.theme.items()
                  if path.endswith("/l10n/es.json")}
         self.assertLessEqual({"core/l10n/es.json", "apps/settings/l10n/es.json", "custom_apps/spreed/l10n/es.json",
-                              "custom_apps/files_antivirus/l10n/es.json", "custom_apps/fulltextsearch/l10n/es.json"},
-                             set(texts))
+                              "custom_apps/files_antivirus/l10n/es.json", "custom_apps/fulltextsearch/l10n/es.json",
+                              "custom_apps/eurooffice/l10n/es.json"}, set(texts))
         said = [value for translations in texts.values() for value in translations.values()]
         self.assertFalse([value for value in said if "Nextcloud" in str(value)])
         welcome = [v for k, v in texts["custom_apps/spreed/l10n/es.json"].items() if k.startswith("# Welcome to")]
@@ -1699,6 +1699,36 @@ class SearchAndAntivirus(InstallTest):
         self.assertEqual(status, "failed")
         self.assertRegex(reason, f"^«{fork['name']}»: [^«]*suma de verificación")
         self.assertFalse(self.suite.indexed)
+
+
+OFFICE = "Office con Euro-Office"
+
+
+class Office(InstallTest):
+    """Nextcloud's own Office entry, on for every staff member, and Euro-Office, which AIO's Nextcloud container
+    installs, opening its documents by default; Nextcloud and Euro-Office reach each other inside the suite."""
+
+    def test_instalar_opens_the_office_entry_to_everyone_with_euro_office_as_its_editor(self):
+        self.suite.apps["office"]["enabled"] = '["admin"]'  # only an admin group would see the entry
+        self.claim()
+        self.install()
+        self.assertEqual(self.steps(self.until("done"))[OFFICE], ("green", None))
+        eurooffice = self.suite.apps["eurooffice"]
+        self.assertEqual((self.suite.apps["office"]["enabled"], eurooffice["enabled"]), ("yes", "yes"))
+        odf = {"odt": True, "ods": True, "odp": True}
+        self.assertEqual((json.loads(eurooffice["defFormats"]), json.loads(eurooffice["editFormats"])), (odf, odf))
+        self.assertEqual((eurooffice["DocumentServerInternalUrl"], eurooffice["StorageUrl"]),
+                         ("http://nextcloud-aio-eurooffice/", "http://nextcloud-aio-apache.nextcloud-aio:23973/"))
+
+    def test_office_waits_for_euro_office_to_answer_nextcloud(self):
+        self.claim()
+        self.suite.down = {"eurooffice"}
+        self.install()
+        self.until_step(OFFICE, "running")
+        time.sleep(1.5)
+        self.assertEqual(self.steps(self.progress())[OFFICE][0], "running")
+        self.suite.down = set()
+        self.assertEqual(self.steps(self.until("done"))[OFFICE], ("green", None))
 
 
 class Listo(InstallTest):

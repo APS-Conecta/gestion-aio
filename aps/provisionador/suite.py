@@ -501,6 +501,15 @@ class Suite:
         except OSError:
             return False
 
+    def eurooffice_answers(self):
+        """Whether Euro-Office answers Nextcloud, by its connector's own check: Euro-Office converts a file it fetches
+        from Nextcloud."""
+        try:
+            self.occ("eurooffice:documentserver", "--check")
+            return True
+        except Unreachable:
+            return False
+
 
 class FakeSuite:
     """The in-memory suite of the wizard-API tests, with the name service it claims from."""
@@ -516,7 +525,8 @@ class FakeSuite:
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
         # Calls in an outage: the name service's "claim" and "address", "aio" (the mastercontainer), "nextcloud"
-        # (Nextcloud's container) and "issuer" (a host's CA, out of the internet's reach).
+        # (Nextcloud's container), "issuer" (a host's CA, out of the internet's reach) and "eurooffice" (Euro-Office,
+        # which does not answer Nextcloud).
         self.down = set()
         self.limited = False  # the name service refuses claims over its limits
         self.claims = []  # the DEIS codes the name service gave a name
@@ -538,7 +548,7 @@ class FakeSuite:
         self.dies = False  # the Provisionador dies while AIO's start runs; AIO goes on
         self.system = {}  # Nextcloud's system settings
         # Each installed app's settings, as Nextcloud ships them: Nextcloud's own voice on.
-        self.apps = {"core": {}, "admin_audit": {}, "theming": {},
+        self.apps = {"core": {}, "admin_audit": {}, "theming": {}, "office": {}, "eurooffice": {},
                      **{app: {"enabled": "yes"} for app in ("nextcloud_announcements", "firstrunwizard",
                                                             "survey_client", "support")}}
         # The apps AIO's start installs and sets up with the components' switches: the antivirus, which only logs what
@@ -586,6 +596,9 @@ class FakeSuite:
 
     def answers(self, name, address):
         return self.answering and name == self.domain
+
+    def eurooffice_answers(self):
+        return not self.down & {"nextcloud", "eurooffice"} and self.apps.get("eurooffice", {}).get("enabled") == "yes"
 
     def _outage_guard(self, part="aio"):
         if part in self.down:
