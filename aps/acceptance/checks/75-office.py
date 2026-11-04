@@ -48,12 +48,12 @@ suite = f"https://{suite_name()}"
 password = person(USER, "Prueba Oficina")
 
 
-def until(read, wait, failure):
+def until(read, wait, failure, pause=time.sleep):
     deadline = time.monotonic() + wait
     while not (answer := read()):
         if time.monotonic() > deadline:
             sys.exit(failure() if callable(failure) else failure)
-        time.sleep(1)
+        pause(1)
     return answer
 
 
@@ -73,8 +73,11 @@ def editor(context, state=READY):
                     if frame.parent_frame.evaluate(holds) and frame.locator("#editor_sdk").is_visible():
                         return page, frame
         return None
+    # Playwright's sync API takes in the browser's frames and their navigations only while it waits on the browser, so
+    # the pause waits there: in time.sleep, page.frames would stay as it was before the editor opened.
     return until(found, 120, lambda: f"Euro-Office under {suite}/eurooffice/ did not report {reported} within 2 "
-                                     f"minutes. The frames, nested, and the events each received:\n{seen(context)}")
+                                     f"minutes. The frames, nested, and the events each received:\n{seen(context)}",
+                 lambda seconds: context.pages[0].wait_for_timeout(seconds * 1000))
 
 
 def seen(context):
