@@ -98,9 +98,11 @@ unpack() {
   mv "$INSTALL_DIR.new" "$INSTALL_DIR"
 }
 
-# The pinned digest runs under the release tag: upstream takes its channel from the image's tag.
+# The pinned digest runs under the release tag: upstream takes its channel from the image's tag. A test build's bundle
+# carries Let's Encrypt's staging roots, which AIO's own folder of trusted CAs gives Nextcloud and Talk.
 start_mastercontainer() {
-  local pinned image="$MASTERCONTAINER:$RELEASE_TAG"
+  local pinned image="$MASTERCONTAINER:$RELEASE_TAG" trusted=()
+  [ ! -d "$INSTALL_DIR/trusted-cacerts" ] || trusted=(--env "NEXTCLOUD_TRUSTED_CACERTS_DIR=$INSTALL_DIR/trusted-cacerts")
   pinned="$(grep -m 1 "^$MASTERCONTAINER@sha256:" "$INSTALL_DIR/images.lock")" \
     || die "el paquete no indica la imagen del contenedor maestro. Infórmelo a APS Conecta."
   say "Descargando el contenedor maestro..."
@@ -110,7 +112,7 @@ start_mastercontainer() {
   docker run --init --sig-proxy=false --name nextcloud-aio-mastercontainer --restart always --detach \
     --publish 80:80 --publish 8080:8080 --publish 8443:8443 \
     --volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config \
-    --volume /var/run/docker.sock:/var/run/docker.sock:ro \
+    --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" \
     "$image" >/dev/null \
     || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
          die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }

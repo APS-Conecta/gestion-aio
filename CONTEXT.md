@@ -38,7 +38,7 @@ The link the bootstrap prints. Its secret opens a Provisionador session until th
 
 **Suite port**:
 The one adapter through which the Provisionador talks to AIO, the name service and Nextcloud's command
-line. It has a real implementation and a fake one for tests.
+line, and reads the server's cores and memory. It has a real implementation and a fake one for tests.
 
 **Name service** (servicio de nombres):
 APS's Cloudflare Worker at `gestion-nombres.apsconecta.workers.dev`. Installs never hold APS's Cloudflare
@@ -64,7 +64,8 @@ hands it over; then the wizard closes.
 
 **Component** (componente):
 An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
-full-text search and the app server (HaRP). Every other optional container stays off.
+full-text search and the app server (HaRP), and Talk recording on a server that passes the recording threshold. Every
+other optional container stays off.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
