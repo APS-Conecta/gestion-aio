@@ -10,7 +10,8 @@
 # Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
 # from the digest the bundle names; start the Provisionador and the inside-address timer and print the
 # one-time link. A rerun once the mastercontainer exists changes nothing else: it makes sure the
-# Provisionador and the timer run and prints a fresh link to the same wizard state.
+# Provisionador and the timer run and prints a fresh link to the same wizard state; once the wizard
+# closed at «Listo», the Provisionador stays stopped and the rerun prints the suite's address instead.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.

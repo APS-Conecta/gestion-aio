@@ -8,6 +8,8 @@ const $ = (id) => document.getElementById(id);
 const CHILE = [-35.7, -71.5];
 const STEPS = ["centro", "direccion", "revisar", "listo"];
 const STATES = {stopped: "En espera", starting: "Iniciando", running: "En ejecución"};
+const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completado", failed: "No se completó",
+  waiting: "En espera"};
 let register = null;
 let selected = null;
 let map = null;
@@ -156,8 +158,7 @@ async function confirm() {
   }
 }
 
-// «Dirección»: the centre's name, claimed by itself; a name in use or an outage offers «Reintentar». Once the name
-// is claimed, the page checks that this computer opens the suite there.
+// «Dirección»: the centre's name, claimed by itself; a name in use or an outage offers «Reintentar».
 function status(id, text, isError = false) {
   $(id).textContent = text;
   $(id).classList.toggle("error", isError);
@@ -167,7 +168,6 @@ async function direccion() {
   show("direccion");
   $("retry").hidden = true;
   $("continue").hidden = true;
-  status("reach", "");
   try {
     let {address} = await api("GET", "/api/state");
     $("address-name").textContent = address.name;
@@ -177,7 +177,6 @@ async function direccion() {
     }
     status("address-status", `Dirección asignada: https://${address.name}`);
     $("continue").hidden = false;
-    reach(address);
   } catch (e) {
     status("address-status", e.message, true);
     $("retry").hidden = false;
@@ -194,23 +193,22 @@ async function opens(name) {
   }
 }
 
-// Asked again every 15 seconds: the suite starts later, and the operator may change the router meanwhile.
-async function reach(address) {
-  if (!address.answers) {
-    status("reach", "Cuando la suite esté en marcha, esta página comprobará que este equipo abre la dirección.");
-  } else if (await opens(address.name)) {
-    return status("reach", `Este equipo abre https://${address.name} correctamente.`);
+// On «Listo», where the suite answers at its name: asked again every 15 seconds, the wizard closed or not, as the
+// operator may change the router meanwhile.
+async function reach(name) {
+  if (await opens(name)) {
+    status("reach", `Este equipo abre https://${name} correctamente.`);
   } else {
-    status("reach", `Este equipo no logra abrir https://${address.name}, aunque la suite ya responde en el servidor: `
+    status("reach", `Este equipo no logra abrir https://${name}, aunque la suite ya responde en el servidor: `
       + "el DNS de esta red descarta las respuestas que apuntan a direcciones internas. En el router, permita esas "
-      + `respuestas para ${address.name.split(".").slice(1).join(".")} (una excepción a la protección contra «DNS `
+      + `respuestas para ${name.split(".").slice(1).join(".")} (una excepción a la protección contra «DNS `
       + "rebinding») y vuelva a conectar este equipo a la red. Esta página lo comprobará de nuevo por sí sola.", true);
   }
-  polling = setTimeout(() => api("GET", "/api/state").then((state) => reach(state.address), () => {}), 15000);
+  polling = setTimeout(() => reach(name), 15000);
 }
 
-// «Revisar»: one summary of what will be installed, then «Instalar»; the progress follows each container as AIO
-// reports it until the suite runs.
+// «Revisar»: one summary of what will be installed, then «Instalar»; the progress follows each step and, once AIO runs
+// our components, each container as AIO reports it, until «Listo».
 async function revisar() {
   show("revisar");
   try {
@@ -226,29 +224,34 @@ async function revisar() {
   }
 }
 
-function container({name, state}) {
-  const item = element("li", "");
-  item.dataset.state = state;
-  item.append(element("strong", name), element("span", STATES[state]));
-  return item;
+function item(name, state, label, reason) {
+  const node = element("li", "");
+  node.dataset.state = state;
+  node.append(element("strong", name), element("span", label));
+  if (reason) node.append(element("p", reason));
+  return node;
 }
 
-// `jump`: once the suite runs, go on to «Listo» (not when the operator came back to «Revisar»).
+// `jump`: at «Listo», go on to its screen (not when the operator came back to «Revisar»). A failed or waiting step is
+// red, with its reason; «Reintentar» runs those again.
 function follow(state, jump = true) {
   const install = state.install;
   $("install").hidden = Boolean(install) && install.status !== "failed";
   $("install").textContent = install?.status === "failed" ? "Reintentar" : "Instalar";
-  $("progress").replaceChildren(...(install?.containers || []).map(container));
+  $("steps").replaceChildren(...(install?.steps || []).map(
+    (step) => item(step.name, step.status, STEP_STATES[step.status], step.reason)));
+  $("progress").replaceChildren(...(install?.containers || []).map((c) => item(c.name, c.state, STATES[c.state])));
   if (!install) {
     status("install-status", "");
   } else if (install.status === "failed") {
-    status("install-status", install.error, true);
+    status("install-status", "Algunos pasos no se completaron; su motivo está en rojo. Presione «Reintentar».", true);
   } else if (install.status === "done") {
-    status("install-status", "La suite está en marcha.");
+    status("install-status", "La instalación terminó.");
     if (jump) listo(state.address.name);
   } else {
     status("install-status", install.error
-      || "Instalando: la suite descarga e inicia sus contenedores. Puede tardar varios minutos.", Boolean(install.error));
+      || "Instalando: cada paso sigue por sí solo; descargar e iniciar los contenedores puede tardar varios minutos.",
+    Boolean(install.error));
     polling = setTimeout(() => api("GET", "/api/state").then(follow, () => follow(state)), 3000);
   }
 }
@@ -265,11 +268,27 @@ async function install() {
   }
 }
 
-// «Listo»: the suite's address.
-function listo(name) {
+// «Listo»: the suite's address and whether this computer opens it. The wizard hands over the passwords file, kept for
+// the download, and closes; the page stays.
+async function listo(name) {
   show("listo");
   $("suite-address").textContent = `https://${name}`;
   $("suite-address").href = `https://${name}`;
+  for (const link of document.querySelectorAll(".step-link")) link.disabled = true;
+  reach(name);
+  try {
+    const {passwords, file} = await api("POST", "/api/close", {});
+    $("passwords").href = URL.createObjectURL(new Blob([passwords], {type: "text/plain;charset=utf-8"}));
+    $("passwords").download = file;
+    $("passwords").hidden = false;
+    status("closed", "El asistente de instalación se cerró y su enlace ya no funciona. Descargue ahora el archivo de "
+      + "contraseñas, con la del administrador de la suite y la frase de contraseña de la página de AIO, y guárdelo en "
+      + "un lugar seguro. Una copia queda en el servidor, legible solo por root.");
+  } catch {
+    status("closed", "No se pudo confirmar el cierre del asistente. Vuelva a ejecutar el comando de instalación: si el "
+      + "asistente sigue abierto, imprimirá un enlace nuevo para descargar el archivo de contraseñas; si ya se cerró, "
+      + "indicará dónde quedó en el servidor.", true);
+  }
 }
 
 function startMap() {

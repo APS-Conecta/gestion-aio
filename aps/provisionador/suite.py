@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The suite port: the only code that talks to AIO, the APS name service and Nextcloud's command line (occ).
 
-The Provisionador is built with one: `Suite` in production, `FakeSuite` in the wizard-API tests. A screen
-that needs the suite adds its methods to both, and the fake records what it was asked so the tests can
+The Provisionador is built with one: `Suite` in production, `FakeSuite` in the wizard-API tests. A screen or an
+install step that needs the suite adds its methods to both, and the fake records what it was asked so the tests can
 assert the suite state.
 
 «Dirección» claims the centre's name from the name service, which answers a credential that changes only that
@@ -13,8 +13,10 @@ image as its reverse proxy, and the server's inside address is published; the ho
 every 10 minutes (`provisionador.py publish`).
 
 «Instalar» drives AIO's own page as its interface does from a same-origin browser, signed in with the passphrase
-AIO keeps on this server: its optional-containers form, its backup settings and its start button. The passphrase
-never leaves this process. The containers' progress is AIO's own reading of their state, as its page lists them.
+AIO keeps on this server: its optional-containers form, its backup settings and its start button. AIO closes that
+login once Apache runs. The passphrase leaves this process only in the passwords file. The containers' progress is
+AIO's own reading of their state, as its page lists them. Every later install step runs occ in the Nextcloud
+container.
 """
 
 import http.client
@@ -42,7 +44,14 @@ SUITE_REFUSED = ("El contenedor maestro de la suite rechazó la instalación (HT
                  "vuelve a ocurrir, contacte a APS Conecta.")
 NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores de la suite. Presione «Reintentar»; si "
                "vuelve a ocurrir, contacte a APS Conecta.")
+NEXTCLOUD_DOWN = ("El contenedor de Nextcloud no responde. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
+                  "Conecta.")
+OCC_FAILED = "Nextcloud no pudo completar «occ {}». Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta."
+ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
+                 "servidor y presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
+NEXTCLOUD = "nextcloud-aio-nextcloud"
+DOWN = {MASTERCONTAINER: SUITE_DOWN, NEXTCLOUD: NEXTCLOUD_DOWN}
 AIO_CONFIG = "/mnt/docker-aio-config/data/configuration.json"  # AIO's settings, its passphrase among them
 AIO_AUTHORITY = "/mnt/docker-aio-config/caddy-internal/pki/authorities/local/root.crt"  # signs AIO's page certificate
 OFFICE_SUITES = {"collabora", "onlyoffice", "eurooffice"}  # AIO's office suites, one choice among them
@@ -56,7 +65,7 @@ class Taken(Exception):
 
 
 class Unreachable(Exception):
-    """The name service, the internet or the mastercontainer did not do what was asked; the Spanish message says
+    """The name service, the internet or a container of the suite did not do what was asked; the Spanish message says
     why."""
 
     def __init__(self, message=UNREACHABLE):
@@ -95,6 +104,45 @@ foreach ($definition->FetchDefinition() as $c) {
 }
 echo json_encode($listed, JSON_THROW_ON_ERROR);
 """
+
+
+# Nextcloud's command line, in its container, with its input from a file: config:import reads its input without
+# waiting for it.
+OCC = """input=$(mktemp) && cat > "$input" && php /var/www/html/occ --no-ansi --no-interaction "$@" < "$input"
+status=$?; rm -f "$input"; exit $status"""
+
+
+# In the Nextcloud container, for the host in $1 that serves only its leaf: the CA its certificate names (its CA
+# Issuers pointer) is imported into Nextcloud's trusted certificates once it is verified to chain the leaf to a root
+# the container trusts, as Nextcloud's own requests then do. An import already there is kept.
+ISSUER = r"""
+set -eu
+host=$1
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+timeout 20 openssl s_client -connect "$host:443" -servername "$host" < /dev/null 2> /dev/null \
+  | openssl x509 > "$dir/leaf"
+issuer=$(openssl x509 -in "$dir/leaf" -noout -ext authorityInfoAccess | sed -n 's/^ *CA Issuers - URI://p' | head -n 1)
+name=$(basename "$issuer" .crt).pem
+case "$issuer" in http://*.crt | https://*.crt) ;; *) echo "no CA Issuers pointer: $issuer" >&2; exit 1 ;; esac
+case "$name" in *[!A-Za-z0-9._-]*) echo "unexpected issuer name: $name" >&2; exit 1 ;; esac
+php /var/www/html/occ security:certificates --output=json | grep -qF "\"$name\"" && exit 0
+curl -fsS --max-time 20 --proto =http,https -o "$dir/issuer" "$issuer"
+openssl x509 -inform DER -in "$dir/issuer" -out "$dir/$name" 2> /dev/null \
+  || openssl x509 -in "$dir/issuer" -out "$dir/$name"
+openssl verify -untrusted "$dir/$name" -verify_hostname "$host" "$dir/leaf"
+php /var/www/html/occ security:certificates:import "$dir/$name"
+"""
+
+
+def write_root_only(path, text):
+    """Replace the file with `text`, readable by its owner (root, on the server) alone."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.unlink(missing_ok=True)
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
 
 
 class AioPage:
@@ -189,21 +237,13 @@ class Suite:
         credential = self.stored()
         return credential and {"code": credential["username"], "name": credential["name"]}
 
-    def store(self, credential):
-        self.credential.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.credential.with_suffix(".tmp")
-        tmp.unlink(missing_ok=True)
-        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as fh:
-            json.dump(credential, fh)
-        os.replace(tmp, self.credential)
-
     def claim(self, code, name):
         """Claim the DEIS code's name unless a claim is stored, set AIO to the stored claim's name and return it. The
         name service answers the name; `name`, the slug table's, is what the fake answers."""
         credential = self.stored()
         if credential is None:
             credential = self.call("/claim", {"code": code})
-            self.store(credential)
+            write_root_only(self.credential, json.dumps(credential))
         values = {"ACMEDNS_USERNAME": credential["username"], "ACMEDNS_PASSWORD": credential["password"],
                   "ACMEDNS_SUBDOMAIN": credential["subdomain"], "ACMEDNS_SERVER_URL": credential["server_url"],
                   "ACME_CA": self.services["acme_ca"]}
@@ -211,19 +251,39 @@ class Suite:
                              stdin=json.dumps({"domain": credential["name"], "secrets": values}))
         return credential["name"]
 
-    def mastercontainer(self, *command, stdin=""):
-        """What a command run in the mastercontainer as AIO's user printed. What it printed may be a secret and is never
-        logged; a failure logs its errors only and is Unreachable."""
+    @staticmethod
+    def execute(container, command, stdin="", failed=None):
+        """What a command run in the container as its web user printed. What it printed may be a secret and is never
+        logged; a failure logs its errors only and is Unreachable: the container's own message when it does not answer,
+        `failed` when the command fails."""
         try:
-            run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data", MASTERCONTAINER, *command],
+            run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data", container, *command],
                                  input=stdin, capture_output=True, text=True, timeout=120, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
-            print(f"mastercontainer {command[0]}: {error}", file=sys.stderr)
-            raise Unreachable(SUITE_DOWN) from error
+            print(f"{container} {command[0]}: {error}", file=sys.stderr)
+            raise Unreachable(DOWN[container]) from error
         if run.returncode:
-            print(f"mastercontainer {command[0]}: {run.stderr}", file=sys.stderr)
-            raise Unreachable(SUITE_DOWN)
+            print(f"{container} {command[0]}: {run.stderr}", file=sys.stderr)
+            answered = "Error response from daemon" not in run.stderr and "No such container" not in run.stderr
+            raise Unreachable(failed if failed and answered else DOWN[container])
         return run.stdout
+
+    def mastercontainer(self, *command, stdin=""):
+        return self.execute(MASTERCONTAINER, command, stdin)
+
+    def occ(self, *args, stdin=""):
+        """What Nextcloud's command line printed."""
+        return self.execute(NEXTCLOUD, ("sh", "-c", OCC, "sh", *args), stdin, OCC_FAILED.format(" ".join(args)))
+
+    def trust_issuer(self, host):
+        """Nextcloud's own requests verify a host that serves only its leaf certificate: the CA that issued it is among
+        Nextcloud's trusted certificates."""
+        self.execute(NEXTCLOUD, ("sh", "-c", ISSUER, "sh", host), failed=ISSUER_FAILED.format(host))
+
+    def secrets(self):
+        """AIO's passphrase and the first password of the suite's administrator, `admin`, as AIO keeps them here."""
+        config = json.loads(self.mastercontainer("cat", AIO_CONFIG))
+        return {"passphrase": config["password"], "administrator": config["secrets"]["NEXTCLOUD_PASSWORD"]}
 
     def _signed_in(self):
         """AIO's page, signed in with the passphrase AIO's first-run setup (on «Dirección») stored on this server."""
@@ -287,22 +347,32 @@ class FakeSuite:
     """The in-memory suite of the wizard-API tests, with the name service it claims from."""
 
     suffix = "gestion.apsconecta.cl"
+    ADMINISTRATOR = "primera-contraseña-del-administrador"
+    PASSPHRASE = "frase de contraseña de AIO"
 
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
-        self.down = set()  # calls in an outage: the name service's "claim" and "address", and "aio"
+        # Calls in an outage: the name service's "claim" and "address", "aio" (the mastercontainer), "nextcloud"
+        # (Nextcloud's container) and "issuer" (a host's CA, out of the internet's reach).
+        self.down = set()
         self.limited = False  # the name service refuses claims over its limits
         self.claims = []  # the DEIS codes the name service gave a name
         self.credential = None  # the stored claim
         self.domain = None  # the name AIO is set to
         self.published = []  # the inside addresses published
-        self.answering = False  # whether the suite's reverse proxy answers at its name
+        self.answering = True  # whether the suite's reverse proxy answers at its name
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.starts = 0  # how often AIO's start button was pressed
         self.states = {}  # what AIO reports per container id: (AIO's name, state: stopped, starting or running)
         self.release = threading.Event()  # AIO's start answers once it is set: tests clear it to watch a start
         self.release.set()
+        self.dies = False  # the Provisionador dies while AIO's start runs; AIO goes on
+        self.system = {}  # Nextcloud's system settings
+        self.apps = {"core": {}, "admin_audit": {}}  # each installed app's settings
+        self.commands = []  # every occ command, by its arguments
+        self.imports = []  # the settings each config:import brought
+        self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
 
     def claim(self, code, name):
         if self.credential is None:
@@ -330,23 +400,64 @@ class FakeSuite:
     def answers(self, name, address):
         return self.answering and name == self.domain
 
-    def _outage_guard(self):
-        if "aio" in self.down:
-            raise Unreachable(SUITE_DOWN)
+    def _outage_guard(self, part="aio"):
+        if part in self.down:
+            raise Unreachable(NEXTCLOUD_DOWN if part == "nextcloud" else SUITE_DOWN)
+
+    def _signed_in(self):
+        """AIO's login, which closes once Apache runs."""
+        self._outage_guard()
+        if self.states.get("nextcloud-aio-apache", (None, None))[1] == "running":
+            raise Unreachable(SUITE_REFUSED.format(code=403))
 
     def switch(self, components):
-        self._outage_guard()
+        self._signed_in()
         self.switched = set(components)
 
     def back_up(self, folder, time):
-        self._outage_guard()
+        self._signed_in()
         self.backup = (folder, time)
 
     def start(self):
-        self._outage_guard()
-        self.release.wait()
+        """AIO's start answers once every container it started runs."""
+        self._signed_in()
         self.starts += 1
+        self.release.wait()
+        if self.dies:
+            raise SystemExit  # the thread ends without a word, as the process would
+        self.states = {id_: (name, "running") for id_, (name, _) in self.states.items()}
 
     def containers(self):
         self._outage_guard()
         return [{"id": id_, "name": name, "state": state} for id_, (name, state) in self.states.items()]
+
+    def occ(self, *args, stdin=""):
+        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on."""
+        self._outage_guard("nextcloud")
+        self.commands.append(args)
+        if args == ("config:list",):
+            return json.dumps({"system": self.system, "apps": self.apps})
+        if args == ("config:import",):
+            settings = json.loads(stdin)
+            self.imports.append(settings)
+            self.system.update(settings.get("system", {}))
+            for app, values in settings.get("apps", {}).items():
+                self.apps.setdefault(app, {}).update(values)
+            return ""
+        if args[0] == "app:enable" and len(args) == 2:
+            if args[1] not in self.apps:
+                raise Unreachable(OCC_FAILED.format(" ".join(args)))
+            self.apps[args[1]]["enabled"] = "yes"
+            return ""
+        raise AssertionError(f"the fake suite runs no occ {args}")
+
+    def trust_issuer(self, host):
+        self._outage_guard("nextcloud")
+        if "issuer" in self.down:
+            raise Unreachable(ISSUER_FAILED.format(host))
+        if host not in self.issuers:
+            self.issuers.append(host)
+
+    def secrets(self):
+        self._outage_guard()
+        return {"passphrase": self.PASSPHRASE, "administrator": self.ADMINISTRATOR}
