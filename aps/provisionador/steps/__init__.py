@@ -14,8 +14,8 @@ into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
 address (`inside`), the folder the Provisionador keeps its files in (`folder`), the ids of the steps a
 Provisionador restart cut short (`interrupted`) and of the optional apps the operator ticked on «Revisar»
-(`optional`). A new step is a new module: no other file lists the steps. A step that configures an app gets it
-through `steps.apps.ensure` rather than NEEDS "apps".
+(`optional`), and the teams declared on «Equipos» (`teams`, as teams.py names them). A new step is a new module: no
+other file lists the steps. A step that configures an app gets it through `steps.apps.ensure` rather than NEEDS "apps".
 """
 
 import json
