@@ -15,10 +15,11 @@ every 10 minutes (`provisionador.py publish`).
 «Instalar» drives AIO's own page as its interface does from a same-origin browser, signed in with the passphrase
 AIO keeps on this server: its optional-containers form, its backup settings and its start button. AIO closes that
 login once Apache runs. The passphrase leaves this process only in the passwords file. The containers' progress is
-AIO's own reading of their state, as its page lists them. Every later install step runs occ in the Nextcloud
-container. The apps step downloads App releases from GitHub, without a token, and unpacks the ones it verified into
-Nextcloud's custom_apps; the theme step reads the Spanish translations Nextcloud ships and places the theme folder in
-Nextcloud's themes folder, which upstream's updates keep.
+AIO's own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording,
+are read here too. Every later install step runs occ in the Nextcloud container. The apps step downloads App releases
+from GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step reads the
+Spanish translations Nextcloud ships and places the theme folder in Nextcloud's themes folder, which upstream's updates
+keep.
 """
 
 import base64
@@ -205,6 +206,16 @@ rm -rf ".$1.old"
 
 # In the Nextcloud container, the Spanish translations Nextcloud ships for its folder $1, if it ships any.
 TRANSLATIONS = 'file="/var/www/html/$1/l10n/es.json"; if [ -f "$file" ]; then cat "$file"; fi'
+
+
+# In the Nextcloud container: each CA of AIO's own folder of trusted CAs, which AIO mounts there only when it has one
+# (a test build's Let's Encrypt staging roots), imported into Nextcloud's trusted certificates, as AIO's own start
+# leaves them out.
+CACERTS = r"""
+set -eu
+[ -n "${TRUSTED_CACERTS_DIR:-}" ] || exit 0
+for ca in /usr/local/share/ca-certificates/*.crt; do php /var/www/html/occ security:certificates:import "$ca"; done
+"""
 
 
 def write_root_only(path, text):
@@ -416,6 +427,10 @@ class Suite:
         """The group folder holds each of the files it does not hold yet: their text by their path in it, None for a
         folder. What it holds stays as staff left it."""
         self.execute(NEXTCLOUD, ("sh", "-c", SEED, "sh", str(folder)), json.dumps(files), SEED_FAILED)
+    def trust_cacerts(self):
+        """Nextcloud's own requests trust the CAs that AIO's folder of trusted CAs holds, as Talk does; a release has
+        none."""
+        self.execute(NEXTCLOUD, ("sh", "-c", CACERTS, "sh"), failed=OCC_FAILED.format("security:certificates:import"))
 
     def secrets(self):
         """AIO's passphrase and the first password of the suite's administrator, `admin`, as AIO keeps them here."""
@@ -427,6 +442,13 @@ class Suite:
         page = AioPage(self.mastercontainer("cat", AIO_AUTHORITY), f"{self.stored()['name']}:8080")
         page.log_in(json.loads(self.mastercontainer("cat", AIO_CONFIG))["password"])
         return page
+
+    @staticmethod
+    def hardware():
+        """The CPU cores and the memory of this server, which runs the suite; the memory in GiB, rounded to the
+        nearest as the bootstrap's check rounds it."""
+        memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        return {"cpus": len(os.sched_getaffinity(0)), "memory_gib": (memory + 2 ** 29) // 2 ** 30}
 
     def switch(self, components):
         """Turn the given optional containers on and every other one off, with AIO's optional-containers form
@@ -506,6 +528,7 @@ class FakeSuite:
         self.groups = {"admin": {"name": "admin", "members": {"admin"}}}  # each group, by its id: its name and members
         self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
         self.answering = True  # whether the suite's reverse proxy answers at its name
+        self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: the bootstrap's minimum
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.starts = 0  # how often AIO's start button was pressed
@@ -535,6 +558,8 @@ class FakeSuite:
         self.api_calls = 0  # the calls to GitHub's API
         self.themes = {}  # each theme folder in Nextcloud's themes folder: its files by their path in it
         self.l10n = {}  # the Spanish translations Nextcloud ships, by its folder, as its l10n/es.json holds them
+        self.cacerts = []  # AIO's folder of trusted CAs: a test build's staging roots; a release has none
+        self.trusted = []  # the CAs of that folder Nextcloud imported
 
     def claim(self, code, name):
         if self.credential is None:
@@ -571,6 +596,9 @@ class FakeSuite:
         self._outage_guard()
         if self.states.get("nextcloud-aio-apache", (None, None))[1] == "running":
             raise Unreachable(SUITE_REFUSED.format(code=403))
+
+    def hardware(self):
+        return dict(self.machine)
 
     def switch(self, components):
         self._signed_in()
@@ -683,6 +711,10 @@ class FakeSuite:
             raise Unreachable(ISSUER_FAILED.format(host))
         if host not in self.issuers:
             self.issuers.append(host)
+
+    def trust_cacerts(self):
+        self._outage_guard("nextcloud")
+        self.trusted = list(self.cacerts)
 
     def secrets(self):
         self._outage_guard()
