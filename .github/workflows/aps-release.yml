@@ -276,9 +276,10 @@ jobs:
                 || { echo "the host was changed" >&2; exit 99; }
               exit "$rc"' > refused.log 2>&1 || rc=$?
           cat refused.log
+          floor() { sed -n "s/^$1=\([0-9][0-9]*\)$/\1/p" install.sh; } # the bootstrap's floors are set there alone
           [ "$rc" -eq 1 ]
           grep -q 'No se modificó nada' refused.log
           grep -q 'la arquitectura del procesador es aarch64; se requiere x86_64' refused.log
-          grep -q 'tiene 2 GiB de memoria; se requieren al menos 6 GiB' refused.log
-          grep -q 'tiene 1 núcleo(s) de CPU; se requieren al menos 2' refused.log
-          grep -q 'GB libres en /var/lib; se requieren al menos 20 GB' refused.log
+          grep -q "tiene 2 GiB de memoria; se requieren al menos $(floor MIN_MEMORY_GIB) GiB$" refused.log
+          grep -q "tiene 1 núcleo(s) de CPU; se requieren al menos $(floor MIN_CPUS)$" refused.log
+          grep -q "GB libres en /var/lib; se requieren al menos $(floor MIN_DISK_GB) GB$" refused.log

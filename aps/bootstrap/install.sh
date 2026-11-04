@@ -20,7 +20,15 @@ set -euo pipefail
 RELEASE_TAG=""
 BUNDLE_SHA256=""
 
-# The hardware minimum: the old installer's memory and disk floors, two CPU cores.
+# The hardware minimum, set here alone: each floor is the suite's peak use in the clean-machine acceptance run, every
+# component on, plus 25%, rounded up to a whole GiB, core or GB (peaks.txt in the run's acceptance-hardware artifact):
+# memory and disk over the whole run; cores in the busiest minute after «Listo» (the stages after 17-install in
+# peaks.txt), as the install takes every core it gets and only runs longer on fewer. A run counts only if it is green
+# with no OOM kill and almost no full memory stall; otherwise raise MIN_MEMORY_GIB (it sizes the acceptance VM) and
+# measure again. Until a run has measured them: the old installer's memory and disk floors and two cores. Talk
+# recording's threshold is these plus one recording (aps/provisionador/steps/components.py).
+# Memory is MemTotal rounded to the nearest GiB: the kernel keeps part of the memory for itself (a 6 GiB machine reports
+# about 5.8 GiB), so a machine with the floor's memory passes and one more than half a GiB short is refused.
 MIN_MEMORY_GIB=6
 MIN_CPUS=2
 MIN_DISK_GB=20
