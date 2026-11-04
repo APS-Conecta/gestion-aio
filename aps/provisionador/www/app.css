@@ -1,28 +1,8 @@
 /* SPDX-FileCopyrightText: 2026 APS Conecta
    SPDX-License-Identifier: AGPL-3.0-or-later */
 
-/* The APS palette and font pairing, as the suite's theme paints them. */
-:root {
-  --aps-violet: #7f21fe;
-  --aps-violet-dark: #5315a8;
-  --aps-violet-tint: #f0eaff;
-  --aps-ink: #101828;
-  --aps-muted: #485363;
-  --aps-error-text: #b4002e;
-  --aps-border: #dcd6e8;
-  --aps-font-display: "Fraunces", Georgia, serif;
-  --aps-font-body: "Nunito Sans", system-ui, -apple-system, sans-serif;
-  --radius: 10px;
-}
-
-@font-face {
-  font-family: "Fraunces"; font-style: normal; font-weight: 100 900; font-display: swap;
-  src: url("/fraunces.woff2") format("woff2");
-}
-@font-face {
-  font-family: "Nunito Sans"; font-style: normal; font-weight: 200 1000; font-display: swap;
-  src: url("/nunito-sans.woff2") format("woff2");
-}
+/* The palette and the fonts come from the brand token file, /tokens.css. */
+:root { --radius: 10px; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -32,11 +12,11 @@ code { font-size: .8rem; overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 
 /* Header and the app layout: navigation on the left, content on the right, as in Nextcloud. */
-.header { display: flex; align-items: baseline; gap: .75rem; padding: .75rem 1.25rem; background: var(--aps-violet); color: #fff; }
+.header { display: flex; align-items: baseline; gap: .75rem; padding: .75rem 1.25rem; background: var(--aps-violet); color: var(--aps-paper); }
 .brand { font: 600 1.2rem var(--aps-font-display); }
 .header-subtitle { opacity: .85; }
 .content { display: flex; flex: 1; min-height: 0; }
-.navigation { width: 260px; flex: none; display: flex; flex-direction: column; padding: .75rem; border-right: 1px solid var(--aps-border); background: #faf8fe; }
+.navigation { width: 260px; flex: none; display: flex; flex-direction: column; padding: .75rem; border-right: 1px solid var(--aps-border); background: var(--aps-violet-wash); }
 .navigation ol { list-style: none; margin: 0; padding: 0; }
 .navigation li { display: flex; align-items: center; gap: .6rem; padding: .5rem .75rem; border-radius: var(--radius); color: var(--aps-muted); }
 .navigation li[aria-current] { background: var(--aps-violet-tint); color: var(--aps-violet-dark); font-weight: 700; }
@@ -53,19 +33,19 @@ code { font-size: .8rem; overflow-wrap: anywhere; }
 /* «Centro»: the filters, the result list and the map. */
 .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; margin-bottom: 1rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-weight: 600; }
-select, input { font: inherit; padding: .45rem .6rem; border: 1px solid var(--aps-border); border-radius: var(--radius); background: #fff; color: inherit; }
+select, input { font: inherit; padding: .45rem .6rem; border: 1px solid var(--aps-border); border-radius: var(--radius); background: var(--aps-paper); color: inherit; }
 select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-violet); outline-offset: 1px; }
 .columns { display: grid; grid-template-columns: minmax(18rem, 1fr) minmax(20rem, 1.3fr); gap: 1.5rem; align-items: start; }
 .results { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; border: 1px solid var(--aps-border); border-radius: var(--radius); }
 .results:empty { display: none; }
 .results button { display: block; width: 100%; padding: .6rem .75rem; border: 0; border-bottom: 1px solid var(--aps-border); border-radius: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .results li:last-child button { border-bottom: 0; }
-.results button:hover { background: #faf8fe; }
+.results button:hover { background: var(--aps-violet-wash); }
 .results button[aria-pressed="true"] { background: var(--aps-violet-tint); }
 .results strong { display: block; }
 .results span { color: var(--aps-muted); font-size: .9rem; }
 .map { height: 22rem; border: 1px solid var(--aps-border); border-radius: var(--radius); }
-.pin { width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--aps-violet); border: 4px solid #fff; box-shadow: 0 0 0 2px var(--aps-violet-dark); }
+.pin { width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--aps-violet); border: 4px solid var(--aps-paper); box-shadow: 0 0 0 2px var(--aps-violet-dark); }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
 .message { margin: .75rem 0 0; }
 .message.error { color: var(--aps-error-text); }
@@ -92,8 +72,8 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-v
 .progress li[data-state="failed"] span, .progress li[data-state="waiting"] span { color: inherit; font-weight: 700; }
 
 /* Simple buttons: one primary action, the rest secondary. */
-button, .button { font: 600 1rem var(--aps-font-body); padding: .55rem 1.1rem; border-radius: var(--radius); border: 1px solid var(--aps-border); background: #fff; color: var(--aps-ink); cursor: pointer; text-decoration: none; }
-button.primary, .button.primary { background: var(--aps-violet); border-color: var(--aps-violet); color: #fff; }
+button, .button { font: 600 1rem var(--aps-font-body); padding: .55rem 1.1rem; border-radius: var(--radius); border: 1px solid var(--aps-border); background: var(--aps-paper); color: var(--aps-ink); cursor: pointer; text-decoration: none; }
+button.primary, .button.primary { background: var(--aps-violet); border-color: var(--aps-violet); color: var(--aps-paper); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 @media (max-width: 800px) {

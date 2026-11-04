@@ -38,6 +38,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
+import brand
 import deis
 import runner
 from steps import apps, backups, components, passwords
@@ -46,8 +47,9 @@ from suite import Suite, Taken, Unreachable
 HERE = Path(__file__).resolve().parent
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
                  ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
-# The page and what it loads, by name: no request path is ever joined to a directory.
-STATIC = {f"/{p.name}": p for p in (HERE / "www").iterdir() if p.suffix in CONTENT_TYPES}
+# The page and what it loads, by name, with the brand token file and its fonts: no request path is ever joined to a
+# directory.
+STATIC = {f"/{p.name}": p for d in (HERE / "www", brand.FOLDER) for p in d.iterdir() if p.suffix in CONTENT_TYPES}
 STATIC["/"] = HERE / "www" / "index.html"
 # connect-src: the browser-side check that this computer opens the suite at its name.
 CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; "

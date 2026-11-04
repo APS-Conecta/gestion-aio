@@ -15,6 +15,8 @@
 #             ssh, it passes stdin through: "$MACHINE" "sudo docker ps"
 #   ADDRESS   the VM's address on the shared network, where the runner's browser reaches it
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
+#   TEST_PASSWORD  the password of each staff account a check makes for itself, masked in the log already
+# A check never prints a secret, not even to mask it: run.sh masks the ones it knows before the checks run.
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
 # Provisionador's journal (the name's credential, AIO's passphrase and the administrator's password blanked out) and
@@ -29,6 +31,9 @@ work="$RUNNER_TEMP/acceptance"
 mkdir -p "$work/evidence"
 export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt"
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
+TEST_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr '+/' '-_')"
+printf '::add-mask::%s\n' "$TEST_PASSWORD"
+export TEST_PASSWORD
 
 password="" passphrase="" administrator=""
 secret() { # <variable> <command> [<jq filter>]: the secret the filter (.password by default) finds in the JSON the

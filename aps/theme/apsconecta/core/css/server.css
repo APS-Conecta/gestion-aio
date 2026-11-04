@@ -1,0 +1,22 @@
+/* SPDX-FileCopyrightText: 2026 APS Conecta
+   SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* The APS Conecta theme on every page Nextcloud renders: the brand token file's fonts, and the establishment's name,
+   which the install writes in site.css, over the login form. Theming's name, colours, logo and background, the custom
+   menu's colours and the text overrides come from the install step (aps/provisionador/steps/theme.py). */
+@import url("../../brand/tokens.css");
+@import url("site.css");
+
+/* Nextcloud's font is its --font-face, which theming sets on body. */
+body { --font-face: var(--aps-font-body) !important; }
+h1, h2, h3 { font-family: var(--aps-font-display); }
+
+.login-form__headline::before {
+  content: var(--aps-establishment);
+  display: block;
+  margin-block-end: 6px;
+  font: 700 19px/1.25 var(--aps-font-display);
+}
+
+/* The custom menu's panel shows the header logo, which its own stylesheet hides. */
+.cm-logo { display: block; }

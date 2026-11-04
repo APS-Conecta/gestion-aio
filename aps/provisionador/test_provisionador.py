@@ -26,6 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
 
+import brand
 import provisionador
 from steps import apps
 from suite import FakeSuite
@@ -220,6 +221,17 @@ class Page(WizardTest):
             self.assertEqual(browser.get(asset)[0], 200, asset)
         self.assertEqual(browser.get("/provisionador.py")[0], 404)
 
+    def test_the_page_takes_its_palette_and_fonts_from_the_brand_token_file(self):
+        browser = Browser(self.link().url)
+        page = browser.get("/")[1].decode()
+        self.assertIn('<link rel="stylesheet" href="/tokens.css">', page)
+        status, tokens = browser.get("/tokens.css")
+        self.assertEqual((status, tokens), (200, (brand.FOLDER / "tokens.css").read_bytes()))
+        fonts = re.findall(r'url\("([^"]+)"\)', tokens.decode())
+        self.assertEqual(sorted(fonts), ["fraunces.woff2", "nunito-sans.woff2"])
+        for font in fonts:
+            self.assertEqual(browser.get(f"/{font}")[0], 200, font)
+
 
 class CentroSearch(WizardTest):
     def codes(self, browser, **query):
@@ -264,8 +276,8 @@ class CentroChoice(WizardTest):
         official = {"latitude": -33.47, "longitude": -70.64}
         self.assertEqual(body["centre"], {
             "code": "999004", "type": "CESFAM", "name": "Centro de Salud Familiar Doctor Juan Pérez",
-            "address": "Calle Cuatro 400, Villa Sur", "comuna_code": "13101", "comuna": "Santiago",
-            "region_code": "13", "region": "Metropolitana de Santiago",
+            "short_name": "CESFAM Doctor Juan Pérez", "address": "Calle Cuatro 400, Villa Sur", "comuna_code": "13101",
+            "comuna": "Santiago", "region_code": "13", "region": "Metropolitana de Santiago",
             "health_service": "Servicio de Salud Metropolitano Central", "dependency": "Municipal",
             "official_point": official, "point": official, "timezone": "America/Santiago"})
         self.assertEqual(browser.get("/api/state")[1]["centre"], body["centre"])
@@ -412,10 +424,12 @@ COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch", "ha
 # This ticket's steps, by what they need of the suite: Nextcloud's command line, or AIO and the name service alone.
 # Later tickets add steps of their own; these tests go by these.
 NEEDS_NEXTCLOUD = {"Certificado del ISP", "Idioma y formato regional", "Sesiones y registro de auditoría",
-                   "Tareas en segundo plano", "Zona horaria"}
+                   "Tareas en segundo plano", "Zona horaria", "Tema y marca"}
 AIO_SIDE = {"Componentes", "Copias de seguridad", "Inicio de la suite", "Dirección de la suite",
             "Archivo de contraseñas"}
 SECURITY = "Sesiones y registro de auditoría"
+MENU = "Menú personalizado"
+THEME = "Tema y marca"
 
 
 def openssl(*args, data=None):
@@ -728,6 +742,22 @@ class StepRunner(InstallTest):
         self.until("done")
         self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
 
+    def test_the_end_of_install_check_reads_the_settings_config_list_hides(self):
+        """occ config:list hides theming's link as sensitive: the check reads it, so a changed one is found too."""
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[THEME], ("green", None))
+        self.suite.apps["theming"]["url"] = "https://nextcloud.com"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[THEME]
+        self.assertEqual(status, "failed")
+        self.assertIn("theming.url", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["theming"]["url"], "https://apsconecta.cl")
+
 
 class Apps(InstallTest):
     """The Suite manifest's apps: every default app and the optional apps ticked on «Revisar». An own or fork app comes
@@ -952,6 +982,110 @@ class InterruptedInstall(InstallTest):
         self.restart()
         self.assertEqual(self.steps(self.until("done"))["Inicio de la suite"], ("green", None))
         self.assertEqual(self.suite.starts, 1)
+
+
+TOKENS = brand.tokens()
+SUITE = "APS Conecta Gestión"
+OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
+TEXTS = json.loads((HERE.parent / "theme" / "texts.json").read_text(encoding="utf-8"))
+PLURAL = "nplurals=2; plural=(n != 1);"
+# Each folder's own Spanish as Nextcloud ships it, naming Nextcloud where the overrides change it; the suite does not
+# hold Contacts.
+SHIPPED = {folder: {"translations": {**dict.fromkeys(texts, "Nextcloud"), "Files": "Archivos"}, "pluralForm": PLURAL}
+           for folder, texts in TEXTS.items() if folder != "custom_apps/contacts"}
+
+
+class Branding(InstallTest):
+    """Every page says «APS Conecta Gestión» in the brand token file's colours and fonts: the theme folder goes into
+    Nextcloud's themes folder, theming takes the name, the colours, the logo and the backdrop, and Nextcloud's own voice
+    goes quiet."""
+
+    def setUp(self):
+        super().setUp()
+        self.suite.l10n = SHIPPED
+        self.claim("999004")
+        self.install()
+        self.until("done")
+        self.theme = self.suite.themes["apsconecta"]
+
+    def test_the_theme_carries_the_brand_token_file_its_fonts_the_art_in_its_colours_and_the_centres_name(self):
+        self.assertEqual(self.theme["brand/tokens.css"], (brand.FOLDER / "tokens.css").read_bytes())
+        self.assertEqual(self.theme["brand/nunito-sans.woff2"], (brand.FOLDER / "nunito-sans.woff2").read_bytes())
+        self.assertIn('@import url("../../brand/tokens.css")', self.theme["core/css/server.css"].decode())
+        self.assertEqual(self.theme["core/css/site.css"].decode(),
+                         ':root { --aps-establishment: "CESFAM Doctor Juan Pérez"; }\n')
+        for art in ("core/img/logo.svg", "core/img/logoheader.svg", "brand/favicon.svg"):
+            self.assertTrue(self.theme[art].startswith(b"<svg"), art)
+            self.assertNotIn(b"var(--aps-", self.theme[art], art)
+            self.assertIn(TOKENS["--aps-logo-gold"].encode(), self.theme[art], art)
+        self.assertIn(TOKENS["--aps-violet"].encode(), self.theme["brand/favicon.svg"])
+
+    def test_theming_says_aps_conecta_gestion_in_the_token_files_colours_with_the_themes_logo(self):
+        theming = self.suite.apps["theming"]
+        self.assertEqual(self.suite.system["theme"], "apsconecta")
+        named = ("name", "productName", "primary_color", "background_color")
+        self.assertEqual({key: theming.get(key) for key in named},
+                         {"name": SUITE, "productName": SUITE, "primary_color": TOKENS["--aps-violet"],
+                          "background_color": TOKENS["--aps-violet-dark"]})
+        self.assertEqual([theming.get(f"{image}Mime") for image in ("logo", "logoheader", "favicon", "background")],
+                         ["image/svg+xml"] * 3 + ["backgroundColor"])
+        self.assertEqual((self.suite.system["enforce_theme"], theming["disable-user-theming"]), ("light", True))
+
+    def test_nextclouds_announcements_slides_survey_support_help_signup_and_update_banners_are_off(self):
+        self.assertEqual({app: self.suite.apps[app]["enabled"] for app in OFF}, dict.fromkeys(OFF, "no"))
+        self.assertLessEqual({"knowledgebaseenabled": False, "simpleSignUpLink.shown": False, "updatechecker": False,
+                              "skeletondirectory": "", "customclient_ios_appid": ""}.items(), self.suite.system.items())
+        self.assertNotIn("nextcloud.com", self.suite.apps["theming"]["url"])
+
+    def test_text_overrides_say_aps_conecta_gestion_where_nextclouds_spanish_names_the_suite_nextcloud(self):
+        texts = {path: json.loads(data)["translations"] for path, data in self.theme.items()
+                 if path.endswith("/l10n/es.json")}
+        self.assertLessEqual({"core/l10n/es.json", "apps/settings/l10n/es.json", "custom_apps/spreed/l10n/es.json"},
+                             set(texts))
+        said = [value for translations in texts.values() for value in translations.values()]
+        self.assertFalse([value for value in said if "Nextcloud" in str(value)])
+        welcome = [v for k, v in texts["custom_apps/spreed/l10n/es.json"].items() if k.startswith("# Welcome to")]
+        self.assertTrue(welcome and welcome[0].startswith("# Bienvenido/a a Talk"), welcome)
+
+    def test_the_browser_gets_each_apps_own_spanish_with_the_overrides_on_top_in_place_of_the_apps_own(self):
+        """Of an app's translations, Nextcloud's browser loads only the first file it finds, and the theme's comes
+        first; an app the suite does not hold gets none, which would hide its own Spanish once it is installed."""
+        for folder, shipped in SHIPPED.items():
+            app = folder.rsplit("/", 1)[-1]
+            script = self.theme[f"core/{app}/l10n/es.js"].decode()
+            arguments = script.removeprefix("OC.L10N.register(").removesuffix(");\n")
+            self.assertEqual(json.loads(f"[{arguments}]"), [app, {**shipped["translations"], **TEXTS[folder]}, PLURAL],
+                             folder)
+        self.assertNotIn("core/contacts/l10n/es.js", self.theme)
+
+    def test_everyones_personal_settings_link_the_source_code_and_its_licence(self):
+        notice = self.theme["apps/settings/templates/settings/personal/development.notice.php"].decode()
+        self.assertIn('href="https://github.com/APS-Conecta/gestion-aio"', notice)
+        self.assertIn('href="https://www.gnu.org/licenses/agpl-3.0.html"', notice)
+        self.assertNotIn("nextcloud.com", notice)
+
+
+class CustomMenu(InstallTest):
+    """The custom menu wears the brand's dark violet once its step ensured its app; without the app, its step and the
+    apps step fail naming it, and nothing else waits for it."""
+
+    def test_the_custom_menu_takes_the_brand_token_files_dark_violet(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        menu = self.suite.apps["side_menu"]
+        self.assertEqual((menu["background-color"], menu["background-color-to"]), (TOKENS["--aps-violet-dark"],) * 2)
+
+    def test_without_its_app_the_menu_and_the_apps_step_fail_naming_it_and_every_other_step_goes_on(self):
+        self.suite.store.remove("side_menu")
+        self.claim()
+        self.install()
+        steps = self.steps(install := self.until("failed"))
+        for step in (APPS_STEP, MENU):
+            self.assertEqual(steps[step][0], "failed", step)
+            self.assertIn(f"«{apps.BY_ID['side_menu']['name']}»: ", steps[step][1], step)
+        self.assertEqual(self.named(install, "green"), set(steps) - {APPS_STEP, MENU})
+        self.assertNotIn("side_menu", self.suite.apps, "nothing configures an app that is not there")
 
 
 class Listo(InstallTest):

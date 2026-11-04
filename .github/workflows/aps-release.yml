@@ -13,11 +13,13 @@ on:
       - .github/workflows/aps-release.yml
       - aps/acceptance/**
       - aps/bootstrap/**
+      - aps/brand/**
       - aps/deis/**
       - aps/images/**
       - aps/name-service/**
       - aps/provisionador/**
       - aps/release/**
+      - aps/theme/**
       - community-containers/caddy/**
       - Containers/mastercontainer/**
       - php/**
@@ -98,7 +100,7 @@ jobs:
         run: |
           pinned="$(aps/release/build-image.sh "$CADDY" aps/images/caddy/Dockerfile aps/images/caddy "$TAG" "$COMMIT")"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
-      - name: Build the mastercontainer with our Nextcloud and Caddy images pinned
+      - name: Build the mastercontainer with our Nextcloud and Caddy images pinned, and the brand on AIO's page
         id: mastercontainer
         env:
           TAG: ${{ steps.release.outputs.tag }}
@@ -114,6 +116,7 @@ jobs:
           }
           pin php/containers.json "$PINNED_NEXTCLOUD"
           pin community-containers/caddy/caddy.json "$PINNED_CADDY"
+          aps/release/brand.sh
           pinned="$(aps/release/build-image.sh "$MASTERCONTAINER" Containers/mastercontainer/Dockerfile . "$TAG" "$COMMIT")"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
 

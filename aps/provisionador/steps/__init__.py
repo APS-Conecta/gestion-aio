@@ -21,6 +21,8 @@ through `steps.apps.ensure` rather than NEEDS "apps".
 import json
 import time
 
+from suite import HIDDEN
+
 POLL = 1  # seconds between two readings of the suite while a step waits for it
 DIFFERS = ("Nextcloud no conserva estos ajustes: {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
            "Conecta.")
@@ -36,11 +38,17 @@ def until(read, done, wait):
 
 def differences(suite, settings):
     """Of Nextcloud's settings, {"system": {key: value}, "apps": {app: {key: value}}}, those it does not hold, as one
-    Spanish reason in a list, or none."""
+    Spanish reason in a list, or none. An app setting occ config:list hides as sensitive, such as theming's url, is read
+    with config:app:get."""
     held = json.loads(suite.occ("config:list"))
+
+    def app_value(app, key):
+        value = held["apps"].get(app, {}).get(key)
+        return json.loads(suite.occ("config:app:get", app, key, "--output=json")) if value == HIDDEN else value
+
     wrong = [key for key, value in settings.get("system", {}).items() if held["system"].get(key) != value]
     wrong += [f"{app}.{key}" for app, values in settings.get("apps", {}).items()
-              for key, value in values.items() if held["apps"].get(app, {}).get(key) != value]
+              for key, value in values.items() if app_value(app, key) != value]
     return [DIFFERS.format(", ".join(wrong))] if wrong else []
 
 
