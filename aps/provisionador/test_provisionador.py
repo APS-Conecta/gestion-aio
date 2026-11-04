@@ -24,6 +24,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from urllib.parse import urlencode, urlsplit
 
 import brand
@@ -1354,6 +1355,27 @@ class PeopleChanges(PeopleTest):
                          (False, {"comite-calidad"}), "disabled and in no team, the account and its files kept")
         self.assertEqual(self.passwords(), first)
         self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
+
+    def test_a_change_while_the_people_check_runs_holds_listo_until_reintentar_applies_it(self):
+        """The change lands once the people step's check read «Equipos», before the runner records what it found."""
+        self.until_people()
+        read, posted = threading.Event(), threading.Event()
+
+        def check(context, people_check=people.check):
+            found = people_check(context)
+            read.set()
+            posted.wait(10)
+            return found
+
+        with mock.patch.object(people, "check", check):
+            self.suite.answering = True
+            self.assertTrue(read.wait(10))
+            self.assertEqual(self.retire("pedro.munoz")[0], 200)
+            posted.set()
+            self.assertEqual(self.steps(self.until("failed"))[PEOPLE_STEP], ("failed", CHANGED))
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")), (False, set()))
 
     def test_a_retired_person_stays_retired_when_the_people_step_runs_again(self):
         self.retire("pedro.munoz")
