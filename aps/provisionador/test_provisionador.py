@@ -1360,9 +1360,11 @@ class PeopleChanges(PeopleTest):
         """The change lands once the people step's check read «Equipos», before the runner records what it found."""
         self.until_people()
         read, posted = threading.Event(), threading.Event()
+        real = people.check
 
-        def check(context, people_check=people.check):
-            found = people_check(context)
+        # No seam reaches the window inside the people check: wrap the real check.
+        def check(context):
+            found = real(context)
             read.set()
             posted.wait(10)
             return found

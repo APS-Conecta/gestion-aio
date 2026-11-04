@@ -105,8 +105,7 @@ def declared(state):
 
 def reopen(s, before):
     """After «Instalar», a change to the people reopens their step if it is green or running, so that «Reintentar»
-    applies the change; the runner drops what a run or check of the step finds once reopened. A step yet to run finds
-    the change itself once it applied the people as they were."""
+    applies the change. A step yet to run finds the change itself once it applied the people as they were."""
     step = s.get("install", {}).get("steps", {}).get("people", {})
     if step.get("status") in ("green", "running") and declared(s) != before:
         s["install"]["steps"]["people"] = {"status": "failed", "reason": people.CHANGED}
