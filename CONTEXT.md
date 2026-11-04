@@ -43,8 +43,8 @@ line, and reads the server's cores and memory. It has a real implementation and 
 **Name service** (servicio de nombres):
 APS's Cloudflare Worker at `gestion-nombres.apsconecta.workers.dev`. Installs never hold APS's Cloudflare
 token, only their name's credential: a DEIS code claims its dirección once and gets a credential that changes
-only that name's address record and, through acme-dns, its certificate's challenge record. PR runs use a
-separate CI deployment, `gestion-nombres-ci.apsconecta.workers.dev`.
+only that name's address record and, through acme-dns, its certificate's challenge record, and can release
+that name. PR runs use a separate CI deployment, `gestion-nombres-ci.apsconecta.workers.dev`.
 
 **Dirección**:
 The establishment's name, `<slug>.gestion.apsconecta.cl`, one per DEIS code. The slug is the short name,
@@ -59,8 +59,8 @@ The differences, step by step, between what each install step declared and what 
 for people what «Equipos» declares now. «Listo» needs it clean.
 
 **Passwords file** (archivo de contraseñas):
-The root-only file on the server with each person's first password, the administrator's and AIO's passphrase. «Listo»
-hands it over; then the wizard closes.
+The root-only file on the server with each person's first password, the administrator's, AIO's passphrase and the
+encryption password of AIO's backup, which a restore asks for. «Listo» hands it over; then the wizard closes.
 
 **Component** (componente):
 An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
