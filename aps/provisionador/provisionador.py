@@ -256,7 +256,7 @@ class Provisionador:
                                      if found["people"] and user not in listed]}
 
     def get_state(self, query, body):
-        state = self.state.read()
+        busy, state = self.busy(), self.state.read()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
                      "components": list(components.chosen(self.suite.hardware()).values()),
                      "backup_folder": backups.BACKUP_FOLDER,
@@ -264,7 +264,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
-                     **self.shown(state), "install": self.progress(state)}
+                     **self.shown(state), "install": self.progress(busy, state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -367,14 +367,15 @@ class Provisionador:
     def busy(self):
         return self.worker is not None and self.worker.is_alive()
 
-    def progress(self, state):
+    def progress(self, busy, state):
         """None before «Instalar»; otherwise each step, and, once AIO runs only our components, each container as AIO
         reports it, a component's under its «Revisar» name. «done» means «Listo». A reading of the containers that fails
-        says why, and the next one asks again."""
+        says why, and the next one asks again. `busy` is read before `state`: an install that ended in between has
+        recorded how it ended, so «failed» never comes with every step green."""
         install = state.get("install")
         if not install:
             return None
-        running = self.busy() or runner.unfinished(install)
+        running = busy or runner.unfinished(install)
         answer = {"status": "done" if install.get("listo") else "installing" if running else "failed",
                   "steps": runner.progress(install)}
         if install["steps"].get("components", {}).get("status") == "green":
@@ -405,18 +406,18 @@ class Provisionador:
         if not (isinstance(optional, list) and all(isinstance(app, str) and app in apps.OPTIONAL for app in optional)):
             return 400, {"error": NOT_OFFERED}
         with self.install_lock:
-            state = self.state.read()
+            busy, state = self.busy(), self.state.read()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
             if not plan(state)["people"]:
                 return 409, {"error": PEOPLE_WRONG if plan(state)["errors"] else NO_PEOPLE}
-            if not (self.busy() or state.get("install", {}).get("listo")):
+            if not (busy or state.get("install", {}).get("listo")):
                 if not state.get("install"):
                     with self.state.change() as s:
                         s["optional"] = sorted(set(optional))
                 runner.begin(self.state)
                 self.run_install()
-        return 202, {"install": self.progress(self.state.read())}
+        return 202, {"install": self.progress(self.busy(), self.state.read())}
 
     def post_close(self, query, body):
         """POST /api/close, at «Listo»: the passwords file, whose copy stays on the server. The wizard then closes: the

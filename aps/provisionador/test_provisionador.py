@@ -653,6 +653,34 @@ class Instalar(InstallTest):
         self.assertEqual(self.install()[1]["install"]["status"], "done")
         self.assertEqual((self.suite.starts, len(self.suite.commands)), (1, commands))
 
+    def test_a_poll_asks_whether_the_install_runs_before_it_reads_the_steps(self):
+        """So an install that reaches «Listo» while a poll is answered shows as installing or done, never as failed with
+        every step green. The fake port cannot hold the install there, so the poll is held after its reads instead: a
+        «Reintentar» pressed meanwhile leaves the failed run it read as it was."""
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        self.until("failed")
+        self.suite.down = set()
+        self.suite.release.clear()
+        held, go, answer = threading.Event(), threading.Event(), {}
+
+        def hardware():  # the poll's reading of the server, held until `go`; the install's own reading is not
+            del self.suite.hardware
+            held.set()
+            go.wait(10)
+            return self.suite.hardware()
+
+        self.suite.hardware = hardware
+        poll = threading.Thread(target=lambda: answer.update(self.progress()))
+        poll.start()
+        self.assertTrue(held.wait(10))
+        self.install()
+        go.set()
+        poll.join(10)
+        self.assertEqual((answer["status"], self.steps(answer)["Componentes"][0]), ("failed", "failed"))
+        self.assertEqual(self.progress()["status"], "installing")
+
 
 class StepRunner(InstallTest):
     """The step runner: a failed step never stops the steps that do not need it, its dependents wait, each red step
