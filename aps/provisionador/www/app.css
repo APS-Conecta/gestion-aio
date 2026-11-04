@@ -74,8 +74,10 @@ select:focus, input:focus, textarea:focus, button:focus-visible { outline: 2px s
 .address { font: 600 1.2rem var(--aps-font-display); overflow-wrap: anywhere; margin: 0; }
 .address a { color: var(--aps-violet-dark); }
 
-/* «Equipos»: a sector or program per line. */
+/* «Equipos»: a sector or program per line; each person with the box «Retirar» takes, a retired one muted. */
 textarea { resize: vertical; }
+.progress label { flex-direction: row; align-items: baseline; gap: .5rem; }
+.progress li[data-state="retired"] { color: var(--aps-muted); }
 
 /* «Revisar»: the summary, then each step's progress, the failed and waiting ones in red with their reason, and each
    container's. */

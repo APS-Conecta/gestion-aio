@@ -11,6 +11,7 @@ const STATES = {stopped: "En espera", starting: "Iniciando", running: "En ejecuc
 const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completado", failed: "No se completó",
   waiting: "En espera"};
 const ADMINISTRATOR = "primer/a administrador/a de la suite";
+const APPLY = " Los cambios se aplican al presionar «Reintentar» en «Revisar».";
 let register = null;
 let selected = null;
 let map = null;
@@ -18,6 +19,7 @@ let marker = null;
 let searching = null;
 let polling = null;
 let typing = null;
+let installed = false;
 
 async function api(method, path, body) {
   let response;
@@ -186,15 +188,16 @@ async function direccion() {
 }
 
 // «Equipos»: the sectors and programs, one per line, and the team each becomes, as the Provisionador names it. What is
-// typed is kept as it changes, so «Revisar» shows it; once «Instalar» was pressed the teams stay.
+// typed is kept as it changes, so «Revisar» shows it; once «Instalar» was pressed the teams stay, while a corrected
+// spreadsheet and «Retirar» wait for «Reintentar».
 async function equipos() {
   try {
     const state = await api("GET", "/api/state");
+    installed = Boolean(state.install);
     for (const kind of ["sector", "program"]) {
       $(`${kind}s`).value = state.teams.filter((team) => team.kind === kind).map((team) => team.name).join("\n");
-      $(`${kind}s`).disabled = Boolean(state.install);
+      $(`${kind}s`).disabled = installed;
     }
-    $("people-file").disabled = Boolean(state.install);
     showTeams(state);
     showPeople(state);
   } catch (e) {
@@ -224,12 +227,48 @@ async function keepTeams() {
   }
 }
 
-// The people the uploaded spreadsheet loads, or each of its errors by line, and the groups it may name.
-function showPeople({groups, people, errors}) {
+// The people the uploaded spreadsheet loads, each with the box «Retirar» takes, or each of its errors by line, and the
+// groups it may name. The first administrator is not retired.
+function showPeople({groups, people, errors, retired}) {
   $("people-groups").replaceChildren(...Object.entries(groups).map(([id, name]) => element("li", `${id}: ${name}`)));
   $("people-errors").replaceChildren(...errors.map((error) => element("li", error)));
-  $("people").replaceChildren(...people.map((person) => item(person.name, "", [person.user, person.email,
-    person.groups.map((id) => groups[id]).join(", "), person.admin && ADMINISTRATOR].filter(Boolean).join(" · "))));
+  $("people").replaceChildren(...people.map((person) => {
+    const gone = retired.includes(person.user);
+    const box = Object.assign(document.createElement("input"),
+      {type: "checkbox", value: person.user, checked: gone, disabled: gone || person.admin});
+    const label = element("label", "");
+    label.append(box, element("strong", person.name));
+    const node = element("li", "");
+    node.dataset.state = gone ? "retired" : "";
+    node.append(label, element("span", [gone && "Retirado/a", person.user, person.email,
+      person.groups.map((id) => groups[id]).join(", "), person.admin && ADMINISTRATOR].filter(Boolean).join(" · ")));
+    return node;
+  }));
+  $("retire").disabled = true;
+  $("retire-confirm").hidden = true;
+}
+
+function ticked() {
+  return [...$("people").querySelectorAll("input:checked:enabled")];
+}
+
+// «Retirar» asks first: the ticked people's accounts are disabled and leave every team, keeping their files and shares.
+function askRetire() {
+  $("retire-question").textContent = `¿Retirar a ${ticked().map((box) => box.parentElement.textContent).join(", ")}? `
+    + "Su cuenta se desactivará y saldrá de todos los equipos; sus archivos y lo que compartió se conservan, y podrá "
+    + "reactivarse en «Cuentas», en APS Conecta Gestión.";
+  $("retire-confirm").hidden = false;
+}
+
+async function retire() {
+  const users = ticked().map((box) => box.value);
+  try {
+    showPeople(await api("POST", "/api/retire", {users}));
+    status("people-status", `Se retiró a ${users.length} ${users.length === 1 ? "persona" : "personas"}.`
+      + (installed ? APPLY : ""));
+  } catch (e) {
+    status("people-status", e.message, true);
+  }
 }
 
 async function template() {
@@ -259,7 +298,8 @@ async function upload() {
     const plan = await api("POST", "/api/people", {spreadsheet: text});
     showPeople(plan);
     status("people-status", plan.errors.length ? "La planilla tiene errores: corríjalos y súbala de nuevo."
-      : `Se cargó la planilla: ${plan.people.length} ${plan.people.length === 1 ? "persona" : "personas"}.`,
+      : `Se cargó la planilla: ${plan.people.length} ${plan.people.length === 1 ? "persona" : "personas"}.`
+        + (installed ? APPLY : ""),
     plan.errors.length > 0);
   } catch (e) {
     status("people-status", e.message, true);
@@ -302,7 +342,8 @@ async function revisar() {
     $("summary-teams").replaceChildren(...(state.teams.length ? state.teams.map((team) => element("li", team.name))
       : [element("li", "Sin sectores ni programas")]));
     $("summary-people").replaceChildren(...(state.people.length ? state.people.map((person) => element("li",
-      `${person.name} (${person.user})${person.admin ? `, ${ADMINISTRATOR}` : ""}`))
+      `${person.name} (${person.user})${person.admin ? `, ${ADMINISTRATOR}` : ""}`
+        + (state.retired.includes(person.user) ? ", retirado/a" : "")))
       : [element("li", state.errors.length ? "La planilla del personal tiene errores: corríjala en «Equipos»"
         : "Sin planilla del personal")]));
     $("summary-cargo").replaceChildren(...state.cargo_accounts.map(
@@ -448,6 +489,15 @@ async function start() {
   }
   $("people-template").addEventListener("click", template);
   $("people-file").addEventListener("change", upload);
+  $("people").addEventListener("change", () => {
+    $("retire").disabled = !ticked().length;
+    $("retire-confirm").hidden = true;
+  });
+  $("retire").addEventListener("click", askRetire);
+  $("retire-yes").addEventListener("click", retire);
+  $("retire-no").addEventListener("click", () => {
+    $("retire-confirm").hidden = true;
+  });
   $("teams-continue").addEventListener("click", async () => (await keepTeams()) && revisar());
   $("install").addEventListener("click", install);
   if (state.centre) {
