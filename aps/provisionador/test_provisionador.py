@@ -1544,6 +1544,10 @@ class InterruptedInstall(InstallTest):
         self.suite.states = states
         self.install()
         self.until_step("Inicio de la suite", "running")
+        deadline = time.monotonic() + 10  # the step runs a moment before it presses AIO's start
+        while not self.suite.starts:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
         self.assertEqual(self.suite.starts, 1)
 
     def test_a_restart_while_aio_starts_waits_for_it_and_never_sends_its_start_again(self):
