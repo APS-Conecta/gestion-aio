@@ -8,13 +8,13 @@ voice goes quiet: its announcements, first-login slides, usage survey and suppor
 own free account» link, its update banners and its iOS app banner are off, and a new person's home starts empty
 instead of with its sample files. Everyone's personal settings link the suite's source code and its licence.
 
-The text overrides (aps/theme/texts.json) are Nextcloud's, Talk's, Calendar's and Contacts' Spanish translations that
-name the suite «Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names
-Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud's server adds a theme's translations to
-its own on every screen and email it renders. Its browser, though, loads only the first translations file it finds for
-an app, and a theme's core/<app>/l10n/es.js is the first it looks for (JSResourceLocator): there the theme holds the
-app's own Spanish, as the suite ships it, with the overrides on top. An app the suite does not hold gets none, which
-would hide its own Spanish; one updated later keeps, in the browser, the Spanish it had when the step ran.
+The text overrides (aps/theme/texts.json) are Spanish translations, Nextcloud's and its apps', that name the suite
+«Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names Nextcloud's company,
+editions, versions or community keeps upstream's. Nextcloud's server adds a theme's translations to its own on every
+screen and email it renders. Its browser, though, loads only the first translations file it finds for an app, and a
+theme's core/<app>/l10n/es.js is the first it looks for (JSResourceLocator): there the theme holds the app's own
+Spanish, as the suite ships it, with the overrides on top. An app the suite does not hold gets none, which would hide
+its own Spanish; one updated later keeps, in the browser, the Spanish it had when the step ran.
 """
 
 import json

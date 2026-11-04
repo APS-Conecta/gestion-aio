@@ -469,6 +469,13 @@ class FakeSuite:
         self.apps = {"core": {}, "admin_audit": {}, "theming": {},
                      **{app: {"enabled": "yes"} for app in ("nextcloud_announcements", "firstrunwizard",
                                                             "survey_client", "support")}}
+        # The apps AIO's start installs and sets up with the components' switches: the antivirus, which only logs what
+        # its background scan finds infected, and full-text search, with the store's files provider.
+        self.apps |= {"files_antivirus": {"enabled": "yes", "av_infected_action": "only_log"},
+                      **{app: {"enabled": "yes"} for app in ("fulltextsearch", "fulltextsearch_elasticsearch",
+                                                              "files_fulltextsearch")}}
+        self.outdated = set()  # apps whose code changed while enabled: Nextcloud waits for their upgrade
+        self.indexed = False  # whether full-text search's index was built
         self.commands = []  # every occ command, by its arguments
         self.imports = []  # the settings each config:import brought
         self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
@@ -559,7 +566,9 @@ class FakeSuite:
         if args[0] == "app:enable" and len(args) == 2:
             if args[1] not in self.apps and args[1] not in self.store:
                 raise Unreachable(OCC_FAILED.format(" ".join(args)))
-            self.apps.setdefault(args[1], {})["enabled"] = "yes"
+            if self.apps.setdefault(args[1], {}).get("enabled") != "yes":
+                self.outdated.discard(args[1])  # enabling an app runs its upgrade; an enabled one is left as it is
+            self.apps[args[1]]["enabled"] = "yes"
             return ""
         if args[0] == "app:disable" and len(args) == 2:
             if args[1] in self.apps:
@@ -567,6 +576,11 @@ class FakeSuite:
             return ""
         if args[0] == "theming:config" and len(args) == 3:
             return self._theming(*args[1:])
+        if args == ("fulltextsearch:index", "--no-readline"):
+            if self.apps["fulltextsearch"].get("enabled") != "yes":  # a disabled app's commands are not there
+                raise Unreachable(OCC_FAILED.format(" ".join(args)))
+            self.indexed = True
+            return ""
         raise AssertionError(f"the fake suite runs no occ {args}")
 
     def latest(self, repo):
@@ -585,7 +599,8 @@ class FakeSuite:
     def unpack(self, app, tarball):
         self._outage_guard("nextcloud")
         self.unpacked.append((app, tarball))
-        self.apps.setdefault(app, {})
+        if self.apps.setdefault(app, {}).get("enabled") == "yes":
+            self.outdated.add(app)
     def _theming(self, key, value):
         """Theming's settings as occ theming:config stores them; an image is a file of a placed theme folder."""
         theming = self.apps["theming"]
