@@ -539,12 +539,14 @@ class FakeSuite:
         return [{"id": id_, "name": name, "state": state} for id_, (name, state) in self.states.items()]
 
     def occ(self, *args, stdin=""):
-        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on, and
-        the teams' groups, folders and welcome page."""
+        """Nextcloud's command line for the commands the install steps run: settings in, settings out, an app on, the
+        teams' groups, folders and welcome page, and the people's accounts."""
         self._outage_guard("nextcloud")
         self.commands.append(args)
         if args[0].split(":")[0] in ("group", "groupfolders", "intravox"):
             return self._teams(*args)
+        if args[0].startswith("user:"):
+            return self._users(*args)
         if args == ("config:list",):
             return json.dumps({"system": self.system, "apps": self.apps})
         if args == ("config:import",):
@@ -638,6 +640,25 @@ class FakeSuite:
         elif (command, args) != ("intravox:reindex", ()):
             raise AssertionError(f"the fake suite runs no occ {(command, *args)}")
         return ""
+
+    def _users(self, command, *args):
+        """occ's accounts, as the people step reads and sets them: Nextcloud keeps an email trimmed and in lower case,
+        and refuses a display name the account already has."""
+        if (command, args) == ("user:list", ("--info", "--limit=0", "--output=json")):
+            return json.dumps({uid: {"display_name": user["name"], "email": user.get("email", ""),
+                                     "groups": sorted(g for g, group in self.groups.items() if uid in group["members"])}
+                               for uid, user in self.users.items()})
+        if command == "user:setting" and len(args) == 4 and args[1:3] in (("settings", "email"),
+                                                                        ("settings", "display_name")):
+            user, _, key, value = args
+            if user not in self.users or key == "display_name" and value in ("", self.users[user]["name"]):
+                raise Unreachable(OCC_FAILED.format(" ".join((command, *args))))
+            if key == "email":
+                self.users[user]["email"] = value.strip().lower()
+            else:
+                self.users[user]["name"] = value
+            return ""
+        raise AssertionError(f"the fake suite runs no occ {(command, *args)}")
 
     def _group_folder(self, mount, groups):
         id_ = len(self.group_folders) + 1

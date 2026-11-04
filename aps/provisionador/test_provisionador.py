@@ -1083,6 +1083,176 @@ class Equipos(InstallTest):
         self.assertIn({"user": "director", "name": "Director/a de SAPU"}, state["cargo_accounts"])
         self.assertNotIn("CESFAM", json.dumps(state["cargo_accounts"], ensure_ascii=False))
 
+
+# As Excel saves it: a byte order mark, CRLF, the empty columns and rows a sheet may carry, an email in capitals.
+SPREADSHEET = ("\ufeffusuario;nombre;apellidos;correo;grupos;primer_admin;;\r\n"
+               "ana.rojas;Ana María;Rojas Núñez;Ana.Rojas@Example.org;sector-norte role-enfermeria;sí;;\r\n"
+               ";;;;;;;\r\n"
+               "pedro.munoz;Pedro;Muñoz  Tapia;pedro.munoz@example.org;sector-sur, prog-atencion-domiciliaria "
+               "role-medico;;;\r\n")
+PEOPLE = [{"user": "ana.rojas", "name": "Ana María Rojas Núñez", "email": "ana.rojas@example.org",
+           "groups": ["sector-norte", "role-enfermeria"], "admin": True},
+          {"user": "pedro.munoz", "name": "Pedro Muñoz Tapia", "email": "pedro.munoz@example.org",
+           "groups": ["sector-sur", "prog-atencion-domiciliaria", "role-medico"], "admin": False}]
+PEOPLE_STEP = "Cuentas del personal"
+
+
+def spreadsheet(*lines):
+    return "usuario;nombre;apellidos;correo;grupos;primer_admin\n" + "".join(f"{line}\n" for line in lines)
+
+
+class People(InstallTest):
+    """The people spreadsheet on «Equipos»: the operator downloads it blank, fills it in and uploads it; every error is
+    named by its line, and the people list shows everyone the install will create. The install creates each account
+    with its display name, email and groups, the first administrator's admin rights among them, and a first password
+    the passwords file lists, made once."""
+
+    def setUp(self):
+        super().setUp()
+        self.claim()
+        self.browser.request("POST", "/api/teams", TEAMS)
+
+    def upload(self, text):
+        return self.browser.request("POST", "/api/people", {"spreadsheet": text})
+
+    def errors(self, text):
+        """The errors an upload of `text` shows, once it loads nobody."""
+        status, body = self.upload(text)
+        self.assertEqual((status, body["people"]), (200, []))
+        return body["errors"]
+
+    def member_of(self, user):
+        return {gid for gid, group in self.suite.groups.items() if user in group["members"]}
+
+    def test_the_blank_spreadsheet_has_the_columns_and_loads_nobody(self):
+        status, body = self.browser.get("/api/spreadsheet")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["file"].endswith(".csv"))
+        self.assertEqual(body["text"].lstrip("\ufeff").splitlines(),
+                         ["usuario;nombre;apellidos;correo;grupos;primer_admin"])
+        self.assertEqual(len(self.errors(body["text"])), 1)
+
+    def test_the_people_list_shows_everyone_the_install_will_create_with_the_groups_the_spreadsheet_may_name(self):
+        status, body = self.upload(SPREADSHEET)
+        self.assertEqual((status, body["people"], body["errors"]), (200, PEOPLE, []))
+        state = self.browser.get("/api/state")[1]
+        self.assertEqual((state["people"], state["errors"]), (PEOPLE, []))
+        self.assertLessEqual({"all-staff": "Todo el personal", "role-medico": "Médico General / de Familia",
+                              "sector-norte": "Sector Norte"}.items(), state["groups"].items())
+        self.assertNotIn("admin", state["groups"])
+
+    def test_every_error_is_named_by_its_line_in_spanish_and_the_spreadsheet_loads_nobody(self):
+        errors = self.errors(spreadsheet(
+            "Ana Rojas;Ana;Rojas;;;sí",  # 2
+            "luis;Luis;;;;",  # 3
+            "marta;Marta;Díaz;marta@ejemplo;;",  # 4
+            "marta;Marta;Díaz;;;",  # 5
+            "jose;José;Pérez;;sector-oriente admin;",  # 6
+            "rosa;Rosa;Soto;;;quizás",  # 7
+            "carla;Carla;Vera;;;;extra",  # 8
+            "juan;Juan Pablo de la Santísima Trinidad;González Hernández de los Ríos y Valdivieso;;;",  # 9
+            '"ema";"Ema\nLuz";Mora;;;',  # 10 and 11
+            "tomas;Tomás;Ruiz;;;si"))  # 12
+        self.assertEqual([error.split(":")[0] for error in errors], [
+            "Línea 2", "Línea 3", "Línea 4", "Línea 5", "Línea 6", "Línea 6", "Línea 7", "Línea 8", "Línea 9",
+            "Línea 10", "Línea 12"])
+        for line, value in ((2, "«ana rojas»"), (4, "«marta@ejemplo»"), (5, "línea 4"), (6, "«sector-oriente»"),
+                            (7, "«quizás»"), (12, "línea 2")):
+            self.assertIn(value, next(e for e in errors if e.startswith(f"Línea {line}:")), line)
+        self.assertIn("«admin»", errors[5])
+        self.assertEqual(self.browser.get("/api/state")[1]["people"], [])
+        status, body = self.install()
+        self.assertEqual(status, 409)
+        self.assertIn("«Equipos»", body["error"])
+
+    def test_the_first_line_must_name_the_columns(self):
+        errors = self.errors("usuario,nombre,apellidos,correo,grupos,primer_admin\nana,Ana,Rojas,,,sí\n")
+        self.assertEqual(len(errors), 1)
+        self.assertTrue(errors[0].startswith("Línea 1:"), errors)
+
+    def test_exactly_one_first_administrator_is_required(self):
+        none = self.errors(spreadsheet("ana;Ana;Rojas;;;no", "pedro;Pedro;Muñoz;;;"))
+        self.assertEqual(len(none), 1)
+        self.assertIn("primer_admin", none[0])
+        two = self.errors(spreadsheet("ana;Ana;Rojas;;;sí", "pedro;Pedro;Muñoz;;;Sí"))
+        self.assertEqual([error.split(":")[0] for error in two], ["Línea 3"])
+
+    def test_the_usernames_of_the_suites_administrator_and_of_every_cargo_account_are_reserved(self):
+        cargo = [account["user"] for account in self.browser.get("/api/state")[1]["cargo_accounts"]]
+        self.assertEqual(set(cargo), CARGO)
+        reserved = ["admin", "Director", *cargo]
+        errors = self.errors(spreadsheet("ana;Ana;Rojas;;;sí", *(f"{user};Ana;Rojas;;;" for user in reserved)))
+        self.assertEqual([error.split(":")[0] for error in errors], [f"Línea {n}" for n in range(3, 3 + len(reserved))])
+        for user, error in zip(reserved, errors):
+            self.assertIn(f"«{user.lower()}» está reservado", error)
+        self.assertIn("«Jefe/a de Sector Norte»", errors[reserved.index("jefe.norte")])
+
+    def test_a_teams_change_reads_the_spreadsheet_again_and_instalar_waits_for_one_without_errors(self):
+        self.upload(SPREADSHEET + "jefe.oriente;Olga;Pinto;;;\r\n")
+        status, body = self.browser.request("POST", "/api/teams", {"sectors": ["Norte", "Oriente"],
+                                                                  "programs": TEAMS["programs"]})
+        self.assertEqual((status, body["people"]), (200, []))
+        self.assertEqual([error.split(":")[0] for error in body["errors"]], ["Línea 4", "Línea 5"])
+        self.assertIn("«sector-sur»", body["errors"][0])
+        self.assertIn("«jefe.oriente» está reservado", body["errors"][1])
+        self.assertEqual(self.install()[0], 409)
+        self.assertEqual(self.browser.request("POST", "/api/teams", TEAMS)[1]["errors"], [])
+        self.assertEqual(self.install()[0], 202)
+
+    def test_a_spreadsheet_that_is_not_text_is_refused_and_changes_nothing(self):
+        self.upload(SPREADSHEET)
+        status, body = self.browser.request("POST", "/api/people", {"spreadsheet": ["ana.rojas"]})
+        self.assertEqual(status, 400)
+        self.assertTrue(body["error"])
+        self.assertEqual(self.browser.get("/api/state")[1]["people"], PEOPLE)
+
+    def test_instalar_creates_each_account_with_its_display_name_email_and_groups_and_the_first_administrator_is_admin(
+            self):
+        self.upload(SPREADSHEET)
+        self.install()
+        self.until("done")
+        self.assertEqual({user: (self.suite.users[user]["name"], self.suite.users[user]["email"])
+                          for user in ("ana.rojas", "pedro.munoz")},
+                         {"ana.rojas": ("Ana María Rojas Núñez", "ana.rojas@example.org"),
+                          "pedro.munoz": ("Pedro Muñoz Tapia", "pedro.munoz@example.org")})
+        self.assertEqual(self.member_of("ana.rojas"),
+                         {"admin", "all-staff", "cat-clinicos", "role-enfermeria", "sector-norte"})
+        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico", "sector-sur",
+                                                         "prog-atencion-domiciliaria"})
+
+    def test_the_passwords_file_lists_each_persons_first_password_and_reintentar_never_changes_one(self):
+        self.upload(SPREADSHEET)
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        first = {user: self.suite.users[user]["password"] for user in ("ana.rojas", "pedro.munoz")}
+        self.suite.groups["sector-sur"]["members"].discard("pedro.munoz")
+        self.suite.users["ana.rojas"]["email"] = ""
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))[PEOPLE_STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn("ana.rojas, pedro.munoz", reason)
+        self.install()
+        self.assertEqual(self.steps(self.until("done"))["Archivo de contraseñas"], ("green", None))
+        self.assertIn("sector-sur", self.member_of("pedro.munoz"))
+        self.assertEqual(self.suite.users["ana.rojas"]["email"], "ana.rojas@example.org")
+        self.assertEqual({user: self.suite.users[user]["password"] for user in first}, first)
+        self.assertNotEqual(*first.values())
+        passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
+        for person in PEOPLE:
+            self.assertIn(f"\n{person['name']}\n  Usuario: {person['user']}\n  Contraseña: {first[person['user']]}\n",
+                          passwords)
+
+    def test_once_instalar_was_pressed_the_spreadsheet_stays(self):
+        self.upload(SPREADSHEET)
+        self.install()
+        self.until("done")
+        status, body = self.upload(spreadsheet("luis;Luis;Vera;;;sí"))
+        self.assertEqual(status, 409)
+        self.assertIn("«Instalar»", body["error"])
+        self.assertEqual(self.browser.get("/api/state")[1]["people"], PEOPLE)
+
+
 class InterruptedInstall(InstallTest):
     """An install that a Provisionador restart cut short resumes by itself, from AIO's own state."""
 
