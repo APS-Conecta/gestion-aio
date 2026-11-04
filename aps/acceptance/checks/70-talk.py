@@ -97,8 +97,14 @@ def decoded(before, after):
 
 
 def join(page):
-    """Join the call from the conversation's own button, through Talk's device check, with camera and microphone on."""
-    page.locator(".join-call:visible").first.click()  # «Comenzar llamada» or «Unirse a la llamada»
+    """Join the call from the conversation's own button, through Talk's device check, with camera and microphone on.
+    Talk tells a headless browser it is not fully supported, in a notice over the button: it is closed first, as a
+    person would close it."""
+    call = page.locator(".join-call:visible").first  # «Comenzar llamada» or «Unirse a la llamada»
+    expect(call).to_be_visible(timeout=60_000)
+    for notice in page.locator(".toastify .toast-close").all():
+        notice.click()
+    call.click()
     devices, joined = page.locator(".media-settings"), page.locator(".leave-call:visible").first
     expect(devices.or_(joined).first).to_be_visible(timeout=60_000)
     if devices.is_visible():
