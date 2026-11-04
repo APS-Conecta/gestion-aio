@@ -80,6 +80,9 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-v
 .summary dt { font-weight: 700; }
 .summary dd { margin: 0; }
 .summary ul { margin: 0; padding-left: 1.1rem; }
+.summary .choices { list-style: none; padding: 0; }
+.choices label { flex-direction: row; align-items: baseline; gap: .5rem; font-weight: 400; }
+.choices span { color: var(--aps-muted); }
 .progress { list-style: none; max-width: 40rem; margin: 1rem 0 0; padding: 0; }
 .progress li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 1rem; padding: .4rem 0; border-bottom: 1px solid var(--aps-border); }
 .progress li span { color: var(--aps-muted); }

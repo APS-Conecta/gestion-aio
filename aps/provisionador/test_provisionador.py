@@ -6,21 +6,28 @@ Each test runs a real Provisionador over a throwaway state directory and a regis
 mints links with the real `link` command, as the bootstrap does. No browser, no Docker.
 """
 
+import base64
 import hashlib
 import http.client
+import io
+import itertools
 import json
+import os
 import re
 import ssl
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
 
 import provisionador
+from steps import apps
 from suite import FakeSuite
 
 HERE = Path(__file__).resolve().parent
@@ -411,6 +418,66 @@ AIO_SIDE = {"Componentes", "Copias de seguridad", "Inicio de la suite", "Direcci
 SECURITY = "Sesiones y registro de auditoría"
 
 
+def openssl(*args, data=None):
+    return subprocess.run(["openssl", *map(str, args)], input=data, check=True, capture_output=True).stdout
+
+
+class AppKey:
+    """A throwaway app key, which signs the tests' App releases as signify signs APS Conecta's: Ed25519 over
+    SHA256SUMS, with the key's number before the key and before each signature."""
+
+    def __init__(self):
+        self.secret = openssl("genpkey", "-algorithm", "ed25519")
+        self.number = os.urandom(8)
+        self.public = self.armoured(openssl("pkey", "-pubout", "-outform", "DER", data=self.secret)[-32:])
+
+    def armoured(self, raw):
+        return f"untrusted comment: clave de prueba\n{base64.b64encode(b'Ed' + self.number + raw).decode()}\n"
+
+    def sign(self, data):
+        with tempfile.TemporaryDirectory() as tmp:
+            message = Path(tmp, "message")
+            message.write_bytes(data)  # Ed25519 signs the whole message at once, so openssl needs its size
+            return self.armoured(openssl("pkeyutl", "-sign", "-rawin", "-inkey", "/dev/stdin", "-in", message,
+                                         data=self.secret)).encode()
+
+
+KEY = AppKey()
+RELEASED = [app for app in apps.MANIFEST if app["source"] != "store"]  # the own and fork apps
+DEFAULT_APPS = {app["id"] for app in apps.MANIFEST if not app.get("optional")}
+OPTIONAL_APPS = {app["id"] for app in apps.MANIFEST if app.get("optional")}
+APPS_STEP = "Aplicaciones"
+versions = itertools.count(1)
+
+
+def app_release(app, nextcloud=FakeSuite.nextcloud, key=KEY, extra=()):
+    """An App release of the app: its tag, and its four assets, for that Nextcloud version (both bounds) and signed with
+    the key. Its tarball holds the app's info.xml, and the `extra` files."""
+    version = f"1.{next(versions)}.0"
+    info = (f'<?xml version="1.0"?>\n<info><id>{app}</id><version>{version}</version><dependencies>'
+            f'<nextcloud min-version="{nextcloud}" max-version="{nextcloud}"/></dependencies></info>\n').encode()
+    packed = io.BytesIO()
+    with tarfile.open(fileobj=packed, mode="w:gz") as tar:
+        for name in (f"{app}/appinfo/info.xml", *extra):
+            member = tarfile.TarInfo(name)
+            member.size = len(info)
+            tar.addfile(member, io.BytesIO(info))
+    assets = {f"{app}.tar.gz": packed.getvalue(), "info.xml": info}
+    sums = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in assets.items()).encode()
+    return f"v{version}", {**assets, "SHA256SUMS": sums, "SHA256SUMS.minisig": key.sign(sums)}
+
+
+PUBLISHED = {app["repo"]: dict([app_release(app["id"])]) for app in RELEASED}
+
+
+def publish(suite):
+    """GitHub serves one compatible App release of each own and fork app, signed with the test app key, which the
+    suite ships; the open app store offers every store app."""
+    suite.app_key = KEY.public
+    suite.app_releases = {repo: dict(releases) for repo, releases in PUBLISHED.items()}
+    suite.store = {app["id"] for app in apps.MANIFEST if app["source"] == "store"}
+
+
 class InstallTest(WizardTest):
     """A wizard whose operator has a session, with what «Revisar» and «Instalar» need."""
 
@@ -418,6 +485,7 @@ class InstallTest(WizardTest):
         super().setUp()
         self.addCleanup(self.settle)
         self.browser = self.operator()
+        publish(self.suite)
 
     def settle(self):
         """Let an install still running finish before its state directory goes."""
@@ -430,8 +498,8 @@ class InstallTest(WizardTest):
         self.browser.request("POST", "/api/centre", {"code": code})
         self.assertEqual(self.browser.request("POST", "/api/address", {})[0], 200)
 
-    def install(self):
-        return self.browser.request("POST", "/api/install", {})
+    def install(self, **body):
+        return self.browser.request("POST", "/api/install", body)
 
     def progress(self):
         return self.browser.get("/api/state")[1]["install"]
@@ -659,6 +727,191 @@ class StepRunner(InstallTest):
         self.install()
         self.until("done")
         self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
+
+
+class Apps(InstallTest):
+    """The Suite manifest's apps: every default app and the optional apps ticked on «Revisar». An own or fork app comes
+    from its newest App release compatible with the running Nextcloud, verified against the app key, and the lock file
+    records its tag; a store app comes from the open app store. One app that fails is named in red while every other
+    app and step goes on, and «Reintentar» installs it."""
+
+    def enabled(self):
+        return {app for app, values in self.suite.apps.items() if values.get("enabled") == "yes"}
+
+    def lock(self):
+        return json.loads((self.state / "apps.lock.json").read_text())
+
+    def newest(self, app):
+        return next(iter(self.suite.app_releases[app["repo"]]))
+
+    def release_newer(self, app, **release):
+        """GitHub serves a newer App release of the app, before the ones it served."""
+        repo = app["repo"]
+        self.suite.app_releases[repo] = dict([app_release(app["id"], **release), *self.suite.app_releases[repo].items()])
+
+    def context(self):
+        """What a step that configures an app gets, as the Provisionador's install gives it."""
+        return SimpleNamespace(suite=self.suite, folder=self.state, optional=frozenset())
+
+    def test_revisar_lists_the_default_apps_and_offers_the_optional_ones_off(self):
+        self.claim()
+        state = self.browser.get("/api/state")[1]
+        self.assertEqual(state["apps"], [app["name"] for app in apps.MANIFEST if not app.get("optional")])
+        self.assertEqual([(a["name"], a["chosen"]) for a in state["optional_apps"]],
+                         [("Farmacia", False), ("Estadística", False), ("Tótem", False)])
+        self.assertTrue(all(a["summary"] for a in state["optional_apps"]))
+
+    def test_instalar_enables_every_default_app_and_records_each_own_and_fork_apps_tag(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertLessEqual(DEFAULT_APPS, self.enabled())
+        self.assertFalse(OPTIONAL_APPS & set(self.suite.apps), "no optional app is installed unless ticked")
+        self.assertEqual(self.suite.api_calls, 0, "the latest releases are compatible: GitHub's API is not called")
+        defaults = [app for app in RELEASED if not app.get("optional")]
+        self.assertEqual(self.lock(), {app["id"]: self.newest(app) for app in defaults})
+        self.assertEqual(self.suite.unpacked, [
+            (app["id"], self.suite.app_releases[app["repo"]][self.newest(app)][f"{app['id']}.tar.gz"])
+            for app in defaults])
+
+    def test_only_the_ticked_optional_apps_install_and_the_choice_stays(self):
+        self.claim()
+        self.assertEqual(self.install(optional=["farmacia"])[0], 202)
+        self.until("done")
+        self.assertIn("farmacia", self.enabled())
+        self.assertFalse({"estadistica", "totem"} & set(self.suite.apps))
+        self.assertIn("farmacia", self.lock())
+        chosen = {a["id"]: a["chosen"] for a in self.browser.get("/api/state")[1]["optional_apps"]}
+        self.assertEqual(chosen, {"farmacia": True, "estadistica": False, "totem": False})
+
+    def test_an_optional_app_the_manifest_does_not_offer_is_refused(self):
+        self.claim()
+        for optional in (["intravox"], ["desconocida"], "farmacia", [["farmacia"]]):
+            status, body = self.install(optional=optional)
+            self.assertEqual(status, 400, optional)
+            self.assertIn("aplicaciones opcionales", body["error"])
+        self.assertEqual((self.progress(), self.suite.starts), (None, 0))
+
+    def test_the_newest_release_compatible_with_the_running_nextcloud_installs(self):
+        app = RELEASED[0]
+        compatible = self.newest(app)
+        self.release_newer(app, nextcloud=FakeSuite.nextcloud + 1)
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.lock()[app["id"]], compatible)
+        self.assertEqual(self.suite.api_calls, 1, "only the app whose latest release is incompatible asks the API")
+
+    def test_a_release_whose_bounds_name_a_minor_version_admits_that_major(self):
+        app = RELEASED[0]
+        tag, assets = app_release(app["id"], nextcloud=f"{FakeSuite.nextcloud}.0.1")
+        self.suite.app_releases[app["repo"]] = {tag: assets}
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.lock()[app["id"]], tag)
+
+    def test_a_package_with_more_than_the_app_or_an_old_release_under_a_new_tag_is_refused_with_its_reason(self):
+        outside, republished = [app for app in RELEASED if not app.get("optional")][:2]
+        self.suite.app_releases[outside["repo"]] = dict([app_release(outside["id"], extra=["otra/appinfo/info.xml"])])
+        old = next(iter(self.suite.app_releases[republished["repo"]].values()))
+        self.suite.app_releases[republished["repo"]] = {app_release(republished["id"])[0]: old}
+        self.claim()
+        self.install()
+        reason = self.steps(self.until("failed"))[APPS_STEP][1]
+        for app in (outside, republished):
+            self.assertRegex(reason, f"«{app['name']}»: [^«]*no contiene solo la aplicación en esa versión")
+        self.assertFalse({outside["id"], republished["id"]} & {app for app, _ in self.suite.unpacked})
+
+    def test_a_bad_signature_or_checksum_refuses_that_app_with_its_reason_and_reintentar_installs_it(self):
+        signed, tampered = [app for app in RELEASED if not app.get("optional")][:2]
+        good = {app["repo"]: dict(self.suite.app_releases[app["repo"]]) for app in (signed, tampered)}
+        tag, assets = next(iter(good[signed["repo"]].items()))
+        forger = AppKey()
+        forger.number = KEY.number  # a signature that names the app key, made with another one
+        forged = forger.sign(assets["SHA256SUMS"])
+        self.suite.app_releases[signed["repo"]] = {tag: {**assets, "SHA256SUMS.minisig": forged}}
+        tag, assets = next(iter(good[tampered["repo"]].items()))
+        package = f"{tampered['id']}.tar.gz"
+        self.suite.app_releases[tampered["repo"]] = {tag: {**assets, package: assets[package] + b"\0"}}
+        self.claim()
+        self.install()
+        install = self.until("failed")
+        status, reason = self.steps(install)[APPS_STEP]
+        self.assertEqual(status, "failed")
+        self.assertRegex(reason, f"«{signed['name']}»: [^«]*clave de aplicaciones de APS Conecta")
+        self.assertRegex(reason, f"«{tampered['name']}»: [^«]*suma de verificación")
+        unpacked = [app for app, _ in self.suite.unpacked]
+        self.assertFalse({signed["id"], tampered["id"]} & (set(unpacked) | set(self.lock())))
+        self.assertLessEqual(DEFAULT_APPS - {signed["id"], tampered["id"]}, self.enabled())
+        self.assertEqual(self.named(install, "failed"), {APPS_STEP}, "every other step goes on")
+        self.suite.app_releases.update(good)
+        self.install()
+        self.until("done")
+        self.assertLessEqual(DEFAULT_APPS, self.enabled())
+        self.assertEqual([app for app, _ in self.suite.unpacked[len(unpacked):]], [signed["id"], tampered["id"]],
+                         "«Reintentar» installs only the apps that failed")
+        self.assertLessEqual({signed["id"], tampered["id"]}, set(self.lock()))
+
+    def test_a_failed_download_or_a_store_app_that_does_not_install_names_that_app_and_reintentar_installs_it(self):
+        app, store = RELEASED[0], next(a for a in apps.MANIFEST if a["source"] == "store")
+        releases = self.suite.app_releases[app["repo"]]
+        tag = next(iter(releases))
+        releases[tag] = {name: data for name, data in releases[tag].items() if name != f"{app['id']}.tar.gz"}
+        self.suite.store.remove(store["id"])
+        self.claim()
+        self.install()
+        reason = self.steps(self.until("failed"))[APPS_STEP][1]
+        self.assertIn(f"«{app['name']}»: No se pudo descargar {app['id']}.tar.gz", reason)
+        self.assertIn(f"«{store['name']}»: Nextcloud no pudo completar «occ app:enable {store['id']}»", reason)
+        self.assertLessEqual(DEFAULT_APPS - {app["id"], store["id"]}, self.enabled())
+        publish(self.suite)
+        self.install()
+        self.until("done")
+        self.assertLessEqual(DEFAULT_APPS, self.enabled())
+
+    def test_a_step_that_configures_an_app_ensures_it_and_ensuring_it_again_installs_nothing(self):
+        app = RELEASED[0]
+        self.assertEqual(apps.ensure(self.context(), app["id"]), [])
+        self.assertIn(app["id"], self.enabled())
+        self.assertEqual(self.lock(), {app["id"]: self.newest(app)})
+        unpacked, commands = len(self.suite.unpacked), len(self.suite.commands)
+        self.assertEqual(apps.ensure(self.context(), app["id"]), [])
+        self.assertEqual(len(self.suite.unpacked), unpacked)
+        self.assertNotIn("app:enable", {command[0] for command in self.suite.commands[commands:]})
+
+    def test_ensure_names_only_its_own_apps_failure_while_the_apps_step_names_every_failure(self):
+        ensured, other = [app for app in RELEASED if not app.get("optional")][:2]
+        for app in (ensured, other):
+            tag, assets = next(iter(self.suite.app_releases[app["repo"]].items()))
+            package = f"{app['id']}.tar.gz"
+            self.suite.app_releases[app["repo"]] = {tag: {**assets, package: assets[package] + b"\0"}}
+        reasons = apps.ensure(self.context(), ensured["id"])
+        self.assertEqual(len(reasons), 1)
+        self.assertRegex(reasons[0], f"^«{ensured['name']}»: [^«]*suma de verificación")
+        self.claim()
+        self.install()
+        reason = self.steps(self.until("failed"))[APPS_STEP][1]
+        for app in (ensured, other):
+            self.assertIn(f"«{app['name']}»: ", reason)
+
+    def test_the_end_of_install_check_finds_a_disabled_app_and_reintentar_enables_its_locked_release_again(self):
+        app = RELEASED[0]
+        self.claim()
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        locked = self.lock()[app["id"]]
+        self.suite.apps[app["id"]]["enabled"] = "no"
+        self.release_newer(app)
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))[APPS_STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn(app["name"], reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.lock()[app["id"]], locked, "a retry installs the tag the lock file records")
+        self.assertIn(app["id"], self.enabled())
 
 
 class InterruptedInstall(InstallTest):
