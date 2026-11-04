@@ -10,7 +10,6 @@ Nextcloud's container, and the support app stays off."""
 
 import json
 import os
-import secrets
 import sys
 import time
 from pathlib import Path
@@ -49,8 +48,7 @@ name = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
 if not name:
     sys.exit("the suite has no name: «Dirección» claimed none")
 suite = f"https://{name}"
-password = secrets.token_urlsafe(24)
-print(f"::add-mask::{password}", flush=True)
+password = os.environ["TEST_PASSWORD"]
 machine(f"sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud sh -c 'read -r OC_PASS && "
         f"export OC_PASS && php occ user:add --password-from-env --display-name \"Persona de prueba\" {PERSON}'",
         stdin=password + "\n")
