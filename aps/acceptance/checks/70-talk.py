@@ -157,7 +157,7 @@ with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=S
 
 sockets, pages = [], []
 with chromium(media=True) as browser:
-    for user in STAFF:  # each in the conversation, then each joins its call
+    for user in STAFF:  # each signs in, then each opens the conversation and joins its call
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         context.add_init_script(OBSERVE)
         page = context.new_page()
@@ -167,9 +167,9 @@ with chromium(media=True) as browser:
         page.fill("#password", password)
         page.click("[data-login-form-submit]")
         page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
-        page.goto(f"{suite}/call/{token}")
         pages.append(page)
-    for user, page in zip(STAFF, pages):
+    for user, page in zip(STAFF, pages):  # the invited one opens the conversation once the first one's call rings
+        page.goto(f"{suite}/call/{token}")
         try:
             join(page)
         except (AssertionError, Error):
