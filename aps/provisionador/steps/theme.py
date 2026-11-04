@@ -9,12 +9,10 @@ own free account» link, its update banners and its iOS app banner are off, and 
 instead of with its sample files. Everyone's personal settings link the suite's source code and its licence.
 
 The text overrides (aps/theme/texts.json) are Spanish translations, Nextcloud's and its apps', that name the suite
-«Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk», and Euro-Office's «Nextcloud Office»
-is «Office»); one that names Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud's server
-adds a theme's translations to its own on every screen and email it renders. Its browser, though, loads only the first translations file it finds for an app, and a
-theme's core/<app>/l10n/es.js is the first it looks for (JSResourceLocator): there the theme holds the app's own
-Spanish, as the suite ships it, with the overrides on top. An app the suite does not hold gets none, which would hide
-its own Spanish; one updated later keeps, in the browser, the Spanish it had when the step ran.
+«Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk», and Euro-Office's «Nextcloud Office» is
+«Office»); one that names Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud's server adds
+a theme's translations to its own on every screen and email it renders, and its browser gets them as
+aps/images/nextcloud/browser-texts.php builds them.
 """
 
 import json
@@ -66,11 +64,6 @@ def files(context):
                if name.endswith(".svg")}
     for folder, overrides in json.loads((SOURCE / "texts.json").read_text(encoding="utf-8")).items():
         placed[f"{folder}/l10n/es.json"] = json.dumps({"translations": overrides}, ensure_ascii=False).encode()
-        if shipped := context.suite.translations(folder):
-            app = folder.rsplit("/", 1)[-1]
-            arguments = (app, {**shipped["translations"], **overrides}, shipped["pluralForm"])
-            script = ", ".join(json.dumps(argument, ensure_ascii=False) for argument in arguments)
-            placed[f"core/{app}/l10n/es.js"] = f"OC.L10N.register({script});\n".encode()
     quoted = context.centre["short_name"].replace("\\", "\\\\").replace('"', '\\"')
     placed["core/css/site.css"] = f':root {{ --aps-establishment: "{quoted}"; }}\n'.encode()
     return placed
@@ -78,6 +71,7 @@ def files(context):
 
 def run(context):
     context.suite.theme(THEME, files(context))
+    context.suite.browser_texts()
     context.suite.occ("config:import", stdin=json.dumps(IMPORTED))
     for key, value in theming().items():
         context.suite.occ("theming:config", key, value)

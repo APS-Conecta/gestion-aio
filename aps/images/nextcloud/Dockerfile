@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The thin Nextcloud image: upstream v14.4.3's Nextcloud image without AIO's one-click 100-user cap,
-# with AIO's notifications and admin section in Spanish, Nextcloud's maintenance window at night and an
-# antivirus that deletes infected files.
+# with AIO's notifications and admin section in Spanish, Nextcloud's maintenance window at night, an
+# antivirus that deletes infected files and the theme's browser texts rebuilt once the apps are installed and updated.
 # The cap is the block between upstream's "AIO one-click settings" markers in /entrypoint.sh and the
 # one-click keys of the image's aio.config.php; the build fails if any of it is left. Its start no longer
 # turns the support app back on, which the theme install step (aps/provisionador/steps/theme.py) turns off.
@@ -37,3 +37,11 @@ RUN set -eux; \
     sed -i 's/\( files_antivirus av_infected_action --value=\)"only_log"$/\1"delete"/' /entrypoint.sh; \
     grep -q ' files_antivirus av_infected_action --value="delete"$' /entrypoint.sh; \
     if grep -n only_log /entrypoint.sh; then exit 1; fi
+
+# browser-texts.php (its header says what it builds) runs once upstream's start installed and updated the apps; the
+# build fails unless it follows the start's last app install or update.
+COPY browser-texts.php /
+RUN set -eux; \
+    sed -i 's|^# Remove the update skip file always$|php /browser-texts.php\n&|' /entrypoint.sh; \
+    last="$(grep -e 'occ app:update' -e 'occ app:install' -e '^php /browser-texts.php$' /entrypoint.sh | tail -n 1)"; \
+    [ "$last" = 'php /browser-texts.php' ]

@@ -904,6 +904,21 @@ class Apps(InstallTest):
         self.until("done")
         self.assertLessEqual(DEFAULT_APPS, self.enabled())
 
+    def test_an_app_that_installs_on_reintentar_gets_its_browser_texts_then(self):
+        """The browser texts are built again once «Reintentar» installs an app the theme step, already green, found
+        missing, rather than at the next start of Nextcloud's container."""
+        self.suite.store.remove("calendar")
+        self.claim()
+        self.install()
+        steps = self.steps(self.until("failed"))
+        self.assertEqual((steps[THEME][0], steps[APPS_STEP][0]), ("green", "failed"))
+        publish(self.suite)
+        self.install()
+        self.until("done")
+        built = self.suite.texts_built[-1]
+        self.assertIn("calendar", built["apps"])
+        self.assertIn("apsconecta", built["themes"])
+
     def test_a_step_that_configures_an_app_ensures_it_and_ensuring_it_again_installs_nothing(self):
         app = RELEASED[0]
         self.assertEqual(apps.ensure(self.context(), app["id"]), [])
@@ -1553,12 +1568,6 @@ class InterruptedInstall(InstallTest):
 TOKENS = brand.tokens()
 SUITE = "APS Conecta Gestión"
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
-TEXTS = json.loads((HERE.parent / "theme" / "texts.json").read_text(encoding="utf-8"))
-PLURAL = "nplurals=2; plural=(n != 1);"
-# Each folder's own Spanish as Nextcloud ships it, naming Nextcloud where the overrides change it; the suite does not
-# hold Contacts.
-SHIPPED = {folder: {"translations": {**dict.fromkeys(texts, "Nextcloud"), "Files": "Archivos"}, "pluralForm": PLURAL}
-           for folder, texts in TEXTS.items() if folder != "custom_apps/contacts"}
 
 
 class Branding(InstallTest):
@@ -1568,7 +1577,6 @@ class Branding(InstallTest):
 
     def setUp(self):
         super().setUp()
-        self.suite.l10n = SHIPPED
         self.claim("999004")
         self.install()
         self.until("done")
@@ -1614,16 +1622,8 @@ class Branding(InstallTest):
         welcome = [v for k, v in texts["custom_apps/spreed/l10n/es.json"].items() if k.startswith("# Welcome to")]
         self.assertTrue(welcome and welcome[0].startswith("# Bienvenido/a a Talk"), welcome)
 
-    def test_the_browser_gets_each_apps_own_spanish_with_the_overrides_on_top_in_place_of_the_apps_own(self):
-        """Of an app's translations, Nextcloud's browser loads only the first file it finds, and the theme's comes
-        first; an app the suite does not hold gets none, which would hide its own Spanish once it is installed."""
-        for folder, shipped in SHIPPED.items():
-            app = folder.rsplit("/", 1)[-1]
-            script = self.theme[f"core/{app}/l10n/es.js"].decode()
-            arguments = script.removeprefix("OC.L10N.register(").removesuffix(");\n")
-            self.assertEqual(json.loads(f"[{arguments}]"), [app, {**shipped["translations"], **TEXTS[folder]}, PLURAL],
-                             folder)
-        self.assertNotIn("core/contacts/l10n/es.js", self.theme)
+    def test_the_browser_texts_are_built_once_the_theme_is_in_place(self):
+        self.assertIn("apsconecta", self.suite.texts_built[-1]["themes"])
 
     def test_everyones_personal_settings_link_the_source_code_and_its_licence(self):
         notice = self.theme["apps/settings/templates/settings/personal/development.notice.php"].decode()

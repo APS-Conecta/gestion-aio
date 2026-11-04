@@ -18,8 +18,9 @@ Apache runs. The first time its page opens, AIO makes the backup's encryption pa
 reads. The passphrase and that password leave this process only in the passwords file. The containers' progress is AIO's
 own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording, are read
 here too. Every later install step runs occ in the Nextcloud container. The apps step downloads App releases from
-GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step reads the Spanish
-translations Nextcloud ships and places the theme folder in Nextcloud's themes folder, which upstream's updates keep.
+GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step places the theme
+folder in Nextcloud's themes folder, which upstream's updates keep, and the theme and apps steps have
+aps/images/nextcloud/browser-texts.php build the browser's texts.
 """
 
 import base64
@@ -207,9 +208,6 @@ mv ".$1.new" "$1"
 rm -rf ".$1.old"
 """
 
-# In the Nextcloud container, the Spanish translations Nextcloud ships for its folder $1, if it ships any.
-TRANSLATIONS = 'file="/var/www/html/$1/l10n/es.json"; if [ -f "$file" ]; then cat "$file"; fi'
-
 
 # In the Nextcloud container: each CA of AIO's own folder of trusted CAs, which AIO mounts there only when it has one
 # (a test build's Let's Encrypt staging roots), imported into Nextcloud's trusted certificates, as AIO's own start
@@ -373,11 +371,10 @@ class Suite:
         self.execute(NEXTCLOUD, ("sh", "-c", THEME, "sh", name), base64.b64encode(archive.getvalue()).decode(),
                      THEME_FAILED)
 
-    def translations(self, folder):
-        """The Spanish translations Nextcloud ships for one of its folders (core, apps/<id>, custom_apps/<id>), as its
-        l10n/es.json holds them; None when it ships none."""
-        shipped = self.execute(NEXTCLOUD, ("sh", "-c", TRANSLATIONS, "sh", folder), failed=THEME_FAILED)
-        return json.loads(shipped) if shipped else None
+    def browser_texts(self):
+        """The browser's texts of the apps Nextcloud holds now, as the image's browser-texts.php builds them from the
+        theme folders."""
+        self.execute(NEXTCLOUD, ("php", "/browser-texts.php"), failed=THEME_FAILED)
 
     def trust_issuer(self, host):
         """Nextcloud's own requests verify a host that serves only its leaf certificate: the CA that issued it is among
@@ -577,9 +574,9 @@ class FakeSuite:
         self.unpacked = []  # each app id and tarball unpacked into custom_apps, in turn
         self.api_calls = 0  # the calls to GitHub's API
         self.themes = {}  # each theme folder in Nextcloud's themes folder: its files by their path in it
-        self.l10n = {}  # the Spanish translations Nextcloud ships, by its folder, as its l10n/es.json holds them
         self.cacerts = []  # AIO's folder of trusted CAs: a test build's staging roots; a release has none
         self.trusted = []  # the CAs of that folder Nextcloud imported
+        self.texts_built = []  # each build of the browser's texts: the theme folders and the enabled apps it found
 
     def claim(self, code, name):
         if self.credential is None:
@@ -724,9 +721,10 @@ class FakeSuite:
         self._outage_guard("nextcloud")
         self.themes[name] = dict(files)
 
-    def translations(self, folder):
+    def browser_texts(self):
         self._outage_guard("nextcloud")
-        return self.l10n.get(folder)
+        self.texts_built.append({"themes": set(self.themes),
+                                 "apps": {app for app, values in self.apps.items() if values.get("enabled") == "yes"}})
 
     def trust_issuer(self, host):
         self._outage_guard("nextcloud")
