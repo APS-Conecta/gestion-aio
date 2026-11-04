@@ -2,8 +2,10 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Equipos», «Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on
-to «Equipos», where the operator types the sectors and programs and sees the team each becomes, then to «Revisar», which
-summarises the centre's address, the teams, the cargo accounts, the components and the backups; «Instalar» shows each
+to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the blank
+people spreadsheet, uploads it filled in as Excel saves it and sees the people the install will create, then to
+«Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the components and the
+backups; «Instalar» shows each
 step and, once AIO runs our components, each container's progress live until «Listo» shows the suite's address. There
 the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's first
 password and AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's answer,
@@ -22,6 +24,7 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
+import spreadsheet  # noqa: E402
 import teams  # noqa: E402
 from browser import aio_config, aio_file, chromium, machine, suite_name, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
@@ -31,6 +34,10 @@ from steps.passwords import FILE  # noqa: E402
 
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
+# As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people.
+PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
+          "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;sector-norte role-enfermeria;sí\r\n"
+          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur prog-cardiovascular role-medico;no\r\n")
 CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": True, "isTalkRecordingEnabled": False,
@@ -41,6 +48,7 @@ KEPT = f"{FOLDER}/{FILE}"
 
 
 centre = json.loads(machine(f"sudo cat {FOLDER}/state.json"))["centre"]  # as 15-wizard chose it
+people = spreadsheet.read(PEOPLE, DECLARED, centre["type"])[0] or sys.exit("PEOPLE loads nobody")
 passphrase, name = aio_config().get("password"), suite_name()
 if not passphrase:  # it stays in memory: run.sh masks it in the log
     sys.exit("AIO stored no passphrase")
@@ -62,11 +70,19 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.fill("#sectors", "\n".join(SECTORS))
     page.fill("#programs", "\n".join(PROGRAMS))
     expect(page.locator("#teams li strong")).to_have_text([team["name"] for team in DECLARED])
+    with page.expect_download() as download:
+        page.click("#people-template")
+    if Path(download.value.path()).read_text(encoding="utf-8-sig").splitlines() != [";".join(spreadsheet.COLUMNS)]:
+        sys.exit("the blank people spreadsheet does not name the columns alone")
+    page.set_input_files("#people-file", files=[{"name": spreadsheet.FILE, "mimeType": "text/csv",
+                                                 "buffer": PEOPLE.encode("cp1252")}])
+    expect(page.locator("#people li strong")).to_have_text([person["name"] for person in people])
     page.screenshot(path=evidence / "equipos.png")
     page.click("#teams-continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
     expect(page.locator("#summary-address")).to_have_text(f"https://{name}")
     expect(page.locator("#summary-teams li")).to_have_text([team["name"] for team in DECLARED])
+    expect(page.locator("#summary-people li")).to_contain_text([f"{p['name']} ({p['user']})" for p in people])
     expect(page.locator("#summary-cargo li")).to_have_text(
         [f"{account['name']} ({account['user']})" for account in teams.cargo_accounts(DECLARED, centre["type"])])
     expect(page.locator("#summary-components li")).to_have_text(CHOSEN)
