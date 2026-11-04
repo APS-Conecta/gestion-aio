@@ -9,48 +9,39 @@ passwords are masked in the log, never printed."""
 
 import json
 import os
-import re
-import shlex
 import sys
 from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
 import spreadsheet  # noqa: E402
-from browser import chromium, machine  # noqa: E402
+from browser import chromium, first_password, occ, provisionador_file, provisionador_state, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 from steps.people import groups  # noqa: E402
 
-FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the passwords file
 WHOAMI = ("fetch('/ocs/v2.php/cloud/user?format=json', {headers: {'OCS-APIRequest': 'true'}})"
           ".then(r => r.json()).then(answer => answer.ocs.data.id)")
 
-
-def occ(*args):
-    return machine("sudo docker exec --user www-data nextcloud-aio-nextcloud php occ --no-ansi " + shlex.join(args))
-
-
 evidence = Path(os.environ["EVIDENCE"])
-state = json.loads(machine(f"sudo cat {FOLDER}/state.json"))
+state = provisionador_state()
 people, errors = spreadsheet.read(state.get("spreadsheet"), state.get("teams", []), state["centre"]["type"])
 if errors or not people:
     sys.exit(f"«Equipos» loaded no people: {errors}")
 people = [person for person in people if person["user"] not in state.get("retired", [])]
-name = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
-                          "/mnt/docker-aio-config/data/configuration.json"))["domain"]
-passwords = machine(f"sudo cat {FOLDER}/{FILE}")  # never printed
+name = suite_name()
+passwords = provisionador_file(FILE)  # never printed
 wrong, first = [], {}
 for person in people:
-    info = json.loads(occ("user:info", person["user"], "--output=json"))
+    info = json.loads(occ(f"user:info {person['user']} --output=json"))
     print(f"{person['user']}: {info['display_name']}, {info['email']}, enabled {info['enabled']}, "
           f"in {sorted(info['groups'])}")
     if ((info["display_name"], info["email"], info["enabled"]) != (person["name"], person["email"], True)
             or not groups(person) <= set(info["groups"])):
         wrong.append(f"{person['user']} is not {person['name']}, {person['email']}, enabled, in "
                      f"{sorted(groups(person))}")
-    listed = re.search(rf"\n  Usuario: {re.escape(person['user'])}\n  Contraseña: (\S+)\n", passwords)
-    if listed:  # run.sh masked it once 17-install made it
-        first[person["user"]] = listed[1]
+    password = first_password(passwords, person["user"])
+    if password:  # run.sh masked it once 17-install made it
+        first[person["user"]] = password
     else:
         wrong.append(f"the passwords file does not list {person['user']}")
 if wrong:

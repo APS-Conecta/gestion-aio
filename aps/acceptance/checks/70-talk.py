@@ -21,13 +21,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import STAGING_ROOTS, chromium, hardware, machine  # noqa: E402
+from browser import NEXTCLOUD, STAGING_ROOTS, aio_config, chromium, hardware, machine, occ, suite_name  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 from steps.components import RECORDING, chosen  # noqa: E402
 
 STAFF = ("llamada.uno", "llamada.dos")
 TURN_PORT = 443  # Talk's port, as the community Caddy sets it (community-containers/caddy/caddy.json: talk_port)
-NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"
 # Before Talk loads: every peer connection Talk opens, with the ICE servers it got.
 OBSERVE = """window.talkPeers = [];
 window.RTCPeerConnection = new Proxy(window.RTCPeerConnection, {
@@ -78,10 +77,6 @@ RELAY = """async () => {
 }"""
 
 
-def occ(command):
-    return machine(f"{NEXTCLOUD} php occ {command}")
-
-
 def decoded(before, after):
     """Whether, between two readings, the browser sent audio and received audio that it decoded, not silence, over a
     connected candidate pair."""
@@ -119,11 +114,7 @@ def join(page):
     expect(joined).to_be_visible(timeout=60_000)
 
 
-config = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
-                            "/mnt/docker-aio-config/data/configuration.json"))
-name = config.get("domain")
-if not name:
-    sys.exit("the suite has no name: «Dirección» claimed none")
+config, name = aio_config(), suite_name()
 suite = f"https://{name}"
 evidence = Path(os.environ["EVIDENCE"])
 
