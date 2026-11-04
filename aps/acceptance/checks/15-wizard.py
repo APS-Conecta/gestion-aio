@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The one-time link the one command printed opens the wizard in a browser that trusts the wizard's certificate
 because its fingerprint is the printed one. The operator reaches «Centro» and chooses a centre, picked by the run
-so concurrent runs claim different names; «Dirección» shows the centre's name from the slug table, under the CI
-name service this test build uses, with nothing to edit, claims it by itself and says so. The claim's credential
-is stored root-only on the machine (run.sh masks it). The DEIS code goes to $GITHUB_OUTPUT before the claim, so
-the run releases it."""
+so concurrent runs claim different names, or a release's RELEASE_DEIS_CODE; «Dirección» shows the centre's name from
+the slug table, under the name service the build uses (a test build the CI deployment, a release production), with
+nothing to edit, claims it by itself and says so. The claim's credential is stored root-only on the machine (run.sh
+masks it). The DEIS code goes to $GITHUB_OUTPUT before the claim, so the run releases it."""
 
 import json
 import os
@@ -17,16 +17,25 @@ from urllib.parse import urlsplit
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import deis  # noqa: E402
-from browser import chromium, machine, verified, wizard_link  # noqa: E402
+from browser import TEST_BUILD, chromium, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 
+NAME_SERVICE = ("https://gestion-nombres-ci.apsconecta.workers.dev" if TEST_BUILD
+                else "https://gestion-nombres.apsconecta.workers.dev")
 services = json.loads(machine("cat /opt/aps-conecta/gestion/services.json"))
-if services["url"] != "https://gestion-nombres-ci.apsconecta.workers.dev":
-    sys.exit(f"the test build claims names from {services['url']}, not from the name service's CI deployment")
+if services["url"] != NAME_SERVICE:
+    sys.exit(f"{os.environ['TAG']} claims names from {services['url']}, not from {NAME_SERVICE}")
 register = deis.Register(deis.newest(REPO / "aps" / "deis"))
 slugs = deis.slugs(register.rows)
 codes = sorted(slugs)
-code = codes[(int(os.environ["GITHUB_RUN_ID"]) + int(os.environ["GITHUB_RUN_ATTEMPT"]) + len(codes) // 2) % len(codes)]
+if TEST_BUILD:
+    turn = int(os.environ["GITHUB_RUN_ID"]) + int(os.environ["GITHUB_RUN_ATTEMPT"]) + len(codes) // 2
+    code = codes[turn % len(codes)]
+else:  # the code the owner set aside for releases, whose name no establishment uses
+    code = os.environ.get("RELEASE_DEIS_CODE", "")
+    if code not in slugs:
+        sys.exit("a release claims the production name of RELEASE_DEIS_CODE, the repository variable the owner sets: "
+                 + (f"{code} is not a code of the DEIS register" if code else "it is not set"))
 row, name = register.by_code[code], f"{slugs[code]}.{services['suffix']}"
 
 link, printed = wizard_link(Path(os.environ["CONSOLE"]).read_text(encoding="utf-8"))

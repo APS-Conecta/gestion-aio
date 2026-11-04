@@ -27,6 +27,10 @@ conformance gate enforces it.
 A published version of this repo: bootstrap (carrying its bundle's checksum), our images, the pins of the official images, theme and data.
 It contains no apps.
 
+**Release candidate** (candidata):
+A Suite release before its clean-machine acceptance run: a pre-release under its version, never «Latest». It becomes the
+release «Latest» once every check passes, and is withdrawn otherwise.
+
 **Operator** (operador):
 The person who runs the install.
 

@@ -57,10 +57,16 @@ BACK
 update
 record "$ADDRESS"
 
-"$MACHINE" "sudo docker exec -i nextcloud-aio-nextcloud sh -c 'cat > /tmp/letsencrypt-staging-roots.pem'" \
-  < aps/acceptance/letsencrypt-staging-roots.pem
+# A test build's certificate verifies against the staging roots, handed to Nextcloud's container here; a release's
+# against the container's own system roots.
+roots=()
+if [[ "$TAG" == v0.0.0-ci.* ]]; then
+  "$MACHINE" "sudo docker exec -i nextcloud-aio-nextcloud sh -c 'cat > /tmp/letsencrypt-staging-roots.pem'" \
+    < aps/acceptance/letsencrypt-staging-roots.pem
+  roots=(--cacert /tmp/letsencrypt-staging-roots.pem)
+fi
 # shellcheck disable=SC2016 # expands on the machine
-"$MACHINE" sudo bash -s "$ADDRESS" "$name" << 'DROP'
+"$MACHINE" sudo bash -s "$ADDRESS" "$name" "${roots[@]}" << 'DROP'
 set -euo pipefail
 rule=(PREROUTING -i br-+ -m addrtype --dst-type LOCAL -j DROP)
 iptables -t raw -I "${rule[@]}"
@@ -70,6 +76,5 @@ if docker exec nextcloud-aio-nextcloud curl --silent --insecure --max-time 10 --
   exit 1
 fi
 echo "the host drops what its containers send it; from inside Nextcloud, https://$2/status.php answers:"
-docker exec nextcloud-aio-nextcloud curl --fail --silent --show-error --max-time 20 \
-  --cacert /tmp/letsencrypt-staging-roots.pem "https://$2/status.php"
+docker exec nextcloud-aio-nextcloud curl --fail --silent --show-error --max-time 20 "${@:3}" "https://$2/status.php"
 DROP

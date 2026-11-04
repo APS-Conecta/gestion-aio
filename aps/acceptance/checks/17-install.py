@@ -21,7 +21,6 @@ import base64
 import json
 import os
 import re
-import ssl
 import sys
 import tempfile
 import time
@@ -34,7 +33,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
 import teams  # noqa: E402
-from browser import STAGING_ROOTS, aio_config, aio_file, chromium, hardware, machine, suite_name, verified  # noqa: E402
+from browser import aio_config, aio_file, chromium, hardware, machine, suite_name, tls, verified  # noqa: E402
 from browser import wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
@@ -77,7 +76,7 @@ def store(user, deadline):
                                      method="PUT", headers={"Authorization": f"Basic {basic}"})
     while True:
         try:
-            with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=STAGING_ROOTS), timeout=60):
+            with urllib.request.urlopen(request, context=tls(), timeout=60):
                 return
         except urllib.error.HTTPError as error:
             sys.exit(f"{user} does not store {STORED} in their files at {suite}: HTTP {error.code}")

@@ -362,5 +362,55 @@ class ReleaseBundle(unittest.TestCase):
         self.assertIn(b"acme-staging-v02", files["services.json"])
 
 
+class ReleaseWorkflowGate(unittest.TestCase):
+    """aps/gates/release.py: the release workflow, as committed and with one defect planted, makes a release «Latest»
+    only once every check of that candidate passed, and creates every release as a pre-release kept from «Latest»."""
+
+    WORKFLOW = REPO / ".github" / "workflows" / "aps-release.yml"
+    PUBLISH = "needs: [images, release, bootstrap, host-checks, acceptance]\n    if: inputs.version != ''\n"
+
+    def gate(self, old="", new=""):
+        """The gate's exit code and output on the committed workflow with `old` replaced by `new`."""
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        if old:
+            self.assertEqual(text.count(old), 1, f"the workflow holds {old!r} once")
+            text = text.replace(old, new)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".yml") as planted:
+            planted.write(text)
+            planted.flush()
+            r = subprocess.run([sys.executable, "-I", str(GATES / "release.py"), "--workflow", planted.name],
+                               capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    def test_the_committed_workflow_passes(self):
+        code, out = self.gate()
+        self.assertEqual(code, 0, out)
+
+    def test_latest_before_the_acceptance_run_passed_fails_naming_it(self):
+        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace(", acceptance]", "]"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("publish makes a release «Latest» without waiting for acceptance", out)
+
+    def test_latest_whatever_the_checks_did_fails(self):
+        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace("if: ", "if: always() && "))
+        self.assertEqual(code, 1, out)
+        self.assertIn("publish makes a release «Latest» even when a check failed", out)
+
+    def test_a_check_that_passes_when_it_fails_fails(self):
+        code, out = self.gate("    timeout-minutes: 60\n", "    timeout-minutes: 60\n    continue-on-error: true\n")
+        self.assertEqual(code, 1, out)
+        self.assertIn("bootstrap passes even when it fails", out)
+
+    def test_a_release_created_that_could_become_latest_fails(self):
+        code, out = self.gate(" --prerelease --latest=false ", " --prerelease ")
+        self.assertEqual(code, 1, out)
+        self.assertIn("is not created as a pre-release kept from «Latest»", out)
+
+    def test_a_workflow_that_never_makes_a_release_latest_fails(self):
+        code, out = self.gate(" --prerelease=false --latest ", " ")
+        self.assertEqual(code, 1, out)
+        self.assertIn("no job makes a release «Latest»", out)
+
+
 if __name__ == "__main__":
     unittest.main()

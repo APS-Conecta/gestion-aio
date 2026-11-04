@@ -11,7 +11,7 @@ AGENTS.md APS agent steering replaces upstream's contributor steering
 CONTEXT.md APS domain glossary
 .github/workflows/aps-gates.yml APS static gates and PR-title check
 .github/workflows/aps-acceptance.yml APS clean-machine acceptance run on a fresh Debian 12 VM
-.github/workflows/aps-release.yml APS release pipeline: our three images, the bundle, test pre-releases, the bootstrap and staging-certificate proofs
+.github/workflows/aps-release.yml APS release pipeline: our three images, the bundle, test pre-releases, the bootstrap and staging-certificate proofs, and releases made «Latest» once their candidate passed
 .github/workflows/aps-name-service.yml APS name service: the production deployment, from main only
 .github/workflows/aps-name-release.yml APS name release: frees a DEIS code's name and its records
 community-containers/caddy/caddy.json the reverse proxy is our thin Caddy image, pinned per release, with the name service's acme-dns credential and the ACME directory; Spanish display name

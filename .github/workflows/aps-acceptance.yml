@@ -2,15 +2,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The clean-machine acceptance run (Seam 1): the one command from a pre-release on a fresh Debian 12 VM,
 # then every check module (aps/acceptance/run.sh documents their interface). The release pipeline calls
-# it for every release candidate; a maintainer can dispatch it for any test build, whose wizard claims a
-# CI name that the run releases at its end.
+# it for every test build and release candidate; a maintainer can dispatch it for any of them. A test build's
+# wizard claims a CI name, which the run releases at its end with APS's token. A release's claims the production
+# name of RELEASE_DEIS_CODE, a repository variable the owner sets, and gets a real certificate; the run releases
+# that name at its end with the name's own credential, and needs no Cloudflare token.
 name: APS acceptance
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Pre-release to install, such as v0.0.0-ci.6
+        description: Pre-release to install, such as v0.0.0-ci.6 or a release's candidate
         required: true
         type: string
   workflow_call:
@@ -33,12 +35,15 @@ jobs:
     name: The one command on a fresh Debian 12 VM
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Every run shares the name service's one CI deployment: one deploy-and-claim at a time.
+    # Every test build shares the name service's one CI deployment, and every release the production name of
+    # RELEASE_DEIS_CODE: one deploy-and-claim at a time.
     concurrency:
-      group: aps-name-service-ci
+      group: aps-name-service-${{ startsWith(inputs.tag, 'v0.0.0-ci.') && 'ci' || 'production' }}
       cancel-in-progress: false
     permissions:
       contents: read
+    env:
+      TEST_BUILD: ${{ startsWith(inputs.tag, 'v0.0.0-ci.') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,6 +63,7 @@ jobs:
           "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium > /dev/null
           echo "$RUNNER_TEMP/browser/bin" >> "$GITHUB_PATH"
       - name: Deploy the name service's CI deployment, gestion-nombres-ci.apsconecta.workers.dev, from this commit
+        if: env.TEST_BUILD == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: aps/name-service/deploy.sh ci
@@ -65,13 +71,19 @@ jobs:
         id: run
         env:
           TAG: ${{ inputs.tag }}
+          RELEASE_DEIS_CODE: ${{ vars.RELEASE_DEIS_CODE }}
         run: aps/acceptance/run.sh "$TAG"
       - name: Release the CI name the wizard claimed
-        if: always() && steps.run.outputs.code != ''
+        if: always() && env.TEST_BUILD == 'true' && steps.run.outputs.code != ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CODE: ${{ steps.run.outputs.code }}
         run: aps/name-service/names.sh ci release "$CODE"
+      - name: Release the production name the wizard claimed, with the name's own credential
+        if: always() && env.TEST_BUILD != 'true' && steps.run.outputs.code != ''
+        env:
+          CODE: ${{ steps.run.outputs.code }}
+        run: aps/name-service/names.sh production release "$CODE" "$RUNNER_TEMP/acceptance/claim.json"
       - name: Attach the evidence (the failing check's container logs and disk usage)
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
