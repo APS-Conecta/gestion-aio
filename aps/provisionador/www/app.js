@@ -432,8 +432,9 @@ async function listo(name) {
     $("passwords").download = file;
     $("passwords").hidden = false;
     status("closed", "El asistente de instalación se cerró y su enlace ya no funciona. Descargue ahora el archivo de "
-      + "contraseñas, con la del administrador de la suite y la frase de contraseña de la página de AIO, y guárdelo en "
-      + "un lugar seguro. Una copia queda en el servidor, legible solo por root.");
+      + "contraseñas, con la del administrador de la suite, la frase de contraseña de la página de AIO y la contraseña "
+      + "de cifrado de las copias de seguridad, sin la cual no se pueden restaurar, y guárdelo en un lugar seguro. Una "
+      + "copia queda en el servidor, legible solo por root.");
   } catch {
     status("closed", "No se pudo confirmar el cierre del asistente. Vuelva a ejecutar el comando de instalación: si el "
       + "asistente sigue abierto, imprimirá un enlace nuevo para descargar el archivo de contraseñas; si ya se cerró, "

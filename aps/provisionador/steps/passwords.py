@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The passwords file: the suite administrator's first password, AIO's passphrase and the first password of each
-account the install creates, kept on the server readable by root alone and handed over at «Listo». A step that creates
-accounts asks `first` for their passwords, which the file then lists."""
+"""The passwords file: the suite administrator's first password, AIO's passphrase, the encryption password AIO made for
+its backup, which a restore on another server asks for, and the first password of each account the install creates,
+kept on the server readable by root alone and handed over at «Listo». A step that creates accounts asks `first` for
+their passwords, which the file then lists. Without the backup's encryption password, no file is written."""
 
 import json
 from secrets import token_hex
@@ -45,7 +46,9 @@ def text(context):
             "  Usuario: admin\n"
             f"  Contraseña: {secrets['administrator']}\n\n"
             "Página de AIO, para las copias de seguridad y la restauración\n"
-            f"  Frase de contraseña: {secrets['passphrase']}\n"
+            f"  Frase de contraseña: {secrets['passphrase']}\n\n"
+            "Copias de seguridad: contraseña necesaria para restaurar una copia en este u otro servidor\n"
+            f"  Contraseña de cifrado: {secrets['backup_password']}\n"
             + "".join(f"\n{account['name']}\n  Usuario: {user}\n  Contraseña: {account['password']}\n"
                       for user, account in accounts(context.folder).items()))
 

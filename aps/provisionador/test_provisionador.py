@@ -1775,6 +1775,34 @@ class Listo(InstallTest):
         self.assertNotIn("#", printed)
         self.assertIn("se cerró", self.command("serve"))
 
+    def test_the_passwords_file_lists_the_backup_encryption_password_aio_holds_to_restore_a_backup(self):
+        self.suite.backup_password = "cifrado-que-aio-genero"
+        self.claim()
+        self.install()
+        self.until("done")
+        passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
+        self.assertIn("\nCopias de seguridad: contraseña necesaria para restaurar una copia en este u otro servidor\n"
+                      "  Contraseña de cifrado: cifrado-que-aio-genero\n", passwords)
+
+    def test_without_the_backup_encryption_password_the_passwords_file_says_so_and_is_not_written(self):
+        self.suite.backup_password = None
+        self.claim()
+        self.install()
+        install = self.until("failed")
+        failed = {"Archivo de contraseñas", "Cuentas de cargo", "Cuentas del personal"}
+        self.assertEqual(self.named(install, "failed"), failed)
+        reasons = {self.steps(install)[name][1] for name in failed}
+        self.assertEqual(len(reasons), 1, reasons)
+        reason = reasons.pop()
+        self.assertIn("contraseña de cifrado de las copias de seguridad", reason)
+        self.assertIn("Reintentar", reason)
+        self.assertFalse((self.state / "contrasenas.txt").exists())
+        self.suite.backup_password = FakeSuite.BACKUP_PASSWORD
+        self.install()
+        self.until("done")
+        self.assertIn(f"  Contraseña de cifrado: {FakeSuite.BACKUP_PASSWORD}\n",
+                      self.browser.request("POST", "/api/close", {})[1]["passwords"])
+
 
 class Resume(WizardTest):
     def test_a_restart_keeps_the_session_the_saved_centre_and_the_certificate(self):
