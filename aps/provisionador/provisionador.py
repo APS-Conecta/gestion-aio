@@ -244,6 +244,15 @@ class Provisionador:
             return {**claimed, "claimed": True}
         return centre and {"name": self.name(centre["code"]), "claimed": False}
 
+    def shown(self, state):
+        """The plan as «Equipos» and «Revisar» show it, with the people a corrected spreadsheet drops though the install
+        made their account, by username and name: «Reintentar» retires them."""
+        found, centre = plan(state), state.get("centre")
+        made = people.made(self.state.dir, state.get("teams", []), centre["type"]) if centre else {}
+        listed = {person["user"] for person in found["people"]}
+        return {**found, "dropped": [{"user": user, "name": name} for user, name in made.items()
+                                     if found["people"] and user not in listed]}
+
     def get_state(self, query, body):
         state = self.state.read()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
@@ -252,7 +261,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
-                     **plan(state), "install": self.progress(state)}
+                     **self.shown(state), "install": self.progress(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -311,7 +320,7 @@ class Provisionador:
             if s.get("install"):
                 return 409, {"error": TEAMS_KEPT}
             s["teams"] = declared
-            return 200, plan(s)
+            return 200, self.shown(s)
 
     def get_spreadsheet(self, query, body):
         """GET /api/spreadsheet: the blank people spreadsheet, for the operator to fill in."""
@@ -331,7 +340,7 @@ class Provisionador:
             before = declared(s)
             s["spreadsheet"] = uploaded
             reopen(s, before)
-            return 200, plan(s)
+            return 200, self.shown(s)
 
     def post_retire(self, query, body):
         """POST /api/retire {"users": [usernames]}, «Retirar» once confirmed: each of these people the list shows keeps
@@ -350,7 +359,7 @@ class Provisionador:
             before = declared(s)
             s["retired"] = sorted({*s.get("retired", []), *users})
             reopen(s, before)
-            return 200, plan(s)
+            return 200, self.shown(s)
 
     def busy(self):
         return self.worker is not None and self.worker.is_alive()

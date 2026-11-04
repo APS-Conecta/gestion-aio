@@ -1353,6 +1353,37 @@ class PeopleChanges(PeopleTest):
         self.until("done")
         self.assertEqual((self.suite.users["ana.rojas"]["enabled"], self.member_of("ana.rojas")), (False, set()))
 
+    def test_a_corrected_spreadsheet_that_drops_a_person_whose_account_the_install_made_retires_them(self):
+        self.until_people()
+        self.suite.groups["comite-calidad"] = {"name": "Comité de Calidad", "members": {"pedro.munoz"}}  # an admin's
+        status, body = self.upload(spreadsheet("ana.rojas;Ana;Rojas;;sector-norte;sí"))
+        self.assertEqual((status, body["dropped"]), (200, [{"user": "pedro.munoz", "name": "Pedro Muñoz Tapia"}]))
+        self.reintentar()
+        self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")),
+                         (False, {"comite-calidad"}))
+
+    def test_a_dropped_person_who_never_got_an_account_is_forgotten(self):
+        self.upload(SPREADSHEET + "luis.vera;Luis;Vera;;sector-norte;\r\n")
+        self.upload(SPREADSHEET)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.browser.get("/api/state")[1]["dropped"], [])
+        self.assertNotIn("luis.vera", self.suite.users)
+        self.assertFalse([command for command in self.suite.commands if "luis.vera" in command])
+
+    def test_an_account_made_later_in_nextcloud_and_not_in_the_spreadsheet_is_untouched(self):
+        self.until_people()
+        self.suite.add_user("rosa.soto", "Rosa Soto", "contraseña de Rosa")
+        for group in ("all-staff", "sector-norte"):
+            self.suite.groups[group]["members"].add("rosa.soto")
+        self.upload(CORRECTED)
+        self.assertEqual(self.browser.get("/api/state")[1]["dropped"], [])
+        self.reintentar()
+        self.assertEqual((self.suite.users["rosa.soto"]["enabled"], self.member_of("rosa.soto")),
+                         (True, {"all-staff", "sector-norte"}))
+        self.assertEqual((self.suite.users["director"]["enabled"], self.member_of("director")),
+                         (True, {"role-director-cesfam", "cat-jefaturas", "all-staff"}), "a cargo account stays")
+
     def test_retirar_takes_people_the_list_shows_and_never_the_first_administrator(self):
         for users in ("pedro.munoz", [], ["nadie"], [3]):
             status, body = self.browser.request("POST", "/api/retire", {"users": users})

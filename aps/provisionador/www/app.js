@@ -12,6 +12,7 @@ const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completa
   waiting: "En espera"};
 const ADMINISTRATOR = "primer/a administrador/a de la suite";
 const APPLY = " Los cambios se aplican al presionar «Reintentar» en «Revisar».";
+const DROPPED = "Retirado/a: ya no está en la planilla";
 let register = null;
 let selected = null;
 let map = null;
@@ -228,8 +229,9 @@ async function keepTeams() {
 }
 
 // The people the uploaded spreadsheet loads, each with the box «Retirar» takes, or each of its errors by line, and the
-// groups it may name. The first administrator is not retired.
-function showPeople({groups, people, errors, retired}) {
+// groups it may name. The first administrator is not retired; a person a corrected spreadsheet drops once the install
+// made their account is.
+function showPeople({groups, people, errors, retired, dropped}) {
   $("people-groups").replaceChildren(...Object.entries(groups).map(([id, name]) => element("li", `${id}: ${name}`)));
   $("people-errors").replaceChildren(...errors.map((error) => element("li", error)));
   $("people").replaceChildren(...people.map((person) => {
@@ -243,7 +245,7 @@ function showPeople({groups, people, errors, retired}) {
     node.append(label, element("span", [gone && "Retirado/a", person.user, person.email,
       person.groups.map((id) => groups[id]).join(", "), person.admin && ADMINISTRATOR].filter(Boolean).join(" · ")));
     return node;
-  }));
+  }), ...dropped.map((person) => item(person.name, "retired", `${DROPPED} · ${person.user}`)));
   $("retire").disabled = true;
   $("retire-confirm").hidden = true;
 }
@@ -346,6 +348,8 @@ async function revisar() {
         + (state.retired.includes(person.user) ? ", retirado/a" : "")))
       : [element("li", state.errors.length ? "La planilla del personal tiene errores: corríjala en «Equipos»"
         : "Sin planilla del personal")]));
+    $("summary-people").append(...state.dropped.map(
+      (person) => element("li", `${person.name} (${person.user}), ${DROPPED.toLowerCase()}`)));
     $("summary-cargo").replaceChildren(...state.cargo_accounts.map(
       (account) => element("li", `${account.name} (${account.user})`)));
     $("summary-components").replaceChildren(...state.components.map((name) => element("li", name)));
