@@ -129,8 +129,9 @@ if recording and "nextcloud-aio-talk-recording:1234" not in occ("config:app:get 
     sys.exit("AIO runs Talk's recording server, but Talk does not hold it")
 
 version = json.loads(occ("app:list --output=json"))["enabled"].get("spreed")
-if not version or occ("integrity:check-app --output=json spreed").strip() != "[]":
-    sys.exit(f"Talk ({version or 'not enabled'}) is not the app store's official, unmodified app")
+integrity = occ("integrity:check-app --output=json spreed").strip()  # the files that differ from the signature
+if not version or integrity != "[]":
+    sys.exit(f"Talk ({version or 'not enabled'}) is not the app store's official, unmodified app: {integrity}")
 print(f"Talk {version}: the app store's signature verifies each of its files")
 
 password = os.environ["TEST_PASSWORD"]  # both staff members'; run.sh masked it
