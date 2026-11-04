@@ -25,13 +25,19 @@ BUNDLE_SHA256=""
 # memory and disk over the whole run; cores in the busiest minute after «Listo» (the stages after 17-install in
 # peaks.txt), as the install takes every core it gets and only runs longer on fewer. A run counts only if it is green
 # with no OOM kill and almost no full memory stall; otherwise raise MIN_MEMORY_GIB (it sizes the acceptance VM) and
-# measure again. Until a run has measured them: the old installer's memory and disk floors and two cores. Talk
-# recording's threshold is these plus one recording (aps/provisionador/steps/components.py).
-# Memory is MemTotal rounded to the nearest GiB: the kernel keeps part of the memory for itself (a 6 GiB machine reports
-# about 5.8 GiB), so a machine with the floor's memory passes and one more than half a GiB short is refused.
+# measure again. Release run 41927261032 (4 cores, MemTotal 5.80 GiB) measured:
+#   memory  4.50 GiB: 4.50 × 1.25 = 5.6, so 6 GiB.
+#   cores   0.58 after «Listo», too thin a measure to go below the 2 the install keeps busy (1.97), so 2.
+#   disk    17.1 GB, plus AIO's first nightly backup to the backup folder on the same disk: at most the 1.8 GB all the
+#           suite's volumes hold after an install (docker system df, run 41907427126), and the 2 GB borg keeps free
+#           (additional_free_space, Containers/borgbackup/backupscript.sh): (17.1 + 1.8 + 2) × 1.25 = 26.1, so 27 GB.
+# Talk recording's threshold is these plus one recording (aps/provisionador/steps/components.py).
+# Memory is MemTotal rounded up to a whole GiB, here as in the Provisionador and the acceptance checks: the kernel keeps
+# part of the memory for itself (a 6 GiB machine reports about 5.8 GiB, about 5.35 GiB when kdump reserves 512 MiB), so
+# a machine passes when it reports more than the floor less 1 GiB, and a 5 GiB machine is refused.
 MIN_MEMORY_GIB=6
 MIN_CPUS=2
-MIN_DISK_GB=20
+MIN_DISK_GB=27
 
 REPO_URL=https://github.com/APS-Conecta/gestion-aio
 INSTALL_DIR=/opt/aps-conecta/gestion
@@ -52,7 +58,7 @@ check_host() {
   local gaps=() arch memory_gib cpus disk_dir disk_gb
   arch="$(uname -m)"
   [ "$arch" = x86_64 ] || gaps+=("la arquitectura del procesador es $arch; se requiere x86_64")
-  memory_gib=$(( ($(awk '/^MemTotal:/ {print $2}' /proc/meminfo) + 524288) / 1048576 ))
+  memory_gib=$(( ($(awk '/^MemTotal:/ {print $2}' /proc/meminfo) + 1048575) / 1048576 ))
   [ "$memory_gib" -ge "$MIN_MEMORY_GIB" ] \
     || gaps+=("tiene $memory_gib GiB de memoria; se requieren al menos $MIN_MEMORY_GIB GiB")
   cpus="$(nproc)"

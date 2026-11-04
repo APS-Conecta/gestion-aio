@@ -262,6 +262,7 @@ jobs:
     permissions: {}
     env:
       RELEASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.images.outputs.tag }}
+      UBUNTU: ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
     steps:
       - name: An arm64 machine with 1 CPU, 2 GiB of memory and 1 GB of disk
         run: |
@@ -269,8 +270,7 @@ jobs:
           printf 'MemTotal:        2097152 kB\n' > meminfo
           rc=0
           docker run --rm --cpuset-cpus 0 --tmpfs /var/lib:size=1g \
-            --volume "$PWD/meminfo:/proc/meminfo:ro" --volume "$PWD/install.sh:/install.sh:ro" \
-            ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 \
+            --volume "$PWD/meminfo:/proc/meminfo:ro" --volume "$PWD/install.sh:/install.sh:ro" "$UBUNTU" \
             bash -c 'bash /install.sh; rc=$?
               [ ! -e /opt/aps-conecta ] && [ ! -e /etc/apt/sources.list.d/docker.sources ] \
                 || { echo "the host was changed" >&2; exit 99; }
@@ -283,3 +283,23 @@ jobs:
           grep -q "tiene 2 GiB de memoria; se requieren al menos $(floor MIN_MEMORY_GIB) GiB$" refused.log
           grep -q "tiene 1 núcleo(s) de CPU; se requieren al menos $(floor MIN_CPUS)$" refused.log
           grep -q "GB libres en /var/lib; se requieren al menos $(floor MIN_DISK_GB) GB$" refused.log
+      - name: Memory rounds up, so the floor's machine passes with kdump's 512 MiB reserved, and 1 GiB less does not
+        run: |
+          floor="$(sed -n 's/^MIN_MEMORY_GIB=\([0-9][0-9]*\)$/\1/p' install.sh)"
+          [ -n "$floor" ]
+          refusal() { # <MemTotal in kB>: what the bootstrap prints on this arm64 machine (refused for its architecture)
+            printf 'MemTotal: %s kB\n' "$1" > meminfo
+            docker run --rm --volume "$PWD/meminfo:/proc/meminfo:ro" --volume "$PWD/install.sh:/install.sh:ro" \
+              "$UBUNTU" bash /install.sh 2>&1 || true
+          }
+          # the floor's machine less kdump's 512 MiB and about 150 MiB the kernel keeps: about 5.35 GiB for 6
+          kdump="$(refusal $(( floor * 1048576 - 524288 - 153600 )))"
+          echo "$kdump"
+          grep -q 'No se modificó nada' <<< "$kdump"
+          if grep -q 'de memoria' <<< "$kdump"; then
+            echo "::error::the floor's machine with kdump was refused for its memory"
+            exit 1
+          fi
+          short="$(refusal $(( (floor - 1) * 1048576 )))"
+          echo "$short"
+          grep -q "tiene $(( floor - 1 )) GiB de memoria; se requieren al menos $floor GiB$" <<< "$short"
