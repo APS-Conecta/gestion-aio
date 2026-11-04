@@ -33,8 +33,8 @@ code { font-size: .8rem; overflow-wrap: anywhere; }
 /* «Centro»: the filters, the result list and the map. */
 .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; margin-bottom: 1rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-weight: 600; }
-select, input { font: inherit; padding: .45rem .6rem; border: 1px solid var(--aps-border); border-radius: var(--radius); background: var(--aps-paper); color: inherit; }
-select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-violet); outline-offset: 1px; }
+select, input, textarea { font: inherit; padding: .45rem .6rem; border: 1px solid var(--aps-border); border-radius: var(--radius); background: var(--aps-paper); color: inherit; }
+select:focus, input:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--aps-violet); outline-offset: 1px; }
 .columns { display: grid; grid-template-columns: minmax(18rem, 1fr) minmax(20rem, 1.3fr); gap: 1.5rem; align-items: start; }
 .results { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; border: 1px solid var(--aps-border); border-radius: var(--radius); }
 .results:empty { display: none; }
@@ -53,6 +53,9 @@ select:focus, input:focus, button:focus-visible { outline: 2px solid var(--aps-v
 /* «Dirección»: the name, which the operator reads but does not edit. */
 .address { font: 600 1.2rem var(--aps-font-display); overflow-wrap: anywhere; margin: 0; }
 .address a { color: var(--aps-violet-dark); }
+
+/* «Equipos»: a sector or program per line. */
+textarea { resize: vertical; }
 
 /* «Revisar»: the summary, then each step's progress, the failed and waiting ones in red with their reason, and each
    container's. */
