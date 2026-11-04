@@ -1607,8 +1607,8 @@ class Branding(InstallTest):
         texts = {path: json.loads(data)["translations"] for path, data in self.theme.items()
                  if path.endswith("/l10n/es.json")}
         self.assertLessEqual({"core/l10n/es.json", "apps/settings/l10n/es.json", "custom_apps/spreed/l10n/es.json",
-                              "custom_apps/files_antivirus/l10n/es.json", "custom_apps/fulltextsearch/l10n/es.json"},
-                             set(texts))
+                              "custom_apps/files_antivirus/l10n/es.json", "custom_apps/fulltextsearch/l10n/es.json",
+                              "custom_apps/eurooffice/l10n/es.json"}, set(texts))
         said = [value for translations in texts.values() for value in translations.values()]
         self.assertFalse([value for value in said if "Nextcloud" in str(value)])
         welcome = [v for k, v in texts["custom_apps/spreed/l10n/es.json"].items() if k.startswith("# Welcome to")]
