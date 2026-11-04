@@ -6,22 +6,30 @@ pins after verifying them itself: the wizard's, by the fingerprint the one comma
 one, read from the machine. No check ignores certificate errors.
 
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
+
+It also gives what checks read on the machine (AIO's configuration, the suite's name), makes staff accounts and
+sends a staff member's own requests to Nextcloud, trusting the staging roots alone.
 """
 
 import base64
 import contextlib
 import hashlib
+import json
 import os
 import re
 import ssl
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
+AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its configuration and its other files
+NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
 
 
 def machine(command, stdin=""):
@@ -55,6 +63,51 @@ def wizard_link(output):
         sys.exit("no one-time link and certificate fingerprint were printed")
     print(f"::add-mask::{links[-1].rsplit('#', 1)[1]}", flush=True)
     return links[-1], printed[-1]
+
+
+def aio_file(name):
+    """One of AIO's files on the machine, as its mastercontainer holds it."""
+    return machine(f"sudo docker exec nextcloud-aio-mastercontainer cat {AIO_DATA}/{name}")
+
+
+def aio_config():
+    """AIO's configuration on the machine, with its passphrase and secrets, which a check keeps in memory, unprinted."""
+    return json.loads(aio_file("configuration.json"))
+
+
+def occ(command, stdin=""):
+    """What Nextcloud's command line printed for `command`, its arguments as one shell command line."""
+    return machine(f"{NEXTCLOUD} php occ --no-ansi {command}", stdin)
+
+
+def suite_name():
+    """The suite's name, which «Dirección» claimed: AIO's domain."""
+    name = aio_config().get("domain")
+    if not name:
+        sys.exit("the suite has no name: «Dirección» claimed none")
+    return name
+
+
+def person(user, display_name):
+    """A new staff account, made with occ with the run's test password (run.sh masks it), on stdin only; its password."""
+    password = os.environ["TEST_PASSWORD"]
+    machine(f"{NEXTCLOUD} sh -c 'read -r OC_PASS && export OC_PASS && "
+            f"php occ user:add --password-from-env --display-name \"{display_name}\" {user}'", stdin=f"{password}\n")
+    return password
+
+
+def as_person(user, password, method, url, body=None, headers=None):
+    """The status and body Nextcloud answers at `url` to a request the person's own client makes with their password,
+    over TLS that trusts the staging roots alone."""
+    login = base64.b64encode(f"{user}:{password}".encode()).decode()
+    request = urllib.request.Request(url, body, {"Authorization": f"Basic {login}", "OCS-APIRequest": "true",
+                                                 **(headers or {})}, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=120,
+                                    context=ssl.create_default_context(cafile=STAGING_ROOTS)) as answer:
+            return answer.status, answer.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
 
 
 def spki(pem):
