@@ -9,19 +9,16 @@ audio. Talk's signaling runs at wss://<name>/standalone-signaling/, and the TURN
 the app store's signature verifies each of its files. Talk recording is on exactly when the machine passes the
 recording threshold, and Talk then holds AIO's recording server."""
 
-import base64
 import json
 import os
 import re
-import ssl
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import NEXTCLOUD, STAGING_ROOTS, aio_config, chromium, hardware, machine, occ, suite_name  # noqa: E402
+from browser import aio_config, as_person, chromium, hardware, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 from steps.components import RECORDING, chosen  # noqa: E402
 
@@ -134,18 +131,15 @@ if not version or integrity:
     sys.exit(f"Talk ({version or 'not enabled'}) is not the app store's official, unmodified app: {integrity}")
 print(f"Talk {version}: the app store's signature verifies each of its files")
 
-password = os.environ["TEST_PASSWORD"]  # both staff members'; run.sh masked it
-for user in STAFF:  # the password arrives on stdin, never on a command line
-    machine(f"{NEXTCLOUD} sh -c 'read -r OC_PASS; export OC_PASS; exec php occ user:add --password-from-env {user}'",
-            password + "\n")
+for user in STAFF:
+    password = person(user, user)  # its username as its display name, as Nextcloud shows an account without one
     occ(f"user:setting {user} firstrunwizard show 999.0.0")  # no first-run wizard over Talk's page
-basic = base64.b64encode(f"{STAFF[0]}:{password}".encode()).decode()
-request = urllib.request.Request(f"{suite}/ocs/v2.php/apps/spreed/api/v4/room", method="POST",
-                                 data=json.dumps({"roomType": 1, "invite": STAFF[1]}).encode(),
-                                 headers={"Authorization": f"Basic {basic}", "OCS-APIRequest": "true",
-                                          "Accept": "application/json", "Content-Type": "application/json"})
-with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=STAGING_ROOTS), timeout=30) as answer:
-    token = json.load(answer)["ocs"]["data"]["token"]
+status, body = as_person(STAFF[0], password, "POST", f"{suite}/ocs/v2.php/apps/spreed/api/v4/room",
+                         json.dumps({"roomType": 1, "invite": STAFF[1]}).encode(),
+                         {"Accept": "application/json", "Content-Type": "application/json"})
+if status not in (200, 201):  # 201: a new conversation; 200: the one-to-one one already exists
+    sys.exit(f"{STAFF[0]} does not open a conversation with {STAFF[1]}: HTTP {status}")
+token = json.loads(body)["ocs"]["data"]["token"]
 
 sockets, pages = [], []
 with chromium(media=True) as browser:

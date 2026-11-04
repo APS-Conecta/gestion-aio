@@ -8,8 +8,9 @@ fake camera and a microphone that plays a steady tone.
 
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
-It also gives what checks read on the machine (AIO's configuration, the suite's name), makes staff accounts and
-sends a staff member's own requests to Nextcloud, trusting the staging roots alone.
+It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
+files, and the first password the passwords file lists for an account), makes staff accounts and sends a staff
+member's own requests to Nextcloud, trusting the staging roots alone.
 """
 
 import base64

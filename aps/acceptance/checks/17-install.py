@@ -17,15 +17,11 @@ other optional one off (Talk recording follows the hardware: 70-talk checks it) 
 folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO
 keeps it in."""
 
-import base64
 import json
 import os
-import ssl
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -33,7 +29,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
 import teams  # noqa: E402
-from browser import STAGING_ROOTS, aio_config, aio_file, chromium, hardware, machine, suite_name, verified  # noqa: E402
+from browser import aio_config, aio_file, as_person, chromium, hardware, machine, suite_name, verified  # noqa: E402
 from browser import STORED, first_password, provisionador_file, provisionador_state, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
@@ -67,15 +63,13 @@ def store(user, deadline):
     """`user` stores STORED in their own files at the suite's name with the first password the passwords file lists,
     once the suite answers there with its certificate."""
     password = first_password(provisionador_file(FILE), user) or sys.exit(f"the passwords file does not list {user}")
-    basic = base64.b64encode(f"{user}:{password}".encode()).decode()
-    request = urllib.request.Request(f"{suite}/remote.php/dav/files/{user}/{quote(STORED)}", data=user.encode(),
-                                     method="PUT", headers={"Authorization": f"Basic {basic}"})
     while True:
         try:
-            with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=STAGING_ROOTS), timeout=60):
-                return
-        except urllib.error.HTTPError as error:
-            sys.exit(f"{user} does not store {STORED} in their files at {suite}: HTTP {error.code}")
+            status, _ = as_person(user, password, "PUT", f"{suite}/remote.php/dav/files/{user}/{quote(STORED)}",
+                                  user.encode())
+            if status not in (201, 204):  # 204: a retry after a PUT that timed out but stored it
+                sys.exit(f"{user} does not store {STORED} in their files at {suite}: HTTP {status}")
+            return
         except OSError as error:
             if time.monotonic() > deadline:
                 sys.exit(f"{suite} does not answer with its certificate, so {user} stores no file: {error}")
