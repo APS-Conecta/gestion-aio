@@ -501,7 +501,8 @@ class FakeSuite:
         self.credential = None  # the stored claim
         self.domain = None  # the name AIO is set to
         self.published = []  # the inside addresses published
-        self.users = {"admin": {"name": "admin", "password": self.ADMINISTRATOR}}  # each account, by its username
+        # Each account, by its username.
+        self.users = {"admin": {"name": "admin", "password": self.ADMINISTRATOR, "enabled": True}}
         self.groups = {"admin": {"name": "admin", "members": {"admin"}}}  # each group, by its id: its name and members
         self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
         self.answering = True  # whether the suite's reverse proxy answers at its name
@@ -701,10 +702,13 @@ class FakeSuite:
             if args[1] in self.groups:
                 raise failed
             self.groups[args[1]] = {"name": args[0].removeprefix("--display-name="), "members": set()}
-        elif command == "group:adduser" and len(args) == 2:
+        elif command in ("group:adduser", "group:removeuser") and len(args) == 2:
             if args[0] not in self.groups or args[1] not in self.users:
                 raise failed
-            self.groups[args[0]]["members"].add(args[1])
+            if command == "group:adduser":
+                self.groups[args[0]]["members"].add(args[1])
+            else:
+                self.groups[args[0]]["members"].discard(args[1])
         elif (command, args) == ("groupfolders:list", ("--output=json",)):
             return json.dumps([{"id": id_, "mountPoint": folder["mount"], "groups_list": folder["groups"] or []}
                                for id_, folder in self.group_folders.items()])
@@ -736,16 +740,28 @@ class FakeSuite:
 
     def _users(self, command, *args):
         """occ's accounts, as the people step reads and sets them: Nextcloud keeps an email trimmed and in lower case,
-        and refuses a display name the account already has."""
+        and refuses a display name the account already has. occ reads a word that starts with «-» as an option, and
+        fails on one it does not know, unless «--» came before it."""
+        failed = Unreachable(OCC_FAILED.format(" ".join((command, *args))))
         if (command, args) == ("user:list", ("--info", "--limit=0", "--output=json")):
             return json.dumps({uid: {"display_name": user["name"], "email": user.get("email", ""),
+                                     "enabled": user["enabled"],
                                      "groups": sorted(g for g, group in self.groups.items() if uid in group["members"])}
                                for uid, user in self.users.items()})
+        if command == "user:disable" and len(args) == 1:
+            if args[0] not in self.users:
+                raise failed
+            self.users[args[0]]["enabled"] = False
+            return ""
+        ends = args.index("--") if "--" in args else len(args)
+        if any(arg.startswith("-") for arg in args[:ends]):
+            raise failed
+        args = args[:ends] + args[ends + 1:]
         if command == "user:setting" and len(args) == 4 and args[1:3] in (("settings", "email"),
                                                                         ("settings", "display_name")):
             user, _, key, value = args
             if user not in self.users or key == "display_name" and value in ("", self.users[user]["name"]):
-                raise Unreachable(OCC_FAILED.format(" ".join((command, *args))))
+                raise failed
             if key == "email":
                 self.users[user]["email"] = value.strip().lower()
             else:
@@ -760,7 +776,7 @@ class FakeSuite:
 
     def add_user(self, user, name, password):
         self._outage_guard("nextcloud")
-        self.users.setdefault(user, {"name": name, "password": password})
+        self.users.setdefault(user, {"name": name, "password": password, "enabled": True})
 
     def seed(self, folder, files):
         self._outage_guard("nextcloud")

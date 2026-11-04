@@ -5,39 +5,51 @@
 to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the blank
 people spreadsheet, uploads it filled in as Excel saves it and sees the people the install will create, then to
 «Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the components and the
-backups; «Instalar» shows each
-step and, once AIO runs our components, each container's progress live until «Listo» shows the suite's address. There
-the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's first
-password and AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's answer,
-the router change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after
+backups; «Instalar» shows each step and, once AIO runs our components, each container's progress live. Meanwhile the
+operator goes back to «Equipos», ticks a person who left and presses «Retirar», then confirms: the install applies the
+people as they were at «Instalar», so that person can still store a file in their own files, and stops with the people
+step red until «Reintentar» applies «Retirar» (48-retire checks the person). Then «Listo» shows the suite's address.
+There the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's
+first password and AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's
+answer, the router change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after
 «Instalar»). AIO reports our components on, every other optional one off and nightly backups to the backup folder.
 AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO keeps
 it in."""
 
+import base64
 import json
 import os
+import re
+import ssl
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
 import teams  # noqa: E402
-from browser import aio_config, aio_file, chromium, machine, suite_name, verified, wizard_link  # noqa: E402
+from browser import STAGING_ROOTS, aio_config, aio_file, chromium, machine, suite_name, verified  # noqa: E402
+from browser import wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import COMPONENTS  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
+from steps.people import CHANGED, NAME as ACCOUNTS  # noqa: E402
 
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
-# As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people.
+# As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people but the one retired.
 PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
           "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;sector-norte role-enfermeria;sí\r\n"
-          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur prog-cardiovascular role-medico;no\r\n")
+          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur prog-cardiovascular role-medico;no\r\n"
+          "luis.vera;Luis;Vera Soto;luis.vera@example.org;sector-norte role-tens-procedimientos;no\r\n")
+RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
+STORED = "Antes de retirarse.txt"  # what he stores in his own files first, his username as its text; 48-retire reads it
 CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": True, "isTalkRecordingEnabled": False,
@@ -45,6 +57,33 @@ SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnab
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the passwords file's root-only copy
 KEPT = f"{FOLDER}/{FILE}"
+
+
+def red(page):
+    """Each failed or waiting step on «Revisar», with its reason."""
+    return page.eval_on_selector_all("#steps li[data-state=failed], #steps li[data-state=waiting]",
+                                     "items => items.map(i => [i.querySelector('strong').textContent, "
+                                     "i.querySelector('p')?.textContent])")
+
+
+def store(user, deadline):
+    """`user` stores STORED in their own files at the suite's name with the first password the passwords file lists,
+    once the suite answers there with its certificate."""
+    listed = re.search(rf"\n  Usuario: {re.escape(user)}\n  Contraseña: (\S+)\n", machine(f"sudo cat {KEPT}"))
+    password = (listed or sys.exit(f"the passwords file does not list {user}"))[1]
+    basic = base64.b64encode(f"{user}:{password}".encode()).decode()
+    request = urllib.request.Request(f"{suite}/remote.php/dav/files/{user}/{quote(STORED)}", data=user.encode(),
+                                     method="PUT", headers={"Authorization": f"Basic {basic}"})
+    while True:
+        try:
+            with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=STAGING_ROOTS), timeout=60):
+                return
+        except urllib.error.HTTPError as error:
+            sys.exit(f"{user} does not store {STORED} in their files at {suite}: HTTP {error.code}")
+        except OSError as error:
+            if time.monotonic() > deadline:
+                sys.exit(f"{suite} does not answer with its certificate, so {user} stores no file: {error}")
+            time.sleep(10)
 
 
 centre = json.loads(machine(f"sudo cat {FOLDER}/state.json"))["centre"]  # as 15-wizard chose it
@@ -91,14 +130,30 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
 
     page.route(dropped, lambda route: route.abort("namenotresolved"))  # a resolver that drops the name's answer
     page.click("#install")
+    expect(page.locator("#steps li")).not_to_have_count(0)
+    page.click(".step-link[data-step=equipos]")
+    page.check(f"#people input[value='{RETIRED}']")
+    page.click("#retire")
+    leaving = next(person["name"] for person in people if person["user"] == RETIRED)
+    expect(page.locator("#retire-question")).to_contain_text(leaving)
+    page.click("#retire-yes")
+    expect(page.locator("#people li[data-state=retired] strong")).to_have_text([leaving])
+    page.screenshot(path=evidence / "retirar.png")
+    page.click("#teams-continue")
     seen = {}  # each container's states, in the order the page showed them
-    deadline = time.monotonic() + 12 * 60
+    deadline, stored = time.monotonic() + 12 * 60, False
     while not page.locator("#listo").is_visible():
         for container, state in page.eval_on_selector_all(
                 "#progress li", "items => items.map(i => [i.querySelector('strong').textContent, i.dataset.state])"):
             if seen.setdefault(container, [state])[-1] != state:
                 seen[container].append(state)
-        if page.locator("#install").is_visible() or time.monotonic() > deadline:
+        if page.locator("#install").is_visible() and not stored and red(page) == [[ACCOUNTS, CHANGED]]:
+            page.screenshot(path=evidence / "retirar-reintentar.png")
+            store(RETIRED, deadline)
+            stored = True
+            print(f"{RETIRED} stored {STORED}; «Reintentar» applies «Retirar»")
+            page.click("#install")
+        elif page.locator("#install").is_visible() or time.monotonic() > deadline:
             page.screenshot(path=evidence / "revisar-failed.png")
             sys.exit(f"no «Listo» within 12 minutes: {page.inner_text('#install-status')}\n{page.inner_text('#steps')}")
         if {"running", "stopped"} <= {s[-1] for s in seen.values()} and not (evidence / "progress.png").exists():
