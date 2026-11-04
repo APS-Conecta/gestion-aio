@@ -19,7 +19,7 @@
 # A check never prints a secret, not even to mask it: run.sh masks the ones it knows before the checks run.
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
-# Provisionador's journal (the name's credential, AIO's passphrase and the administrator's password blanked out) and
+# Provisionador's journal (the name's credential, AIO's passphrase, its secrets and the first passwords blanked out) and
 # the disk usage, and the workflow attaches it to the run. The check that has the wizard claim a CI name writes its
 # DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it.
 # Usage: run.sh <tag>
@@ -35,23 +35,30 @@ TEST_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr '+/' '-_')"
 printf '::add-mask::%s\n' "$TEST_PASSWORD"
 export TEST_PASSWORD
 
-password="" passphrase="" administrator="" first=()
+password="" passphrase="" masked=()
 secret() { # <variable> <command> [<jq filter>]: the secret the filter (.password by default) finds in the JSON the
   # command prints on the machine, masked in the log once found
   [ -z "${!1}" ] || return 0
   printf -v "$1" '%s' "$("$MACHINE" "$2" 2> /dev/null | jq -r "${3:-.password} // empty" 2> /dev/null || true)"
   [ -z "${!1}" ] || printf '\n::add-mask::%s\n' "${!1}"
 }
-mask_secrets() { # once «Dirección» claimed the name: its credential, AIO's passphrase and, once AIO made it, the
-  # administrator's first password, each on a line of its own; then each first password the install recorded so far
-  local aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json' found
+each() { # <command> <jq filter>: each value the filter finds in the JSON the command prints on the machine, masked in
+  # the log once found
+  local found
+  while IFS= read -r found; do
+    [[ -z "$found" || " ${masked[*]} " == *" $found "* ]] && continue
+    masked+=("$found")
+    printf '\n::add-mask::%s\n' "$found"
+  done < <("$MACHINE" "$1" 2> /dev/null | jq -r "$2" 2> /dev/null || true)
+}
+mask_secrets() { # once «Dirección» claimed the name: its credential, AIO's passphrase and, once AIO made them, its
+  # passwords and secrets (the administrator's first password among them), each on a line of its own; then each first
+  # password the install recorded so far
+  local aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
   secret password 'sudo cat /var/lib/aps-conecta/name-service.json'
   secret passphrase "$aio"
-  secret administrator "$aio" '.secrets.NEXTCLOUD_PASSWORD'
-  while IFS= read -r found; do
-    [ -z "$found" ] || [[ " ${first[*]} " == *" $found "* ]] || { first+=("$found"); printf '\n::add-mask::%s\n' "$found"; }
-  done < <("$MACHINE" 'sudo cat /var/lib/aps-conecta/provisionador/first-passwords.json' 2> /dev/null \
-    | jq -r '.[].password // empty' 2> /dev/null || true)
+  each "$aio" '.secrets // {} | to_entries[] | select(.key | test("PASSWORD|SECRET")) | .value | strings'
+  each 'sudo cat /var/lib/aps-conecta/provisionador/first-passwords.json' '.[].password // empty'
 }
 collect() { # <dir>: every container's log and the Provisionador's journal, without the secrets mask_secrets finds,
   # and the disk usage
@@ -70,8 +77,7 @@ blanked() { # <command>: what it printed on the machine, without the secrets mas
   log="$("$MACHINE" "$1" 2>&1 || true)"
   [ -z "$password" ] || log="${log//"$password"/[credential]}"
   [ -z "$passphrase" ] || log="${log//"$passphrase"/[passphrase]}"
-  [ -z "$administrator" ] || log="${log//"$administrator"/[administrator]}"
-  for found in "${first[@]}"; do log="${log//"$found"/[first password]}"; done
+  for found in "${masked[@]}"; do log="${log//"$found"/[secret]}"; done
   printf '%s\n' "$log"
 }
 on_exit() { # a failure outside the checks names its stage and collects the same evidence

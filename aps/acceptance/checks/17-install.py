@@ -12,9 +12,9 @@ step red until «Reintentar» applies «Retirar» (48-retire checks the person).
 There the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's
 first password and AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's
 answer, the router change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after
-«Instalar»). AIO reports our components on, every other optional one off and nightly backups to the backup folder.
-AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO keeps
-it in."""
+«Instalar»). AIO reports our components on, every other optional one off (Talk recording follows the hardware:
+70-talk checks it) and nightly backups to the backup folder. AIO's passphrase reaches the browser only in the
+passwords file, and on the machine only root reads the file AIO keeps it in."""
 
 import base64
 import json
@@ -33,11 +33,11 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
 import teams  # noqa: E402
-from browser import STAGING_ROOTS, aio_config, aio_file, chromium, machine, suite_name, verified  # noqa: E402
+from browser import STAGING_ROOTS, aio_config, aio_file, chromium, hardware, machine, suite_name, verified  # noqa: E402
 from browser import wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
-from steps.components import COMPONENTS  # noqa: E402
+from steps.components import chosen  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 from steps.people import CHANGED, NAME as ACCOUNTS  # noqa: E402
 
@@ -50,9 +50,9 @@ PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
           "luis.vera;Luis;Vera Soto;luis.vera@example.org;sector-norte role-tens-procedimientos;no\r\n")
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 STORED = "Antes de retirarse.txt"  # what he stores in his own files first, his username as its text; 48-retire reads it
-CHOSEN = list(COMPONENTS.values())  # «Revisar» lists them, and the progress names their containers so
+CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
-            "isFulltextsearchEnabled": True, "isHarpEnabled": True, "isTalkRecordingEnabled": False,
+            "isFulltextsearchEnabled": True, "isHarpEnabled": True,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the passwords file's root-only copy
