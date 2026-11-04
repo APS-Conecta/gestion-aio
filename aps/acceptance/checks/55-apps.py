@@ -10,13 +10,12 @@ import sys
 from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
-from browser import machine  # noqa: E402
+from browser import machine, occ  # noqa: E402
 from steps.apps import LOCK, MANIFEST, OPTIONAL  # noqa: E402
 
 FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the lock file
 
-listed = json.loads(machine("sudo docker exec --user www-data nextcloud-aio-nextcloud php occ --no-ansi app:list "
-                            "--output=json"))
+listed = json.loads(occ("app:list --output=json"))
 ticked = set(json.loads(machine(f"sudo cat {FOLDER}/state.json")).get("optional", []))
 lock = json.loads(machine(f"sudo cat {FOLDER}/{LOCK}"))
 wrong = []
