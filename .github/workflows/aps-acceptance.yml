@@ -4,8 +4,8 @@
 # then every check module (aps/acceptance/run.sh documents their interface). The release pipeline calls
 # it for every test build and release candidate; a maintainer can dispatch it for any of them. A test build's
 # wizard claims a CI name, which the run releases at its end with APS's token. A release's claims the production
-# name of RELEASE_DEIS_CODE, a repository variable the owner sets, and gets a real certificate; the run releases
-# that name at its end with the name's own credential, and needs no Cloudflare token.
+# name of the register's hidden test establishment and gets a real certificate; the run releases that name at its
+# end with the name's own credential, and needs no Cloudflare token.
 name: APS acceptance
 
 on:
@@ -35,8 +35,8 @@ jobs:
     name: The one command on a fresh Debian 12 VM
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Every test build shares the name service's one CI deployment, and every release the production name of
-    # RELEASE_DEIS_CODE: one deploy-and-claim at a time.
+    # Every test build shares the name service's one CI deployment, and every release the test establishment's
+    # production name: one deploy-and-claim at a time.
     concurrency:
       group: aps-name-service-${{ startsWith(inputs.tag, 'v0.0.0-ci.') && 'ci' || 'production' }}
       cancel-in-progress: false
@@ -71,7 +71,6 @@ jobs:
         id: run
         env:
           TAG: ${{ inputs.tag }}
-          RELEASE_DEIS_CODE: ${{ vars.RELEASE_DEIS_CODE }}
         run: aps/acceptance/run.sh "$TAG"
       - name: Release the CI name the wizard claimed
         if: always() && env.TEST_BUILD == 'true' && steps.run.outputs.code != ''

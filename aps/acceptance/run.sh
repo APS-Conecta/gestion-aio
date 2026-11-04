@@ -16,7 +16,6 @@
 #   ADDRESS   the VM's address on the shared network, where the runner's browser reaches it
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
 #   TEST_PASSWORD  the password of each staff account a check makes for itself, masked in the log already
-#   RELEASE_DEIS_CODE  a release's only: the DEIS code whose production name its wizard claims (the owner's choice)
 # A check never prints a secret, not even to mask it: run.sh masks the ones it knows before the checks run.
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the

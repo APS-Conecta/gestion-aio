@@ -7,9 +7,8 @@
 # A release, dispatched from main with a new version (gh workflow run aps-release.yml --ref main -f version=v1.0.0),
 # needs no other step. Its candidate, built the same way for production's name service and Let's Encrypt with no
 # staging root, is published as a pre-release kept from «Latest»; the same checks run on it, the acceptance run with
-# a real certificate for the production name of RELEASE_DEIS_CODE, a repository variable the owner sets (a release
-# refuses to start without it). Only once every check passed does the candidate become the release «Latest», which the
-# one command installs:
+# a real certificate for the production name of the register's hidden test establishment (aps/deis/). Only once every
+# check passed does the candidate become the release «Latest», which the one command installs:
 #   curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/latest/download/install.sh | sudo bash
 # A candidate that did not pass is withdrawn with its tag. aps/gates/release.py holds this workflow to these rules.
 name: APS release
@@ -73,7 +72,6 @@ jobs:
           COMMIT: ${{ github.sha }}
           TEST_TAG: v0.0.0-ci.${{ github.run_number }}
           VERSION: ${{ inputs.version }}
-          CODE: ${{ vars.RELEASE_DEIS_CODE }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$VERSION" ]; then
@@ -81,8 +79,6 @@ jobs:
             [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::A release is cut from main, not $GITHUB_REF."; exit 1; }
             ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --silent 2> /dev/null \
               || { echo "::error::$VERSION exists already."; exit 1; }
-            [ -n "$CODE" ] || { echo "::error::The repository variable RELEASE_DEIS_CODE is not set: the owner names the" \
-              "DEIS code whose production name a release's acceptance run claims, then releases. Nothing was built."; exit 1; }
           fi
           printf 'tag=%s\ncommit=%s\n' "${VERSION:-$TEST_TAG}" "$COMMIT" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

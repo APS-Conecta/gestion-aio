@@ -2,11 +2,12 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The one-time link the one command printed opens the wizard in a browser that trusts the wizard's certificate
-because its fingerprint is the printed one. The operator reaches «Centro» and chooses a centre, picked by the run
-so concurrent runs claim different names, or a release's RELEASE_DEIS_CODE; «Dirección» shows the centre's name from
-the slug table, under the name service the build uses (a test build the CI deployment, a release production), with
-nothing to edit, claims it by itself and says so. The claim's credential is stored root-only on the machine (run.sh
-masks it). The DEIS code goes to $GITHUB_OUTPUT before the claim, so the run releases it."""
+because its fingerprint is the printed one. The operator reaches «Centro». A test build's run chooses a centre there,
+picked so concurrent runs claim different names under the name service's CI deployment. A release's run claims a
+production name, so it never takes a real establishment's: it sends the register's test establishment, which «Centro»
+never lists, to the wizard's API, and the page resumes at «Dirección». «Dirección» shows the centre's name from the
+slug table, with nothing to edit, claims it by itself and says so. The claim's credential is stored root-only on the
+machine (run.sh masks it). The DEIS code goes to $GITHUB_OUTPUT before the claim, so the run releases it."""
 
 import json
 import os
@@ -27,15 +28,14 @@ if services["url"] != NAME_SERVICE:
     sys.exit(f"{os.environ['TAG']} claims names from {services['url']}, not from {NAME_SERVICE}")
 register = deis.Register(deis.newest(REPO / "aps" / "deis"))
 slugs = deis.slugs(register.rows)
-codes = sorted(slugs)
 if TEST_BUILD:
+    codes = sorted(r["codigo"] for r in register.listed)
     turn = int(os.environ["GITHUB_RUN_ID"]) + int(os.environ["GITHUB_RUN_ATTEMPT"]) + len(codes) // 2
     code = codes[turn % len(codes)]
-else:  # the code the owner set aside for releases, whose name no establishment uses
-    code = os.environ.get("RELEASE_DEIS_CODE", "")
-    if code not in slugs:
-        sys.exit("a release claims the production name of RELEASE_DEIS_CODE, the repository variable the owner sets: "
-                 + (f"{code} is not a code of the DEIS register" if code else "it is not set"))
+elif len(register.tests) == 1:
+    code = register.tests[0]
+else:
+    sys.exit(f"a release claims the test establishment's name, and the register has {len(register.tests)}, not one")
 row, name = register.by_code[code], f"{slugs[code]}.{services['suffix']}"
 
 link, printed = wizard_link(Path(os.environ["CONSOLE"]).read_text(encoding="utf-8"))
@@ -43,18 +43,33 @@ url = urlsplit(link)
 if url.hostname != os.environ["ADDRESS"]:
     sys.exit(f"the printed link points at {url.hostname}, not at the machine's address {os.environ['ADDRESS']}")
 evidence = Path(os.environ["EVIDENCE"])
+# The wizard's own request for a centre, from the page and its session.
+CENTRE = """code => fetch('/api/centre', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                      body: JSON.stringify({code})}).then(r => r.status)"""
+
+
+def releasable():
+    """The run releases the code's name whatever happens next: the claim is about to start."""
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+        output.write(f"code={code}\n")
 
 with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     page.goto(link)
     expect(page.get_by_role("heading", name="Centro")).to_be_visible()
-    page.select_option("#search [name=region]", row["region_codigo"])
-    page.select_option("#search [name=comuna]", row["comuna_codigo"])
-    page.fill("#search [name=name]", row["nombre"])
-    page.click(f'#results button[data-code="{code}"]')
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-        output.write(f"code={code}\n")
-    page.click("#confirm")
+    if TEST_BUILD:
+        page.select_option("#search [name=region]", row["region_codigo"])
+        page.select_option("#search [name=comuna]", row["comuna_codigo"])
+        page.fill("#search [name=name]", row["nombre"])
+        page.click(f'#results button[data-code="{code}"]')
+        releasable()
+        page.click("#confirm")
+    else:
+        releasable()
+        status = page.evaluate(CENTRE, code)
+        if status != 200:
+            sys.exit(f"the wizard's API answers {status} to the test establishment")
+        page.reload()
     expect(page.get_by_role("heading", name="Dirección")).to_be_visible()
     expect(page.locator("#address-name")).to_have_text(name)
     expect(page.locator("#direccion input")).to_have_count(0)

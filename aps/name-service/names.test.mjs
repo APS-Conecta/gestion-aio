@@ -4,6 +4,8 @@
 // Fixture codes only: the DEIS-code gate proves no real register code is named here.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fakeCloudflare, fakeStorage } from "./fakes.mjs";
 import { nameService } from "./names.mjs";
@@ -123,6 +125,17 @@ test("a code outside the register, or a claim that is not one code, is refused",
   }
   assert.equal((await names.post("/claim", { code: "999001", name: "otro" })).status, 400);
   assert.equal(names.storage.data.size, 0);
+});
+
+test("the slug table deploy.sh bundles holds the hidden test establishment, so production claims its name", async () => {
+  const repo = new URL("../../", import.meta.url);
+  const tests = readFileSync(new URL("aps/deis/establecimientos-prueba.csv", repo), "utf8").trim().split("\n").slice(1);
+  assert.equal(tests.length, 1, "one test establishment");
+  const code = tests[0].split(",")[0];
+  const table = JSON.parse(execFileSync("python3", ["-I", "aps/provisionador/deis.py", "slugs"], { cwd: repo }));
+  const { status, body } = await deployment({ table }).claim(code);
+  assert.equal(status, 201, body.error);
+  assert.equal(body.name, "cesfam-prueba-aps-conecta.gestion.apsconecta.cl");
 });
 
 test("storage keeps only a hash of the credential", async () => {

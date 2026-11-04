@@ -3,8 +3,10 @@
 """The DEIS register: the public primary-care establishments, one of which is this install's centre.
 
 The register is aps/deis/establecimientos-deis-<date>.csv; the date in its name is its provenance.
-Run as `deis.py slugs [<directory>]`, it prints the slug table (DEIS code to slug, as JSON) that the
-name service bundles, and fails when two codes share a slug.
+Beside it, establecimientos-prueba.csv holds APS Conecta's test establishment, in the same columns, under a code
+outside DEIS's: it has a name and the API takes its code, as a release's acceptance run sends it, but the search
+never lists it. Run as `deis.py slugs [<directory>]`, it prints the slug table (DEIS code to slug, as JSON) that the
+name service bundles, and fails when two codes share a slug or a test establishment has a DEIS code.
 """
 
 import argparse
@@ -30,6 +32,7 @@ TYPES = {
     "CGR": "Consultorio General Rural",
 }
 SEARCH_LIMIT = 50
+TESTS = "establecimientos-prueba.csv"  # beside the register: test establishments, hidden from the search
 
 
 def fold(text):
@@ -113,19 +116,29 @@ def centre(row, moved=None):
             "timezone": timezone(row)}
 
 
+def read(path):
+    with open(path, encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
 class Register:
     def __init__(self, path):
         path = Path(path)
         self.date = path.stem.rsplit("-deis-", 1)[-1]
-        with open(path, encoding="utf-8", newline="") as fh:
-            self.rows = sorted(csv.DictReader(fh), key=lambda r: fold(r["nombre"]))
+        self.listed = sorted(read(path), key=lambda r: fold(r["nombre"]))
+        tests = read(path.with_name(TESTS)) if path.with_name(TESTS).exists() else []
+        clashing = sorted({r["codigo"] for r in tests} & {r["codigo"] for r in self.listed})
+        if clashing:
+            raise ValueError(f"test establishments with a DEIS code: {', '.join(clashing)}")
+        self.tests = [r["codigo"] for r in tests]
+        self.rows = self.listed + tests
         self.by_code = {r["codigo"]: r for r in self.rows}
 
     def facets(self):
         """The regions, comunas and types the search filters offer."""
-        regions = {r["region_codigo"]: r["region"] for r in self.rows}
-        comunas = {r["comuna_codigo"]: (r["comuna"], r["region_codigo"]) for r in self.rows}
-        types = {r["tipo"] for r in self.rows}
+        regions = {r["region_codigo"]: r["region"] for r in self.listed}
+        comunas = {r["comuna_codigo"]: (r["comuna"], r["region_codigo"]) for r in self.listed}
+        types = {r["tipo"] for r in self.listed}
         return {
             "date": self.date,
             "regions": [{"code": c, "name": regions[c]} for c in REGION_ORDER if c in regions],
@@ -137,7 +150,7 @@ class Register:
     def search(self, region="", comuna="", type="", name=""):
         """The rows matching every filter given; a name matches when it holds every word typed."""
         words = fold(name).split()
-        found = [r for r in self.rows
+        found = [r for r in self.listed
                  if region in ("", r["region_codigo"]) and comuna in ("", r["comuna_codigo"])
                  and type in ("", r["tipo"]) and all(w in fold(r["nombre"]) for w in words)]
         return {"total": len(found), "rows": [establishment(r) for r in found[:SEARCH_LIMIT]]}

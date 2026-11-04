@@ -282,12 +282,17 @@ DEIS = GATES.parent / "provisionador" / "deis.py"
 HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 
 
-def slug_table(rows):
-    """Runs the slug-table command on a register of `rows` (code, type, name, comuna)."""
+def slug_table(rows, tests=()):
+    """Runs the slug-table command on a register of `rows` (code, type, name, comuna), with the test establishments
+    `tests` beside it."""
+    def csv(rows):
+        return HEADER + "".join(f"{c},{t},{n},Calle 1,13101,{comuna},13,Metropolitana,Servicio,Municipal,-33.4,-70.6\n"
+                                for c, t, n, comuna in rows)
+
     with tempfile.TemporaryDirectory() as tmp:
-        lines = [f"{c},{t},{n},Calle 1,13101,{comuna},13,Metropolitana,Servicio,Municipal,-33.4,-70.6"
-                 for c, t, n, comuna in rows]
-        Path(tmp, "establecimientos-deis-2026-07-23.csv").write_text(HEADER + "\n".join(lines) + "\n")
+        Path(tmp, "establecimientos-deis-2026-07-23.csv").write_text(csv(rows))
+        if tests:
+            Path(tmp, "establecimientos-prueba.csv").write_text(csv(tests))
         r = subprocess.run([sys.executable, "-I", str(DEIS), "slugs", tmp], capture_output=True, text=True)
     return r.returncode, r.stdout, r.stderr
 
@@ -323,6 +328,19 @@ class SlugTable(unittest.TestCase):
         self.assertIn("cesfam-bellavista-tome", err)
         self.assertIn("999001", err)
         self.assertIn("999002", err)
+        self.assertEqual(out, "")
+
+    def test_a_test_establishment_beside_the_register_gets_its_name_too(self):
+        code, out, err = slug_table([("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago")],
+                                    tests=[("999009", "CESFAM", "Centro de Salud Familiar Prueba", "Santiago")])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), {"999001": "cesfam-los-castanos", "999009": "cesfam-prueba"})
+
+    def test_a_test_establishment_with_a_register_code_fails_naming_it(self):
+        code, out, err = slug_table([("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago")],
+                                    tests=[("999001", "CESFAM", "Centro de Salud Familiar Prueba", "Santiago")])
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("999001", err)
         self.assertEqual(out, "")
 
 
