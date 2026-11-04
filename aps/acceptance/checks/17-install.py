@@ -10,11 +10,12 @@ operator goes back to «Equipos», ticks a person who left and presses «Retirar
 people as they were at «Instalar», so that person can still store a file in their own files, and stops with the people
 step red until «Reintentar» applies «Retirar» (48-retire checks the person). Then «Listo» shows the suite's address.
 There the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's
-first password and AIO's passphrase, and closes; the page then still tells, behind a resolver that drops the name's
-answer, the router change, and otherwise that this computer opens the suite (no check goes back to «Dirección» after
-«Instalar»). AIO reports our components on, every other optional one off (Talk recording follows the hardware:
-70-talk checks it) and nightly backups to the backup folder. AIO's passphrase reaches the browser only in the
-passwords file, and on the machine only root reads the file AIO keeps it in."""
+first password, AIO's passphrase and the backup's encryption password AIO made (its own copy of it unchanged), and
+closes; the page then still tells, behind a resolver that drops the name's answer, the router change, and otherwise that
+this computer opens the suite (no check goes back to «Dirección» after «Instalar»). AIO reports our components on, every
+other optional one off (Talk recording follows the hardware: 70-talk checks it) and nightly backups to the backup
+folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO
+keeps it in."""
 
 import base64
 import json
@@ -187,14 +188,19 @@ if unshown:
 
 config = aio_config()
 administrator = config["secrets"]["NEXTCLOUD_PASSWORD"]  # never printed; run.sh masks it once AIO made it
-carried = [url for url, text in answers
-           if (passphrase in text or administrator in text) and not url.endswith("/api/close")]
+backup_password = config["secrets"].get("BORGBACKUP_PASSWORD") or sys.exit("AIO holds no backup encryption password")
+if aio_file("backupsecret") != backup_password:  # AIO's own copy, written when it made the password; neither is printed
+    sys.exit("AIO's backup encryption password is not the one it made")
+carried = [url for url, text in answers if not url.endswith("/api/close")
+           and any(secret in text for secret in (passphrase, administrator, backup_password))]
 if carried:
-    sys.exit(f"these answers of the wizard carried AIO's passphrase or the administrator's password: {carried}")
+    sys.exit(f"these answers of the wizard carried AIO's passphrase, the administrator's password or the backup's "
+             f"encryption password: {carried}")
 kept = machine(f"sudo cat {KEPT}")
-if not (handed == kept and passphrase in kept and administrator in kept):
-    sys.exit("the passwords file «Listo» handed over is not the machine's copy with the administrator's first password "
-             "and AIO's passphrase")
+if not (handed == kept and passphrase in kept and administrator in kept
+        and backup_password in kept):
+    sys.exit("the passwords file «Listo» handed over is not the machine's copy with the administrator's first "
+             "password, AIO's passphrase and AIO's backup encryption password")
 reported = {key: config.get(key) for key in SWITCHES}
 backup = aio_file("daily_backup_time").splitlines()
 print(f"AIO reports {reported}; daily backup {backup}")

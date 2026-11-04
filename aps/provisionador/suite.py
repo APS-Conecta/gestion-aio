@@ -12,14 +12,14 @@ root-only the moment it arrives and reused, so a name is claimed once. AIO is th
 image as its reverse proxy, and the server's inside address is published; the host's timer publishes it again
 every 10 minutes (`provisionador.py publish`).
 
-«Instalar» drives AIO's own page as its interface does from a same-origin browser, signed in with the passphrase
-AIO keeps on this server: its optional-containers form, its backup settings and its start button. AIO closes that
-login once Apache runs. The passphrase leaves this process only in the passwords file. The containers' progress is
-AIO's own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording,
-are read here too. Every later install step runs occ in the Nextcloud container. The apps step downloads App releases
-from GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step reads the
-Spanish translations Nextcloud ships and places the theme folder in Nextcloud's themes folder, which upstream's updates
-keep.
+«Instalar» drives AIO's own page as its interface does from a same-origin browser, signed in with the passphrase AIO
+keeps on this server: its optional-containers form, its backup settings and its start button. AIO closes that login once
+Apache runs. The first time its page opens, AIO makes the backup's encryption password, which the Provisionador only
+reads. The passphrase and that password leave this process only in the passwords file. The containers' progress is AIO's
+own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording, are read
+here too. Every later install step runs occ in the Nextcloud container. The apps step downloads App releases from
+GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step reads the Spanish
+translations Nextcloud ships and places the theme folder in Nextcloud's themes folder, which upstream's updates keep.
 """
 
 import base64
@@ -64,6 +64,9 @@ UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de la aplicación. Pres
                  "contacte a APS Conecta.")
 THEME_FAILED = ("No se pudo instalar el tema de APS Conecta Gestión en el servidor de aplicaciones. Presione "
                 "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+NO_BACKUP_PASSWORD = ("El contenedor maestro de la suite aún no tiene la contraseña de cifrado de las copias de "
+                      "seguridad, que el archivo de contraseñas debe incluir. Presione «Reintentar»; si vuelve a "
+                      "ocurrir, contacte a APS Conecta.")
 ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
                  "servidor y presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
@@ -433,9 +436,14 @@ class Suite:
         self.execute(NEXTCLOUD, ("sh", "-c", CACERTS, "sh"), failed=OCC_FAILED.format("security:certificates:import"))
 
     def secrets(self):
-        """AIO's passphrase and the first password of the suite's administrator, `admin`, as AIO keeps them here."""
+        """AIO's passphrase, the first password of the suite's administrator, `admin`, and the backup's encryption
+        password, as AIO keeps them here; without the last, Unreachable."""
         config = json.loads(self.mastercontainer("cat", AIO_CONFIG))
-        return {"passphrase": config["password"], "administrator": config["secrets"]["NEXTCLOUD_PASSWORD"]}
+        backup_password = config["secrets"].get("BORGBACKUP_PASSWORD")
+        if not backup_password:
+            raise Unreachable(NO_BACKUP_PASSWORD)
+        return {"passphrase": config["password"], "administrator": config["secrets"]["NEXTCLOUD_PASSWORD"],
+                "backup_password": backup_password}
 
     def _signed_in(self):
         """AIO's page, signed in with the passphrase AIO's first-run setup (on «Dirección») stored on this server."""
@@ -520,6 +528,7 @@ class FakeSuite:
     PASSPHRASE = "frase de contraseña de AIO"
     # The app settings occ config:list hides, as Nextcloud's own list of sensitive ones names them.
     SENSITIVE = {"theming": ("imprintUrl", "privacyUrl", "slogan", "url")}
+    BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
 
     def __init__(self):
@@ -541,6 +550,7 @@ class FakeSuite:
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: the bootstrap's minimum
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
+        self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
         self.starts = 0  # how often AIO's start button was pressed
         self.states = {}  # what AIO reports per container id: (AIO's name, state: stopped, starting or running)
         self.release = threading.Event()  # AIO's start answers once it is set: tests clear it to watch a start
@@ -731,7 +741,10 @@ class FakeSuite:
 
     def secrets(self):
         self._outage_guard()
-        return {"passphrase": self.PASSPHRASE, "administrator": self.ADMINISTRATOR}
+        if not self.backup_password:
+            raise Unreachable(NO_BACKUP_PASSWORD)
+        return {"passphrase": self.PASSPHRASE, "administrator": self.ADMINISTRATOR,
+                "backup_password": self.backup_password}
 
     def _teams(self, command, *args):
         """occ's groups, Groupfolders' folders and IntraVox's setup, as the «Equipos» steps run them. An app's commands
