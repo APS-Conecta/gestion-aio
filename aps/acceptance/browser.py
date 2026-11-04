@@ -3,7 +3,8 @@
 """The acceptance run's one way to open a browser: Chromium through Playwright, whose context adds trust only for
 Let's Encrypt's staging roots, which the suite's certificate comes from in CI, and for the certificates a check
 pins after verifying them itself: the wizard's, by the fingerprint the one command printed, and AIO's own :8080
-one, read from the machine. No check ignores certificate errors.
+one, read from the machine. No check ignores certificate errors. A check that calls gets fake media devices: Chromium's
+fake camera and a microphone that plays a steady tone.
 
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
@@ -15,14 +16,17 @@ import base64
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import ssl
+import struct
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+import wave
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -30,6 +34,10 @@ from playwright.sync_api import sync_playwright
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
 AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its configuration and its other files
 NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
+# Fake media devices, granted to every page (the headless browser refuses them otherwise), whose sound and video a
+# page plays without a click.
+FAKE_MEDIA = ("--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
+              "--autoplay-policy=no-user-gesture-required")
 
 
 def machine(command, stdin=""):
@@ -38,6 +46,12 @@ def machine(command, stdin=""):
     if run.returncode:
         sys.exit(f"on the machine, {command!r} failed:\n{run.stderr}")
     return run.stdout
+
+
+def hardware():
+    """The machine's CPU cores and memory, the memory in GiB rounded as the bootstrap rounds it."""
+    cpus, memory = machine("nproc; awk '/^MemTotal:/ {print $2}' /proc/meminfo").split()
+    return {"cpus": int(cpus), "memory_gib": (int(memory) + 524288) // 1048576}
 
 
 def fingerprint(pem):
@@ -119,9 +133,19 @@ def spki(pem):
     return base64.b64encode(hashlib.sha256(der).digest()).decode()
 
 
+def tone(path):
+    """Five seconds of a 440 Hz tone, which the fake microphone plays in a loop."""
+    with wave.open(str(path), "wb") as out:
+        out.setparams((1, 2, 48000, 0, "NONE", "not compressed"))
+        out.writeframes(b"".join(struct.pack("<h", round(12000 * math.sin(2 * math.pi * 440 * n / 48000)))
+                                 for n in range(5 * 48000)))
+    return path
+
+
 @contextlib.contextmanager
-def chromium(pinned=(), args=()):
-    """A Chromium browser trusting the staging roots (in its own NSS database) and the pinned PEM certificates."""
+def chromium(pinned=(), args=(), media=False):
+    """A Chromium browser trusting the staging roots (in its own NSS database) and the pinned PEM certificates; with
+    `media`, its camera and microphone are the fake ones."""
     with tempfile.TemporaryDirectory() as home, sync_playwright() as playwright:
         nssdb = Path(home, ".pki", "nssdb")
         nssdb.mkdir(parents=True)
@@ -131,7 +155,8 @@ def chromium(pinned=(), args=()):
             subprocess.run(["certutil", "-A", "-d", f"sql:{nssdb}", "-n", f"staging-{n}", "-t", "C,,", "-a"],
                            input=root, text=True, check=True)
         pins = [f"--ignore-certificate-errors-spki-list={','.join(spki(pem) for pem in pinned)}"] if pinned else []
-        browser = playwright.chromium.launch(env={**os.environ, "HOME": home}, args=[*pins, *args])
+        fake = [*FAKE_MEDIA, f"--use-file-for-fake-audio-capture={tone(Path(home, 'tone.wav'))}"] if media else []
+        browser = playwright.chromium.launch(env={**os.environ, "HOME": home}, args=[*pins, *fake, *args])
         try:
             yield browser
         finally:
