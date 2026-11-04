@@ -40,7 +40,7 @@ from urllib.parse import parse_qs
 
 import deis
 import runner
-from steps import backups, components, passwords
+from steps import apps, backups, components, passwords
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -67,6 +67,7 @@ IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este estab
           "APS Conecta puede liberarla; después presione «Reintentar».")
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
+NOT_OFFERED = "Elija solo entre las aplicaciones opcionales que ofrece «Revisar»."
 NOT_LISTO = "El archivo de contraseñas se entrega en «Listo», cuando la instalación terminó."
 CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gestión está instalada en https://{}.\n"
           "El archivo de contraseñas quedó en este servidor, legible solo por root: {}")
@@ -211,6 +212,10 @@ class Provisionador:
         state = self.state.read()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
                      "components": list(components.COMPONENTS.values()), "backup_folder": backups.BACKUP_FOLDER,
+                     "apps": [app["name"] for app in apps.MANIFEST if app["id"] not in apps.OPTIONAL],
+                     "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
+                                        "chosen": app["id"] in state.get("optional", ())}
+                                       for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
                      "install": self.progress(state)}
 
     def get_register(self, query, body):
@@ -283,18 +288,26 @@ class Provisionador:
         """The install's steps, in the background, with what they need to know."""
         state = self.state.read()
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
-                                  inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted))
+                                  inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
+                                  optional=frozenset(state.get("optional", ())))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
 
     def post_install(self, query, body):
-        """POST /api/install, «Instalar» and «Reintentar»: the steps not green yet run in the background and GET
-        /api/state shows their progress. While they run, or at «Listo», pressing it again starts nothing more."""
+        """POST /api/install {"optional": [ids]}, «Instalar» and «Reintentar»: the steps not green yet run in the
+        background and GET /api/state shows their progress. The optional apps ticked on «Revisar» are those of the first
+        «Instalar». While the steps run, or at «Listo», pressing it again starts nothing more."""
+        optional = body.get("optional", [])
+        if not (isinstance(optional, list) and all(isinstance(app, str) and app in apps.OPTIONAL for app in optional)):
+            return 400, {"error": NOT_OFFERED}
         with self.install_lock:
             state = self.state.read()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
             if not (self.busy() or state.get("install", {}).get("listo")):
+                if not state.get("install"):
+                    with self.state.change() as s:
+                        s["optional"] = sorted(set(optional))
                 runner.begin(self.state)
                 self.run_install()
         return 202, {"install": self.progress(self.state.read())}
