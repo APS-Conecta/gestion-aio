@@ -10,6 +10,7 @@ const STEPS = ["centro", "direccion", "equipos", "revisar", "listo"];
 const STATES = {stopped: "En espera", starting: "Iniciando", running: "En ejecución"};
 const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completado", failed: "No se completó",
   waiting: "En espera"};
+const ADMINISTRATOR = "primer/a administrador/a de la suite";
 let register = null;
 let selected = null;
 let map = null;
@@ -193,7 +194,9 @@ async function equipos() {
       $(`${kind}s`).value = state.teams.filter((team) => team.kind === kind).map((team) => team.name).join("\n");
       $(`${kind}s`).disabled = Boolean(state.install);
     }
+    $("people-file").disabled = Boolean(state.install);
     showTeams(state);
+    showPeople(state);
   } catch (e) {
     status("teams-status", e.message, true);
   }
@@ -209,13 +212,57 @@ async function keepTeams() {
   clearTimeout(typing);
   if ($("sectors").disabled) return true;
   try {
-    showTeams(await api("POST", "/api/teams", {sectors: $("sectors").value.split("\n"),
-      programs: $("programs").value.split("\n")}));
+    const plan = await api("POST", "/api/teams", {sectors: $("sectors").value.split("\n"),
+      programs: $("programs").value.split("\n")});
+    showTeams(plan);
+    showPeople(plan);
     status("teams-status", "");
     return true;
   } catch (e) {
     status("teams-status", e.message, true);
     return false;
+  }
+}
+
+// The people the uploaded spreadsheet loads, or each of its errors by line, and the groups it may name.
+function showPeople({groups, people, errors}) {
+  $("people-groups").replaceChildren(...Object.entries(groups).map(([id, name]) => element("li", `${id}: ${name}`)));
+  $("people-errors").replaceChildren(...errors.map((error) => element("li", error)));
+  $("people").replaceChildren(...people.map((person) => item(person.name, "", [person.user, person.email,
+    person.groups.map((id) => groups[id]).join(", "), person.admin && ADMINISTRATOR].filter(Boolean).join(" · "))));
+}
+
+async function template() {
+  try {
+    const {file, text} = await api("GET", "/api/spreadsheet");
+    const link = Object.assign(document.createElement("a"), {download: file,
+      href: URL.createObjectURL(new Blob([text], {type: "text/csv;charset=utf-8"}))});
+    link.click();
+  } catch (e) {
+    status("people-status", e.message, true);
+  }
+}
+
+// The spreadsheet as Excel saves it: as UTF-8, or as Windows-1252 when saved as plain CSV.
+async function upload() {
+  const file = $("people-file").files[0];
+  if (!file) return;
+  const bytes = await file.arrayBuffer();
+  $("people-file").value = "";
+  let text;
+  try {
+    text = new TextDecoder("utf-8", {fatal: true}).decode(bytes);
+  } catch {
+    text = new TextDecoder("windows-1252").decode(bytes);
+  }
+  try {
+    const plan = await api("POST", "/api/people", {spreadsheet: text});
+    showPeople(plan);
+    status("people-status", plan.errors.length ? "La planilla tiene errores: corríjalos y súbala de nuevo."
+      : `Se cargó la planilla: ${plan.people.length} ${plan.people.length === 1 ? "persona" : "personas"}.`,
+    plan.errors.length > 0);
+  } catch (e) {
+    status("people-status", e.message, true);
   }
 }
 
@@ -254,6 +301,10 @@ async function revisar() {
     $("summary-address").textContent = `https://${address.name}`;
     $("summary-teams").replaceChildren(...(state.teams.length ? state.teams.map((team) => element("li", team.name))
       : [element("li", "Sin sectores ni programas")]));
+    $("summary-people").replaceChildren(...(state.people.length ? state.people.map((person) => element("li",
+      `${person.name} (${person.user})${person.admin ? `, ${ADMINISTRATOR}` : ""}`))
+      : [element("li", state.errors.length ? "La planilla del personal tiene errores: corríjala en «Equipos»"
+        : "Sin planilla del personal")]));
     $("summary-cargo").replaceChildren(...state.cargo_accounts.map(
       (account) => element("li", `${account.name} (${account.user})`)));
     $("summary-components").replaceChildren(...state.components.map((name) => element("li", name)));
@@ -395,6 +446,8 @@ async function start() {
       typing = setTimeout(keepTeams, 400);
     });
   }
+  $("people-template").addEventListener("click", template);
+  $("people-file").addEventListener("change", upload);
   $("teams-continue").addEventListener("click", async () => (await keepTeams()) && revisar());
   $("install").addEventListener("click", install);
   if (state.centre) {
