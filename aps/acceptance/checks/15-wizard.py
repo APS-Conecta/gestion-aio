@@ -3,11 +3,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The one-time link the one command printed opens the wizard in a browser that trusts the wizard's certificate
 because its fingerprint is the printed one. The operator reaches «Centro». A test build's run chooses a centre there,
-picked so concurrent runs claim different names under the name service's CI deployment. A release's run claims a
-production name, so it never takes a real establishment's: it sends the register's test establishment, which «Centro»
-never lists, to the wizard's API, and the page resumes at «Dirección». «Dirección» shows the centre's name from the
-slug table, with nothing to edit, claims it by itself and says so. The claim's credential is stored root-only on the
-machine (run.sh masks it). The DEIS code goes to $GITHUB_OUTPUT before the claim, so the run releases it."""
+picked so concurrent runs claim different names under the name service's CI deployment, and writes its DEIS code to
+$GITHUB_OUTPUT before the claim, so the run releases it. A release's run never holds a real establishment's production
+name: before the one command it claimed the name of the register's test establishment with APS's token
+(aps-acceptance.yml). The check hands that claim to the machine root-only, where the suite port takes it instead of
+claiming, sends the test establishment, which «Centro» never lists, to the wizard's API, and the page resumes at
+«Dirección». «Dirección» shows the centre's name from the slug table, with nothing to edit, claims it by itself and
+says so. The claim's credential is stored root-only on the machine (run.sh masks it)."""
 
 import json
 import os
@@ -32,10 +34,9 @@ if TEST_BUILD:
     codes = sorted(r["codigo"] for r in register.listed)
     turn = int(os.environ["GITHUB_RUN_ID"]) + int(os.environ["GITHUB_RUN_ATTEMPT"]) + len(codes) // 2
     code = codes[turn % len(codes)]
-elif len(register.tests) == 1:
-    code = register.tests[0]
-else:
-    sys.exit(f"a release claims the test establishment's name, and the register has {len(register.tests)}, not one")
+else:  # the run's claim, which holds the credential: never printed
+    claim = Path(os.environ["RUNNER_TEMP"], "acceptance", "claim.json").read_text(encoding="utf-8")
+    code = json.loads(claim)["username"]
 row, name = register.by_code[code], f"{slugs[code]}.{services['suffix']}"
 
 link, printed = wizard_link(Path(os.environ["CONSOLE"]).read_text(encoding="utf-8"))
@@ -48,11 +49,6 @@ CENTRE = """code => fetch('/api/centre', {method: 'POST', headers: {'Content-Typ
                                       body: JSON.stringify({code})}).then(r => r.status)"""
 
 
-def releasable():
-    """The run releases the code's name whatever happens next: the claim is about to start."""
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-        output.write(f"code={code}\n")
-
 with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     page.goto(link)
@@ -62,10 +58,11 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
         page.select_option("#search [name=comuna]", row["comuna_codigo"])
         page.fill("#search [name=name]", row["nombre"])
         page.click(f'#results button[data-code="{code}"]')
-        releasable()
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"code={code}\n")
         page.click("#confirm")
     else:
-        releasable()
+        machine("sudo sh -c 'umask 077 && cat > /var/lib/aps-conecta/name-service.json'", claim)
         status = page.evaluate(CENTRE, code)
         if status != 200:
             sys.exit(f"the wizard's API answers {status} to the test establishment")

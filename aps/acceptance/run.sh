@@ -20,10 +20,9 @@
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
 # Provisionador's journal (the name's credential, AIO's passphrase, its secrets and the first passwords blanked out) and
-# the disk usage, and the workflow attaches it to the run. The check that has the wizard claim a name writes its
-# DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it: a test build's CI name with APS's token, a
-# release's production name with its own credential, the claim's answer, which run.sh keeps in claim.json beside
-# the evidence (never in it) as soon as a check finds it on the machine.
+# the disk usage, and the workflow attaches it to the run. In a test build, the check that has the wizard claim a CI
+# name writes its DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it; a release's workflow claims
+# the test establishment's production name before run.sh, the wizard takes that claim, and the workflow releases it.
 # A test build gets a staging certificate and the checks trust the staging roots alone (browser.py); a release's
 # candidate gets a real one, which the system's real roots alone verify.
 # The VM has the bootstrap's memory floor (aps/bootstrap/install.sh), so a green run proves it. hardware.sh samples its
@@ -57,15 +56,11 @@ each() { # <command> <jq filter>: each value the filter finds in the JSON the co
     printf '\n::add-mask::%s\n' "$found"
   done < <("$MACHINE" "$1" 2> /dev/null | jq -r "$2" 2> /dev/null || true)
 }
-mask_secrets() { # once «Dirección» claimed the name: its credential, whose claim it keeps on the runner too, AIO's
-  # passphrase and, once AIO made them, its passwords and secrets (the administrator's first password among them), each
-  # on a line of its own; then each first password the install recorded so far
+mask_secrets() { # once «Dirección» claimed the name: its credential, AIO's passphrase and, once AIO made them, its
+  # passwords and secrets (the administrator's first password among them), each on a line of its own; then each first
+  # password the install recorded so far
   local aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
   secret password 'sudo cat /var/lib/aps-conecta/name-service.json'
-  if [ -n "$password" ] && [ ! -s "$work/claim.json" ]; then
-    (umask 077; "$MACHINE" 'sudo cat /var/lib/aps-conecta/name-service.json' > "$work/claim.new") 2> /dev/null \
-      && mv "$work/claim.new" "$work/claim.json"
-  fi
   secret passphrase "$aio"
   each "$aio" '.secrets // {} | to_entries[] | select(.key | test("PASSWORD|SECRET")) | .value | strings'
   each 'sudo cat /var/lib/aps-conecta/provisionador/first-passwords.json' '.[].password // empty'

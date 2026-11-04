@@ -282,9 +282,9 @@ DEIS = GATES.parent / "provisionador" / "deis.py"
 HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 
 
-def slug_table(rows, tests=()):
-    """Runs the slug-table command on a register of `rows` (code, type, name, comuna), with the test establishments
-    `tests` beside it."""
+def slug_table(rows, tests=(), command="slugs"):
+    """Runs a slug-table command, `slugs` or `tests`, on a register of `rows` (code, type, name, comuna), with the test
+    establishments `tests` beside it."""
     def csv(rows):
         return HEADER + "".join(f"{c},{t},{n},Calle 1,13101,{comuna},13,Metropolitana,Servicio,Municipal,-33.4,-70.6\n"
                                 for c, t, n, comuna in rows)
@@ -293,7 +293,7 @@ def slug_table(rows, tests=()):
         Path(tmp, "establecimientos-deis-2026-07-23.csv").write_text(csv(rows))
         if tests:
             Path(tmp, "establecimientos-prueba.csv").write_text(csv(tests))
-        r = subprocess.run([sys.executable, "-I", str(DEIS), "slugs", tmp], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-I", str(DEIS), command, tmp], capture_output=True, text=True)
     return r.returncode, r.stdout, r.stderr
 
 
@@ -330,18 +330,21 @@ class SlugTable(unittest.TestCase):
         self.assertIn("999002", err)
         self.assertEqual(out, "")
 
-    def test_a_test_establishment_beside_the_register_gets_its_name_too(self):
-        code, out, err = slug_table([("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago")],
-                                    tests=[("999009", "CESFAM", "Centro de Salud Familiar Prueba", "Santiago")])
-        self.assertEqual(code, 0, err)
-        self.assertEqual(json.loads(out), {"999001": "cesfam-los-castanos", "999009": "cesfam-prueba"})
+    def test_test_establishments_get_a_table_of_their_own_apart_from_the_listed_ones(self):
+        rows = [("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago")]
+        tests = [("999009", "CESFAM", "Centro de Salud Familiar Prueba", "Santiago")]
+        for command, table in (("slugs", {"999001": "cesfam-los-castanos"}), ("tests", {"999009": "cesfam-prueba"})):
+            code, out, err = slug_table(rows, tests, command)
+            self.assertEqual((code, json.loads(out)), (0, table), err)
 
-    def test_a_test_establishment_with_a_register_code_fails_naming_it(self):
-        code, out, err = slug_table([("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago")],
-                                    tests=[("999001", "CESFAM", "Centro de Salud Familiar Prueba", "Santiago")])
-        self.assertEqual(code, 1, out + err)
-        self.assertIn("999001", err)
-        self.assertEqual(out, "")
+    def test_a_test_establishment_with_a_register_code_or_a_listed_slug_fails_either_table(self):
+        rows = [("999001", "CESFAM", "Centro de Salud Familiar Los Castaños", "Santiago")]
+        for tests, named in (([("999001", "CESFAM", "Centro de Salud Familiar Prueba", "Santiago")], "999001"),
+                             ([("999009", "CESFAM", "CESFAM Los Castaños", "Santiago")], "cesfam-los-castanos")):
+            for command in ("slugs", "tests"):
+                code, out, err = slug_table(rows, tests, command)
+                self.assertEqual((code, out), (1, ""), err)
+                self.assertIn(named, err)
 
 
 class ReleaseBundle(unittest.TestCase):
@@ -413,6 +416,15 @@ class ReleaseWorkflowGate(unittest.TestCase):
         code, out = self.gate(self.PUBLISH, self.PUBLISH.replace("if: ", "if: always() && "))
         self.assertEqual(code, 1, out)
         self.assertIn("publish makes a release «Latest» even when a check failed", out)
+
+    def test_latest_under_a_block_scalar_if_that_runs_whatever_the_checks_did_fails(self):
+        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace("if: ", "if: >-\n      always() &&\n      "))
+        self.assertEqual(code, 1, out)
+        self.assertIn("publish makes a release «Latest» even when a check failed", out)
+
+    def test_latest_after_an_explicit_success_passes(self):
+        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace("if: ", "if: success() && "))
+        self.assertEqual(code, 0, out)
 
     def test_a_check_that_passes_when_it_fails_fails(self):
         code, out = self.gate("    timeout-minutes: 60\n", "    timeout-minutes: 60\n    continue-on-error: true\n")

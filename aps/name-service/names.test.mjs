@@ -4,8 +4,6 @@
 // Fixture codes only: the DEIS-code gate proves no real register code is named here.
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fakeCloudflare, fakeStorage } from "./fakes.mjs";
 import { nameService } from "./names.mjs";
@@ -21,12 +19,12 @@ const LIMITS = { perIpPerDay: 3, perWeek: 50 }; // production's, from wrangler.j
 const DAY = 86_400_000;
 const MANY = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [String(999100 + i), `centro-${i}`]));
 
-function deployment({ suffix = "gestion.apsconecta.cl", table = SLUGS } = {}) {
+function deployment({ suffix = "gestion.apsconecta.cl", table = SLUGS, tests = {} } = {}) {
   const cloudflare = fakeCloudflare({ token: TOKEN, zone: ZONE });
   const storage = fakeStorage();
   const clock = { ms: 0 };
   const start = (slugs) =>
-    nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs, claimLimits: LIMITS,
+    nameService({ storage, fetch: cloudflare.fetch, token: TOKEN, zone: ZONE, suffix, slugs, tests, claimLimits: LIMITS,
                   now: () => clock.ms });
   let serve = start(table);
   const post = async (path, body, headers = {}) => {
@@ -127,15 +125,20 @@ test("a code outside the register, or a claim that is not one code, is refused",
   assert.equal(names.storage.data.size, 0);
 });
 
-test("the slug table deploy.sh bundles holds the hidden test establishment, so production claims its name", async () => {
-  const repo = new URL("../../", import.meta.url);
-  const tests = readFileSync(new URL("aps/deis/establecimientos-prueba.csv", repo), "utf8").trim().split("\n").slice(1);
-  assert.equal(tests.length, 1, "one test establishment");
-  const code = tests[0].split(",")[0];
-  const table = JSON.parse(execFileSync("python3", ["-I", "aps/provisionador/deis.py", "slugs"], { cwd: repo }));
-  const { status, body } = await deployment({ table }).claim(code);
+test("a test establishment's code claims its name only with APS's token; a listed code needs none", async () => {
+  const names = deployment({ tests: { 999009: "cesfam-prueba" } });
+  const client = { "CF-Connecting-IP": "198.51.100.1" };
+  for (const headers of [client, { ...client, Authorization: "Bearer not-the-token" }]) {
+    const { status, body } = await names.post("/claim", { code: "999009" }, headers);
+    assert.ok(status >= 400 && status < 500 && body.error, JSON.stringify(headers));
+  }
+  assert.equal(names.storage.data.size, 0);
+  const aps = { ...client, Authorization: `Bearer ${TOKEN}` };
+  const { status, body } = await names.post("/claim", { code: "999009" }, aps);
   assert.equal(status, 201, body.error);
-  assert.equal(body.name, "cesfam-prueba-aps-conecta.gestion.apsconecta.cl");
+  assert.deepEqual([body.name, body.username], ["cesfam-prueba.gestion.apsconecta.cl", "999009"]);
+  assert.equal((await names.claim("999001")).body.name, CASTANOS);
+  assert.equal((await names.post("/claim", { code: "999002" }, aps)).body.name, ESTRECHO);
 });
 
 test("storage keeps only a hash of the credential", async () => {

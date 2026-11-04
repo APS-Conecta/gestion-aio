@@ -5,8 +5,10 @@
 The register is aps/deis/establecimientos-deis-<date>.csv; the date in its name is its provenance.
 Beside it, establecimientos-prueba.csv holds APS Conecta's test establishment, in the same columns, under a code
 outside DEIS's: it has a name and the API takes its code, as a release's acceptance run sends it, but the search
-never lists it. Run as `deis.py slugs [<directory>]`, it prints the slug table (DEIS code to slug, as JSON) that the
-name service bundles, and fails when two codes share a slug or a test establishment has a DEIS code.
+never lists it. Run as `deis.py slugs [<directory>]`, it prints the slug table of the listed establishments (DEIS
+code to slug, as JSON) that the name service bundles; as `deis.py tests [<directory>]`, the test establishments'
+table, whose names the name service gives with APS's token alone. Either fails when two codes, test ones included,
+share a slug, or a test establishment has a DEIS code.
 """
 
 import argparse
@@ -116,7 +118,7 @@ def centre(row, moved=None):
             "timezone": timezone(row)}
 
 
-def read(path):
+def csv_rows(path):
     with open(path, encoding="utf-8", newline="") as fh:
         return list(csv.DictReader(fh))
 
@@ -125,12 +127,13 @@ class Register:
     def __init__(self, path):
         path = Path(path)
         self.date = path.stem.rsplit("-deis-", 1)[-1]
-        self.listed = sorted(read(path), key=lambda r: fold(r["nombre"]))
-        tests = read(path.with_name(TESTS)) if path.with_name(TESTS).exists() else []
+        self.listed = sorted(csv_rows(path), key=lambda r: fold(r["nombre"]))
+        test_path = path.with_name(TESTS)
+        tests = csv_rows(test_path) if test_path.exists() else []
         clashing = sorted({r["codigo"] for r in tests} & {r["codigo"] for r in self.listed})
         if clashing:
             raise ValueError(f"test establishments with a DEIS code: {', '.join(clashing)}")
-        self.tests = [r["codigo"] for r in tests]
+        self.test_codes = [r["codigo"] for r in tests]
         self.rows = self.listed + tests
         self.by_code = {r["codigo"]: r for r in self.rows}
 
@@ -157,16 +160,19 @@ class Register:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Print the slug table of the newest DEIS register.")
-    parser.add_argument("command", choices=["slugs"])
+    parser = argparse.ArgumentParser(description="Print the slug table of the newest DEIS register's listed "
+                                                 "establishments (slugs) or of its test establishments (tests).")
+    parser.add_argument("command", choices=["slugs", "tests"])
     parser.add_argument("directory", nargs="?", default=Path(__file__).resolve().parents[1] / "deis")
     args = parser.parse_args()
     try:
-        table = slugs(Register(newest(args.directory)).rows)
+        register = Register(newest(args.directory))
+        table = slugs(register.rows)
     except ValueError as e:
         print(f"deis: {e}", file=sys.stderr)
         return 1
-    print(json.dumps(table, indent=0, sort_keys=True))
+    tests = args.command == "tests"
+    print(json.dumps({c: s for c, s in table.items() if (c in register.test_codes) == tests}, indent=0, sort_keys=True))
     return 0
 
 

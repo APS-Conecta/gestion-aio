@@ -77,8 +77,11 @@ jobs:
           if [ -n "$VERSION" ]; then
             [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::A release's version is vX.Y.Z."; exit 1; }
             [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::A release is cut from main, not $GITHUB_REF."; exit 1; }
-            ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" --silent 2> /dev/null \
-              || { echo "::error::$VERSION exists already."; exit 1; }
+            tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/")')"
+            ! grep -qxF "$VERSION" <<< "$tags" || { echo "::error::$VERSION exists already."; exit 1; }
+            newest="$({ grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' <<< "$tags" || true; } | sort -V | tail -n 1)"
+            [ -z "$newest" ] || [ "$(printf '%s\n' "$newest" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ] \
+              || { echo "::error::$VERSION is not above the newest release tag, $newest."; exit 1; }
           fi
           printf 'tag=%s\ncommit=%s\n' "${VERSION:-$TEST_TAG}" "$COMMIT" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -351,17 +354,25 @@ jobs:
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest \
             --title "APS Conecta Gestión $TAG" \
             --notes "Instale APS Conecta Gestión en una máquina limpia con este comando: $COMMAND"
-          [ "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$TAG" ] \
-            || { echo "::error::$TAG did not become Latest"; exit 1; }
-      - name: The one command fetches the install.sh the acceptance run installed
+      - name: Within about 10 minutes, «Latest» is the release and the one command fetches the install.sh it checked
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           expected="$(curl -fsSL --retry 5 "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/SHA256SUMS" \
             | awk '$2 == "install.sh" {print $1}')"
-          served="$(curl -fsSL --retry 5 "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh" \
-            | sha256sum | cut -d ' ' -f 1)"
-          [ -n "$expected" ] && [ "$served" = "$expected" ] \
-            || { echo "::error::$COMMAND does not fetch $TAG's install.sh"; exit 1; }
-          echo "$COMMAND installs $TAG"
+          [ -n "$expected" ] || { echo "::error::$TAG's SHA256SUMS lists no install.sh"; exit 1; }
+          for _ in $(seq 60); do
+            latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || true)"
+            served="$({ curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh" || true; } \
+              | sha256sum | cut -d ' ' -f 1)"
+            if [ "$latest" = "$TAG" ] && [ "$served" = "$expected" ]; then
+              echo "«Latest» is $TAG, and $COMMAND installs it"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::After 10 minutes «Latest» is ${latest:-unknown}, and the one command's install.sh is $served, not $TAG's $expected"
+          exit 1
 
   withdraw:
     name: A candidate that did not pass is withdrawn with its tag, so the version can be cut again
@@ -378,8 +389,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          candidate="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease,targetCommitish \
-            --jq '"\(.isPrerelease) \(.targetCommitish)"' 2> /dev/null || true)"
-          [ "$candidate" = "true $COMMIT" ] || { echo "No candidate $TAG of $COMMIT is left to withdraw."; exit 0; }
+          if ! candidate="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+              --jq '"\(.prerelease) \(.target_commitish)"' 2> "$RUNNER_TEMP/withdraw.err")"; then
+            cat "$RUNNER_TEMP/withdraw.err" >&2
+            grep -q '(HTTP 404)' "$RUNNER_TEMP/withdraw.err" || exit 1
+            echo "No release $TAG is left to withdraw."
+            exit 0
+          fi
+          [ "$candidate" = "true $COMMIT" ] || { echo "$TAG is not this run's candidate of $COMMIT: nothing withdrawn."; exit 0; }
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
           echo "$TAG did not pass every check: its candidate and its tag were withdrawn."

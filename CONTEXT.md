@@ -32,8 +32,8 @@ A Suite release before its clean-machine acceptance run: a pre-release under its
 release «Latest» once every check passes, and is withdrawn otherwise.
 
 **Test establishment** (establecimiento de prueba):
-APS Conecta's own entry beside the DEIS register, under a code outside DEIS's. «Centro» never lists it; a release's
-acceptance run claims its production name.
+APS Conecta's own entry beside the DEIS register, under a code outside DEIS's. «Centro» never lists it, and only APS's
+token claims its name: a release's acceptance run claims it in production.
 
 **Operator** (operador):
 The person who runs the install.

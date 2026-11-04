@@ -15,7 +15,7 @@ from pathlib import Path
 
 WORKFLOW = ".github/workflows/aps-release.yml"
 CHECKS = ("acceptance", "bootstrap", "host-checks")  # the jobs that check the candidate
-STATUS = re.compile(r"\b(always|success|failure|cancelled)\s*\(")  # any of them drops the implicit success()
+STATUS = re.compile(r"\b(always|failure|cancelled)\s*\(")  # each lets a job run after a needed job failed
 PUBLISHES = {"--latest", "--latest=true", "--prerelease=false"}  # `gh release edit` flags that can make it «Latest»
 
 
@@ -26,9 +26,9 @@ def jobs(text):
         head = re.match(r"  ([\w-]+):\n", block)
         if head:
             needs = re.search(r"(?m)^    needs: *(.+)$", block)
-            condition = re.search(r"(?m)^    if: *(.+)$", block)
+            condition = re.search(r"(?m)^    if:(.*(?:\n {6,}\S.*)*)", block)  # a block scalar's lines too
             found[head[1]] = {"needs": re.findall(r"[\w-]+", needs[1]) if needs else [],
-                              "if": condition[1] if condition else "", "text": block}
+                              "if": " ".join(condition[1].split()) if condition else "", "text": block}
     return found
 
 
