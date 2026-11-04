@@ -436,10 +436,10 @@ class AppKey:
 
     def sign(self, data):
         with tempfile.TemporaryDirectory() as tmp:
-            secret, message = Path(tmp, "key"), Path(tmp, "message")
-            secret.write_bytes(self.secret)
+            message = Path(tmp, "message")
             message.write_bytes(data)  # Ed25519 signs the whole message at once, so openssl needs its size
-            return self.armoured(openssl("pkeyutl", "-sign", "-rawin", "-inkey", secret, "-in", message)).encode()
+            return self.armoured(openssl("pkeyutl", "-sign", "-rawin", "-inkey", "/dev/stdin", "-in", message,
+                                         data=self.secret)).encode()
 
 
 KEY = AppKey()
