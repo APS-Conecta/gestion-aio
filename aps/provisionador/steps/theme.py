@@ -10,8 +10,11 @@ instead of with its sample files. Everyone's personal settings link the suite's 
 
 The text overrides (aps/theme/texts.json) are Nextcloud's, Talk's, Calendar's and Contacts' Spanish translations that
 name the suite «Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk»); one that names
-Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud adds a theme's translations to its
-own on every screen and email it renders.
+Nextcloud's company, editions, versions or community keeps upstream's. Nextcloud's server adds a theme's translations to
+its own on every screen and email it renders. Its browser, though, loads only the first translations file it finds for
+an app, and a theme's core/<app>/l10n/es.js is the first it looks for (JSResourceLocator): there the theme holds the
+app's own Spanish, as the suite ships it, with the overrides on top. An app the suite does not hold gets none, which
+would hide its own Spanish; one updated later keeps, in the browser, the Spanish it had when the step ran.
 """
 
 import json
@@ -61,8 +64,13 @@ def files(context):
     placed = {name: path.read_bytes() for name, path in found.items()}
     placed |= {name: brand.render(path.read_text(encoding="utf-8")).encode() for name, path in found.items()
                if name.endswith(".svg")}
-    for app, translations in json.loads((SOURCE / "texts.json").read_text(encoding="utf-8")).items():
-        placed[f"{app}/l10n/es.json"] = json.dumps({"translations": translations}, ensure_ascii=False).encode()
+    for folder, overrides in json.loads((SOURCE / "texts.json").read_text(encoding="utf-8")).items():
+        placed[f"{folder}/l10n/es.json"] = json.dumps({"translations": overrides}, ensure_ascii=False).encode()
+        if shipped := context.suite.translations(folder):
+            app = folder.rsplit("/", 1)[-1]
+            arguments = (app, {**shipped["translations"], **overrides}, shipped["pluralForm"])
+            script = ", ".join(json.dumps(argument, ensure_ascii=False) for argument in arguments)
+            placed[f"core/{app}/l10n/es.js"] = f"OC.L10N.register({script});\n".encode()
     quoted = context.centre["short_name"].replace("\\", "\\\\").replace('"', '\\"')
     placed["core/css/site.css"] = f':root {{ --aps-establishment: "{quoted}"; }}\n'.encode()
     return placed

@@ -429,6 +429,7 @@ AIO_SIDE = {"Componentes", "Copias de seguridad", "Inicio de la suite", "Direcci
             "Archivo de contraseñas"}
 SECURITY = "Sesiones y registro de auditoría"
 MENU = "Menú personalizado"
+THEME = "Tema y marca"
 
 
 def openssl(*args, data=None):
@@ -741,6 +742,22 @@ class StepRunner(InstallTest):
         self.until("done")
         self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
 
+    def test_the_end_of_install_check_reads_the_settings_config_list_hides(self):
+        """occ config:list hides theming's link as sensitive: the check reads it, so a changed one is found too."""
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[THEME], ("green", None))
+        self.suite.apps["theming"]["url"] = "https://nextcloud.com"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[THEME]
+        self.assertEqual(status, "failed")
+        self.assertIn("theming.url", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["theming"]["url"], "https://apsconecta.cl")
+
 
 class Apps(InstallTest):
     """The Suite manifest's apps: every default app and the optional apps ticked on «Revisar». An own or fork app comes
@@ -970,6 +987,12 @@ class InterruptedInstall(InstallTest):
 TOKENS = brand.tokens()
 SUITE = "APS Conecta Gestión"
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
+TEXTS = json.loads((HERE.parent / "theme" / "texts.json").read_text(encoding="utf-8"))
+PLURAL = "nplurals=2; plural=(n != 1);"
+# Each folder's own Spanish as Nextcloud ships it, naming Nextcloud where the overrides change it; the suite does not
+# hold Contacts.
+SHIPPED = {folder: {"translations": {**dict.fromkeys(texts, "Nextcloud"), "Files": "Archivos"}, "pluralForm": PLURAL}
+           for folder, texts in TEXTS.items() if folder != "custom_apps/contacts"}
 
 
 class Branding(InstallTest):
@@ -979,6 +1002,7 @@ class Branding(InstallTest):
 
     def setUp(self):
         super().setUp()
+        self.suite.l10n = SHIPPED
         self.claim("999004")
         self.install()
         self.until("done")
@@ -1022,6 +1046,17 @@ class Branding(InstallTest):
         self.assertFalse([value for value in said if "Nextcloud" in str(value)])
         welcome = [v for k, v in texts["custom_apps/spreed/l10n/es.json"].items() if k.startswith("# Welcome to")]
         self.assertTrue(welcome and welcome[0].startswith("# Bienvenido/a a Talk"), welcome)
+
+    def test_the_browser_gets_each_apps_own_spanish_with_the_overrides_on_top_in_place_of_the_apps_own(self):
+        """Of an app's translations, Nextcloud's browser loads only the first file it finds, and the theme's comes
+        first; an app the suite does not hold gets none, which would hide its own Spanish once it is installed."""
+        for folder, shipped in SHIPPED.items():
+            app = folder.rsplit("/", 1)[-1]
+            script = self.theme[f"core/{app}/l10n/es.js"].decode()
+            arguments = script.removeprefix("OC.L10N.register(").removesuffix(");\n")
+            self.assertEqual(json.loads(f"[{arguments}]"), [app, {**shipped["translations"], **TEXTS[folder]}, PLURAL],
+                             folder)
+        self.assertNotIn("core/contacts/l10n/es.js", self.theme)
 
     def test_everyones_personal_settings_link_the_source_code_and_its_licence(self):
         notice = self.theme["apps/settings/templates/settings/personal/development.notice.php"].decode()
