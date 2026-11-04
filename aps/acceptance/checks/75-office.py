@@ -8,7 +8,9 @@ holds it. Reopened from the Office entry, Euro-Office shows that line, and a sec
 import base64
 import contextlib
 import io
+import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -21,18 +23,25 @@ from browser import NEXTCLOUD, chromium, machine, person, suite_name  # noqa: E4
 from playwright.sync_api import Error  # noqa: E402
 
 USER, FILE = "prueba.oficina", "acta-de-prueba.docx"
-# In every frame, what the Euro-Office editor it holds reports: its document loaded, and whether it holds an edit the
-# document server does not have yet.
-EDITOR_STATE = """window.addEventListener('message', event => {
-  if (![...document.querySelectorAll('iframe[name="frameEditor"]')].some(f => f.contentWindow === event.source)) return;
+# In every frame, each message it receives that names an event, as Euro-Office's Gateway.js posts DocsAPI's events
+# (onDocumentReady, onDocumentStateChange, ...) to the frame holding its iframe "frameEditor": the event, its data, the
+# second since the frame loaded, and whether that iframe sent it.
+EDITOR_EVENTS = """window.editorEvents = [];
+window.addEventListener('message', event => {
   let message;
   try { message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; } catch (error) { return; }
-  if (message.event === 'onDocumentReady') window.documentReady = true;
-  if (message.event === 'onDocumentStateChange') {
-    window.unsaved = message.data;
-    window.edited = window.edited || message.data;
-  }
+  const name = message?.event ?? message?.method;
+  if (typeof name !== 'string') return;
+  const editors = [...document.querySelectorAll('iframe[name="frameEditor"]')];
+  const editor = editors.some(f => f.contentWindow === event.source);
+  window.editorEvents.push([name, message.data ?? null, Math.round(performance.now() / 1000), editor]);
 });"""
+# What the editor reported: its document loaded; it held an edit, and then the document server had every edit.
+READY = "its document ready", "editorEvents.some(([name, , , editor]) => editor && name === 'onDocumentReady')"
+SAVED = "the edit saved", """(() => {
+  const states = editorEvents.filter(([name, , , editor]) => editor && name === 'onDocumentStateChange');
+  return states.some(([, unsaved]) => unsaved) && states.at(-1)[1] === false;
+})()"""
 
 evidence = Path(os.environ["EVIDENCE"])
 suite = f"https://{suite_name()}"
@@ -43,36 +52,71 @@ def until(read, wait, failure):
     deadline = time.monotonic() + wait
     while not (answer := read()):
         if time.monotonic() > deadline:
-            sys.exit(failure)
+            sys.exit(failure() if callable(failure) else failure)
         time.sleep(1)
     return answer
 
 
-def editor(context, state="documentReady"):
-    """The page and frame of the Euro-Office editor served under the suite's name, once `state` holds in the frame
-    that holds the editor."""
+def served(frame):
+    """Whether the frame is Euro-Office's document editor, served under the suite's name."""
+    return frame.url.startswith(f"{suite}/eurooffice/") and "/documenteditor/" in frame.url
+
+
+def editor(context, state=READY):
+    """The page and frame of the Euro-Office editor, once it reported `state` to the frame that holds it."""
+    reported, holds = state
+
     def found():
         for page in context.pages:
-            for frame in page.frames:
-                if not (frame.url.startswith(f"{suite}/eurooffice/") and "/documenteditor/" in frame.url):
-                    continue
+            for frame in filter(served, page.frames):
                 with contextlib.suppress(Error):  # a frame that navigates away
-                    if frame.parent_frame.evaluate(state) and frame.locator("#editor_sdk").is_visible():
+                    if frame.parent_frame.evaluate(holds) and frame.locator("#editor_sdk").is_visible():
                         return page, frame
         return None
-    return until(found, 120, f"Euro-Office under {suite}/eurooffice/ did not reach {state} within 2 minutes")
+    return until(found, 120, lambda: f"Euro-Office under {suite}/eurooffice/ did not report {reported} within 2 "
+                                     f"minutes. The frames, nested, and the events each received:\n{seen(context)}")
+
+
+def seen(context):
+    """Each page's frames by URL without its query, nested, with the events each received (data that is no link or
+    token) and, for the editor, whether its document shows."""
+    lines = []
+    for n, page in enumerate(context.pages):
+        for frame in page.frames:
+            depth, parent = 0, frame.parent_frame
+            while parent:
+                depth, parent = depth + 1, parent.parent_frame
+            events, shows = None, ""
+            with contextlib.suppress(Error):
+                events = frame.evaluate("window.editorEvents")
+                if served(frame):
+                    shows = f" [#editor_sdk visible: {frame.locator('#editor_sdk').is_visible()}]"
+            received = "no listener" if events is None else "; ".join(
+                f"{name}{'' if data in (None, {}) else ' ' + json.dumps(shown(data))} at {second} s"
+                f"{'' if editor else ' (not from frameEditor)'}" for name, data, second, editor in events) or "none"
+            lines.append(f"{'  ' * depth}page {n} {frame.url.split('?')[0]}{shows}: {received}")
+    return "\n".join(lines)
+
+
+def shown(data):
+    if not isinstance(data, dict):
+        return data
+    return {k: v for k, v in data.items() if not (isinstance(v, (dict, list)) or re.search("url|token|link", k, re.I))}
 
 
 def edit(context, line):
     """Type the line at the document's end and save; Euro-Office stores the document once its editor closes."""
     page, frame = editor(context)
+    for tip in frame.get_by_text("Entendido", exact=True).all():  # the editor's «Nuevo» tips, closed as a person does
+        if tip.is_visible():
+            tip.click()
     frame.locator("#editor_sdk").click(position={"x": 300, "y": 200})
     frame.locator("#area_id").focus()
     for key in ("Control+End", "Enter"):
         page.keyboard.press(key)
     page.keyboard.type(line, delay=30)
     page.keyboard.press("Control+s")
-    editor(context, "window.edited === true && window.unsaved === false")
+    editor(context, SAVED)
     for opened in context.pages:
         opened.goto("about:blank")
 
@@ -99,7 +143,7 @@ def office(page):
 first, second = (f"APS-{n}-{secrets.token_hex(4)}" for n in ("PRIMERA", "SEGUNDA"))
 with chromium() as browser:
     context = browser.new_context(locale="es-CL", viewport={"width": 1600, "height": 1000})
-    context.add_init_script(EDITOR_STATE)
+    context.add_init_script(EDITOR_EVENTS)
     page = context.new_page()
     try:
         page.goto(f"{suite}/login")
