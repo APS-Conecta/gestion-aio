@@ -1468,6 +1468,48 @@ class PeopleChanges(PeopleTest):
         self.assertEqual((state["people"], state["retired"]), (PEOPLE, []))
 
 
+class Recording(InstallTest):
+    """Talk recording is on, with the components, on a server with at least 4 cores and 8 GiB, and off on any other:
+    the operator has nothing to choose, and «Revisar» lists it when it is on. The fake's server is the bootstrap's
+    minimum until a test changes it."""
+
+    def switched(self, cpus, memory_gib):
+        """The optional containers AIO runs once «Instalar» finished on a server with these cores and memory."""
+        self.suite.machine = {"cpus": cpus, "memory_gib": memory_gib}
+        self.claim()
+        self.install()
+        self.until("done")
+        return self.suite.switched
+
+    def test_a_server_at_the_threshold_records_talk_calls(self):
+        self.assertEqual(self.switched(4, 8), COMPONENTS | {"talk-recording"})
+
+    def test_a_server_one_core_short_does_not(self):
+        self.assertEqual(self.switched(3, 8), COMPONENTS)
+
+    def test_a_server_one_gib_short_does_not(self):
+        self.assertEqual(self.switched(4, 7), COMPONENTS)
+
+    def test_revisar_lists_recording_only_on_a_server_that_records(self):
+        self.claim()
+        for cpus, listed in ((4, True), (3, False)):
+            self.suite.machine = {"cpus": cpus, "memory_gib": 8}
+            self.assertEqual("Grabador de Talk" in self.browser.get("/api/state")[1]["components"], listed, cpus)
+
+
+class TrustedCertificates(InstallTest):
+    """Nextcloud trusts what AIO's own folder of trusted CAs holds, which AIO also gives Talk: a test build's Let's
+    Encrypt staging roots, so server-side calls through the suite's name verify its staging certificate; a release
+    holds none and Nextcloud imports nothing."""
+
+    def test_in_a_test_build_nextcloud_imports_each_ca_aio_trusts(self):
+        self.suite.cacerts = ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"]
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.trusted, ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"])
+
+
 class InterruptedInstall(InstallTest):
     """An install that a Provisionador restart cut short resumes by itself, from AIO's own state."""
 
