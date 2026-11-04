@@ -653,10 +653,10 @@ class Instalar(InstallTest):
         self.assertEqual(self.install()[1]["install"]["status"], "done")
         self.assertEqual((self.suite.starts, len(self.suite.commands)), (1, commands))
 
-    def test_a_poll_asks_whether_the_install_runs_before_it_reads_the_steps(self):
-        """So an install that reaches «Listo» while a poll is answered shows as installing or done, never as failed with
-        every step green. The fake port cannot hold the install there, so the poll is held after its reads instead: a
-        «Reintentar» pressed meanwhile leaves the failed run it read as it was."""
+    def test_a_poll_reads_whether_the_install_runs_together_with_its_steps(self):
+        """The poll's status matches the steps it read, even if «Reintentar» starts a run meanwhile. The fake suite port
+        cannot reach the moment between the install's last green step and «Listo», so snapshot() keeps the order that
+        covers it: whether the install runs, then the state."""
         self.claim()
         self.suite.down = {"aio"}
         self.install()

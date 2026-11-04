@@ -256,7 +256,7 @@ class Provisionador:
                                      if found["people"] and user not in listed]}
 
     def get_state(self, query, body):
-        busy, state = self.busy(), self.state.read()
+        busy, state = self.snapshot()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
                      "components": list(components.chosen(self.suite.hardware()).values()),
                      "backup_folder": backups.BACKUP_FOLDER,
@@ -364,14 +364,15 @@ class Provisionador:
             reopen(s, before)
             return 200, self.shown(s)
 
-    def busy(self):
-        return self.worker is not None and self.worker.is_alive()
+    def snapshot(self):
+        """Whether the install runs, then the state, in that order: an install that ends between the two readings
+        has recorded how it ended, so a poll never answers «failed» for an install reaching «Listo»."""
+        return self.worker is not None and self.worker.is_alive(), self.state.read()
 
     def progress(self, busy, state):
         """None before «Instalar»; otherwise each step, and, once AIO runs only our components, each container as AIO
         reports it, a component's under its «Revisar» name. «done» means «Listo». A reading of the containers that fails
-        says why, and the next one asks again. `busy` is read before `state`: an install that ended in between has
-        recorded how it ended, so «failed» never comes with every step green."""
+        says why, and the next one asks again."""
         install = state.get("install")
         if not install:
             return None
@@ -406,7 +407,7 @@ class Provisionador:
         if not (isinstance(optional, list) and all(isinstance(app, str) and app in apps.OPTIONAL for app in optional)):
             return 400, {"error": NOT_OFFERED}
         with self.install_lock:
-            busy, state = self.busy(), self.state.read()
+            busy, state = self.snapshot()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
             if not plan(state)["people"]:
@@ -417,7 +418,7 @@ class Provisionador:
                         s["optional"] = sorted(set(optional))
                 runner.begin(self.state)
                 self.run_install()
-        return 202, {"install": self.progress(self.busy(), self.state.read())}
+        return 202, {"install": self.progress(*self.snapshot())}
 
     def post_close(self, query, body):
         """POST /api/close, at «Listo»: the passwords file, whose copy stays on the server. The wizard then closes: the
