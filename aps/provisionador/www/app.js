@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 APS Conecta
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Provisionador's page: it exchanges the link's secret (the URL fragment, never sent in a request
-// line) for a session, then drives «Centro», «Dirección», «Revisar» and «Listo» through the HTTP API.
+// line) for a session, then drives «Centro», «Dirección», «Equipos», «Revisar» and «Listo» through the HTTP API.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const CHILE = [-35.7, -71.5];
-const STEPS = ["centro", "direccion", "revisar", "listo"];
+const STEPS = ["centro", "direccion", "equipos", "revisar", "listo"];
 const STATES = {stopped: "En espera", starting: "Iniciando", running: "En ejecución"};
 const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completado", failed: "No se completó",
   waiting: "En espera"};
@@ -16,6 +16,7 @@ let map = null;
 let marker = null;
 let searching = null;
 let polling = null;
+let typing = null;
 
 async function api(method, path, body) {
   let response;
@@ -183,6 +184,41 @@ async function direccion() {
   }
 }
 
+// «Equipos»: the sectors and programs, one per line, and the team each becomes, as the Provisionador names it. What is
+// typed is kept as it changes, so «Revisar» shows it; once «Instalar» was pressed the teams stay.
+async function equipos() {
+  try {
+    const state = await api("GET", "/api/state");
+    for (const kind of ["sector", "program"]) {
+      $(`${kind}s`).value = state.teams.filter((team) => team.kind === kind).map((team) => team.name).join("\n");
+      $(`${kind}s`).disabled = Boolean(state.install);
+    }
+    showTeams(state);
+  } catch (e) {
+    status("teams-status", e.message, true);
+  }
+  show("equipos");
+}
+
+function showTeams({teams: declared}) {
+  $("teams").replaceChildren(...declared.map(
+    (team) => item(team.name, "", `Grupo ${team.id} · carpeta ${team.folder}`)));
+}
+
+async function keepTeams() {
+  clearTimeout(typing);
+  if ($("sectors").disabled) return true;
+  try {
+    showTeams(await api("POST", "/api/teams", {sectors: $("sectors").value.split("\n"),
+      programs: $("programs").value.split("\n")}));
+    status("teams-status", "");
+    return true;
+  } catch (e) {
+    status("teams-status", e.message, true);
+    return false;
+  }
+}
+
 // Whether this browser opens the suite at its name.
 async function opens(name) {
   try {
@@ -216,6 +252,10 @@ async function revisar() {
     const {centre, address} = state;
     $("summary-centre").textContent = `${centre.name} (${centre.comuna}, ${centre.region})`;
     $("summary-address").textContent = `https://${address.name}`;
+    $("summary-teams").replaceChildren(...(state.teams.length ? state.teams.map((team) => element("li", team.name))
+      : [element("li", "Sin sectores ni programas")]));
+    $("summary-cargo").replaceChildren(...state.cargo_accounts.map(
+      (account) => element("li", `${account.name} (${account.user})`)));
     $("summary-components").replaceChildren(...state.components.map((name) => element("li", name)));
     $("summary-apps").replaceChildren(...state.apps.map((name) => element("li", name)));
     $("optional-apps").replaceChildren(...state.optional_apps.map(choice));
@@ -341,14 +381,21 @@ async function start() {
   fillFilters();
   startMap();
   const open = {
-    centro: () => show("centro"), direccion, revisar,
+    centro: () => show("centro"), direccion, equipos, revisar,
     listo: () => api("GET", "/api/state").then((now) => listo(now.address.name), (e) => say(e.message, true)),
   };
   for (const link of document.querySelectorAll(".step-link")) {
     link.addEventListener("click", () => open[link.dataset.step]());
   }
   $("retry").addEventListener("click", direccion);
-  $("continue").addEventListener("click", revisar);
+  $("continue").addEventListener("click", equipos);
+  for (const list of ["sectors", "programs"]) {
+    $(list).addEventListener("input", () => {
+      clearTimeout(typing);
+      typing = setTimeout(keepTeams, 400);
+    });
+  }
+  $("teams-continue").addEventListener("click", async () => (await keepTeams()) && revisar());
   $("install").addEventListener("click", install);
   if (state.centre) {
     select({...state.centre, point: state.centre.official_point}, state.centre.point);
