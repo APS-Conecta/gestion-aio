@@ -8,7 +8,8 @@ A step module, whose name is its id, declares:
   run(context)    its work, idempotent; it returns what went wrong as Spanish reasons, which the red list shows, and
                   None or [] once the work is done: no step reports success without doing its work
   check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
-                  differences between the running suite and what the step declared, None or [] when it is clean
+                  differences between what the step declared and what holds now (the running suite, or for people
+                  what «Equipos» declares now), None or [] when it is clean
 Both answer the same way; only the suite port raises, Unreachable with its Spanish reason, and the runner turns that
 into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside

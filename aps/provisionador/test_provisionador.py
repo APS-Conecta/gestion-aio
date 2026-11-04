@@ -1336,6 +1336,23 @@ class PeopleChanges(PeopleTest):
         self.assertEqual(self.suite.users["ana.rojas"]["email"], "ana.rojas@salud.example.org")
         self.assertEqual(self.browser.get("/api/state")[1]["retired"], ["pedro.munoz"])
 
+    def test_moving_primer_admin_takes_the_old_first_administrator_out_of_admin_and_retiring_them_out_of_every_group(
+            self):
+        self.suite.down = {"issuer"}
+        self.install()
+        self.until("failed")
+        self.upload(spreadsheet("ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;sector-norte role-enfermeria;",
+                                "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur role-medico;sí"))
+        self.install()
+        self.until("failed")
+        self.assertNotIn("admin", self.member_of("ana.rojas"))
+        self.assertIn("admin", self.member_of("pedro.munoz"))
+        self.assertEqual(self.retire("ana.rojas")[0], 200)
+        self.suite.down = set()
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.users["ana.rojas"]["enabled"], self.member_of("ana.rojas")), (False, set()))
+
     def test_retirar_takes_people_the_list_shows_and_never_the_first_administrator(self):
         for users in ("pedro.munoz", [], ["nadie"], [3]):
             status, body = self.browser.request("POST", "/api/retire", {"users": users})

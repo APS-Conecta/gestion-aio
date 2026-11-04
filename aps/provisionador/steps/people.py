@@ -3,9 +3,9 @@
 """Each person the people spreadsheet loads gets an account with their display name, email and groups: the listed ones,
 the staff-wide group, each listed role's category and, for the first administrator, Nextcloud's admin group. A person
 retired with «Retirar» keeps their account, files and shares, disabled and in none of the groups the install manages
-(teams.py's); a corrected spreadsheet takes a person out of the managed groups it no longer lists. Any other group stays
-as Nextcloud has it. Their first passwords are made once and the passwords file lists them under their current name; an
-account that exists keeps its own.
+(teams.py's and admin); a corrected spreadsheet takes a person out of the managed groups it no longer lists. Any other
+group stays as Nextcloud has it. Their first passwords are made once and the passwords file lists them under their
+current name; an account that exists keeps its own.
 
 The step applies the people as «Equipos» declared them when «Instalar» or «Reintentar» was pressed. Its part of the
 end-of-install check compares them with what «Equipos» declares now, never with Nextcloud, where an administrator may
@@ -42,10 +42,10 @@ def differences(context, found):
     """By username, the occ commands that bring each account the step reconciles to what it declares: a listed person's
     display name, email and groups, and a retired person's account disabled. A retired person the spreadsheet no longer
     lists is reconciled while their account exists."""
-    managed, retired = set(teams.groups(context.teams, context.centre["type"])), set(context.retired)
+    managed, retired = {*teams.groups(context.teams, context.centre["type"]), ADMINS}, set(context.retired)
     listed = {person["user"]: person for person in context.people}
     needed = {}
-    for user in [*listed, *sorted(retired & found.keys() - listed.keys())]:
+    for user in [*listed, *sorted(retired & (found.keys() - listed.keys()))]:
         account, person, commands = found.get(user, NEW), listed.get(user), []
         if person:
             commands += [("user:setting", "--", user, "settings", key, value)  # «--»: a name may start with «-»
@@ -53,7 +53,7 @@ def differences(context, found):
                          if account[key] != value]
         wanted = set() if user in retired else groups(person)
         held = set(account["groups"])
-        commands +=[("group:removeuser", group, user) for group in sorted(held & managed - wanted)]
+        commands += [("group:removeuser", group, user) for group in sorted(held & (managed - wanted))]
         commands += [("group:adduser", group, user) for group in sorted(wanted - held)]
         if user in retired and account["enabled"]:
             commands.append(("user:disable", user))
