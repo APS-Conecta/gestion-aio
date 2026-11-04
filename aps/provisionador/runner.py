@@ -83,15 +83,13 @@ def run(state, context):
         record(state, name, "failed" if found else "green", found)
     if any(r["status"] != "green" for r in state.read()["install"]["steps"].values()):
         return
-    clean = True
     for name, step in STEPS.items():
         if hasattr(step, "check"):
             record(state, name, "running")
             found = problems(step.check, context)
             record(state, name, "failed" if found else "green", found)
-            clean = clean and not found
-    with state.change() as s:
-        s["install"]["listo"] = clean
+    with state.change() as s:  # a step the wizard reopened meanwhile keeps «Listo» away
+        s["install"]["listo"] = all(step["status"] == "green" for step in s["install"]["steps"].values())
 
 
 def progress(install):

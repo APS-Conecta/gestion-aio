@@ -24,9 +24,11 @@ def accounts(context):
 
 def first(context, named):
     """The first password of each account in `named`, {username: the name the file shows}: made the first time an
-    account is named and kept from then on, so a rerun never changes it. The passwords file lists it at once."""
+    account is named and kept from then on, so a rerun or a new name never changes it. The passwords file lists it at
+    once, under the account's current name."""
     kept = accounts(context)
-    new = {user: {"name": name, "password": token_hex(12)} for user, name in named.items() if user not in kept}
+    new = {user: {"name": name, "password": kept[user]["password"] if user in kept else token_hex(12)}
+           for user, name in named.items() if kept.get(user, {}).get("name") != name}
     if new:
         kept.update(new)
         write_root_only(context.folder / ACCOUNTS, json.dumps(kept, ensure_ascii=False, indent=1))
