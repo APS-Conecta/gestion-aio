@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The people the spreadsheet uploaded on «Equipos» (17-install) loaded, in the installed suite: each has an enabled
-account with their display name, email and groups, the staff-wide group and their roles' categories among them, and the
-first administrator is in the admin group. Each logs in at the suite's name, in a browser that trusts the staging roots
-alone, with the first password the passwords file lists for them; the passwords are masked in the log, never printed."""
+"""The people the spreadsheet uploaded on «Equipos» (17-install) loaded, in the installed suite: each one not retired
+(48-retire checks those) has an enabled account with their display name, email and groups, the staff-wide group and
+their roles' categories among them, and the first administrator is in the admin group. Each logs in at the suite's
+name, in a browser that trusts the staging roots alone, with the first password the passwords file lists for them; the
+passwords are masked in the log, never printed."""
 
 import json
 import os
@@ -34,6 +35,7 @@ state = json.loads(machine(f"sudo cat {FOLDER}/state.json"))
 people, errors = spreadsheet.read(state.get("spreadsheet"), state.get("teams", []), state["centre"]["type"])
 if errors or not people:
     sys.exit(f"«Equipos» loaded no people: {errors}")
+people = [person for person in people if person["user"] not in state.get("retired", [])]
 name = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
                           "/mnt/docker-aio-config/data/configuration.json"))["domain"]
 passwords = machine(f"sudo cat {FOLDER}/{FILE}")  # never printed

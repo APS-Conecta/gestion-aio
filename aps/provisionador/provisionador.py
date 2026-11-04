@@ -43,7 +43,7 @@ import deis
 import runner
 import spreadsheet
 import teams
-from steps import apps, backups, components, passwords
+from steps import apps, backups, components, passwords, people
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -73,7 +73,10 @@ CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo.
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
 TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
 NOT_SPREADSHEET = "Suba la planilla del personal como texto CSV."
-PEOPLE_KEPT = "La planilla del personal ya no puede cambiarse: se presionó «Instalar»."
+PEOPLE_KEPT = "La instalación terminó: el personal se administra ahora en «Cuentas», en APS Conecta Gestión."
+NOT_LISTED = "Marque en la lista del personal a las personas que retirará."
+FIRST_ADMIN = ("{} es el primer administrador y no puede retirarse. Marque a otra persona como primer administrador "
+               "en la planilla y súbala de nuevo.")
 PEOPLE_WRONG = "La planilla del personal tiene errores. Corríjalos en «Equipos» y súbala de nuevo."
 NO_PEOPLE = "Suba en «Equipos» la planilla del personal, con su primer administrador."
 NOT_OFFERED = "Elija solo entre las aplicaciones opcionales que ofrece «Revisar»."
@@ -84,15 +87,28 @@ CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gest
 
 def plan(state):
     """The teams «Equipos» declared and, once the centre is chosen, what follows from them, named for its type: the
-    cargo accounts, the groups the people spreadsheet may name, and the people the uploaded spreadsheet loads or its
-    errors; as «Equipos» and «Revisar» show them."""
-    declared, centre = state.get("teams", []), state.get("centre")
+    cargo accounts, the groups the people spreadsheet may name, the people the uploaded spreadsheet loads or its
+    errors, and the usernames retired with «Retirar»; as «Equipos» and «Revisar» show them."""
+    declared, centre, retired = state.get("teams", []), state.get("centre"), state.get("retired", [])
     if not centre:
-        return {"teams": declared, "cargo_accounts": [], "groups": {}, "people": [], "errors": []}
-    people, errors = spreadsheet.read(state.get("spreadsheet"), declared, centre["type"])
+        return {"teams": declared, "cargo_accounts": [], "groups": {}, "people": [], "errors": [], "retired": retired}
+    loaded, errors = spreadsheet.read(state.get("spreadsheet"), declared, centre["type"], retired)
     return {"teams": declared, "cargo_accounts": [{"user": account["user"], "name": account["name"]}
                                                   for account in teams.cargo_accounts(declared, centre["type"])],
-            "groups": teams.groups(declared, centre["type"]), "people": people, "errors": errors}
+            "groups": teams.groups(declared, centre["type"]), "people": loaded, "errors": errors, "retired": retired}
+
+
+def declared(state):
+    """The people as «Equipos» declares them: those the spreadsheet loads and the usernames retired."""
+    return plan(state)["people"], state.get("retired", [])
+
+
+def reopen(s, before):
+    """After «Instalar», a change to the people reopens their step if it is green, so that «Reintentar» applies the
+    change. A step that has yet to finish finds the change itself once it applied the people as they were."""
+    step = s.get("install", {}).get("steps", {}).get("people", {})
+    if step.get("status") == "green" and declared(s) != before:
+        s["install"]["steps"]["people"] = {"status": "failed", "reason": people.CHANGED}
 
 
 def digest(value):
@@ -230,6 +246,15 @@ class Provisionador:
             return {**claimed, "claimed": True}
         return centre and {"name": self.name(centre["code"]), "claimed": False}
 
+    def shown(self, state):
+        """The plan as «Equipos» and «Revisar» show it, with the people a corrected spreadsheet drops though the install
+        made their account, by username and name: «Reintentar» retires them."""
+        found, centre = plan(state), state.get("centre")
+        made = people.made(self.state.dir, state.get("teams", []), centre["type"]) if centre else {}
+        listed = {person["user"] for person in found["people"]}
+        return {**found, "dropped": [{"user": user, "name": name} for user, name in made.items()
+                                     if found["people"] and user not in listed]}
+
     def get_state(self, query, body):
         state = self.state.read()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
@@ -238,7 +263,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
-                     **plan(state), "install": self.progress(state)}
+                     **self.shown(state), "install": self.progress(state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -297,7 +322,7 @@ class Provisionador:
             if s.get("install"):
                 return 409, {"error": TEAMS_KEPT}
             s["teams"] = declared
-            return 200, plan(s)
+            return 200, self.shown(s)
 
     def get_spreadsheet(self, query, body):
         """GET /api/spreadsheet: the blank people spreadsheet, for the operator to fill in."""
@@ -305,16 +330,38 @@ class Provisionador:
 
     def post_people(self, query, body):
         """POST /api/people {"spreadsheet": its text}: the people spreadsheet, kept as uploaded. The plan then lists the
-        people it loads or each of its errors, and reads it again whenever the teams change; «Instalar» waits for one
-        that loads people. Once «Instalar» was pressed it stays."""
+        people it loads or each of its errors, and reads it again whenever the teams change; «Instalar» and «Reintentar»
+        wait for one that loads people. From «Instalar» on, a corrected one updates the people already loaded once
+        «Reintentar» applies it; at «Listo» it stays."""
         uploaded = body.get("spreadsheet")
         if not isinstance(uploaded, str):
             return 400, {"error": NOT_SPREADSHEET}
         with self.install_lock, self.state.change() as s:
-            if s.get("install"):
+            if s.get("install", {}).get("listo"):
                 return 409, {"error": PEOPLE_KEPT}
+            before = declared(s)
             s["spreadsheet"] = uploaded
-            return 200, plan(s)
+            reopen(s, before)
+            return 200, self.shown(s)
+
+    def post_retire(self, query, body):
+        """POST /api/retire {"users": [usernames]}, «Retirar» once confirmed: each of these people the list shows keeps
+        their account, files and shares, disabled and in no team, whatever spreadsheet follows; from «Instalar» on,
+        «Reintentar» applies it. The first administrator is not retired; at «Listo» nobody is."""
+        users = body.get("users")
+        with self.install_lock, self.state.change() as s:
+            if s.get("install", {}).get("listo"):
+                return 409, {"error": PEOPLE_KEPT}
+            listed = {person["user"]: person for person in plan(s)["people"]}
+            if not (isinstance(users, list) and users and all(isinstance(user, str) and user in listed
+                                                              for user in users)):
+                return 400, {"error": NOT_LISTED}
+            if admin := [listed[user]["name"] for user in users if listed[user]["admin"]]:
+                return 409, {"error": FIRST_ADMIN.format(admin[0])}
+            before = declared(s)
+            s["retired"] = sorted({*s.get("retired", []), *users})
+            reopen(s, before)
+            return 200, self.shown(s)
 
     def busy(self):
         return self.worker is not None and self.worker.is_alive()
@@ -340,17 +387,19 @@ class Provisionador:
     def run_install(self, interrupted=()):
         """The install's steps, in the background, with what they need to know."""
         state = self.state.read()
+        loaded, retired = declared(state)
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
                                   optional=frozenset(state.get("optional", ())), teams=state.get("teams", []),
-                                  people=plan(state)["people"])
+                                  people=loaded, retired=retired, declared=lambda: declared(self.state.read()))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
 
     def post_install(self, query, body):
         """POST /api/install {"optional": [ids]}, «Instalar» and «Reintentar»: the steps not green yet run in the
         background and GET /api/state shows their progress. The optional apps ticked on «Revisar» are those of the first
-        «Instalar». While the steps run, or at «Listo», pressing it again starts nothing more."""
+        «Instalar». Both wait for a spreadsheet that loads people. While the steps run, or at «Listo», pressing it again
+        starts nothing more."""
         optional = body.get("optional", [])
         if not (isinstance(optional, list) and all(isinstance(app, str) and app in apps.OPTIONAL for app in optional)):
             return 400, {"error": NOT_OFFERED}
@@ -358,7 +407,7 @@ class Provisionador:
             state = self.state.read()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
-            if not state.get("install") and not plan(state)["people"]:
+            if not plan(state)["people"]:
                 return 409, {"error": PEOPLE_WRONG if plan(state)["errors"] else NO_PEOPLE}
             if not (self.busy() or state.get("install", {}).get("listo")):
                 if not state.get("install"):
@@ -388,6 +437,7 @@ class Provisionador:
         ("POST", "/api/teams"): post_teams,
         ("GET", "/api/spreadsheet"): get_spreadsheet,
         ("POST", "/api/people"): post_people,
+        ("POST", "/api/retire"): post_retire,
         ("POST", "/api/install"): post_install,
         ("POST", "/api/close"): post_close,
     }

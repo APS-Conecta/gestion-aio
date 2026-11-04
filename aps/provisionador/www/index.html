@@ -94,7 +94,9 @@
       <p class="lead">Descargue la planilla del personal y complete una persona por línea, con su usuario, nombre,
         apellidos, correo y grupos (los de la lista de abajo, separados por espacios). Escriba «sí» en primer_admin para
         una sola persona: la que administrará la suite. Guárdela como CSV y súbala: la instalación creará la cuenta de
-        cada persona de la lista.</p>
+        cada persona de la lista. Para corregir la lista, suba la planilla corregida. Si alguien dejó el
+        establecimiento, márquelo y presione «Retirar»: su cuenta se desactiva y sale de todos los equipos, y sus
+        archivos y lo que compartió se conservan.</p>
       <div class="actions">
         <button type="button" id="people-template">Descargar la planilla</button>
         <label>Subir la planilla completa<input type="file" id="people-file" accept=".csv,text/csv"></label>
@@ -102,6 +104,14 @@
       <details><summary>Grupos que acepta la planilla</summary><ul id="people-groups"></ul></details>
       <ul class="message error" id="people-errors" aria-label="Errores de la planilla"></ul>
       <ul class="progress" id="people" aria-label="Personas que creará la instalación" aria-live="polite"></ul>
+      <div class="actions"><button type="button" id="retire" disabled>Retirar</button></div>
+      <div id="retire-confirm" hidden>
+        <p class="message" id="retire-question"></p>
+        <div class="actions">
+          <button type="button" class="primary" id="retire-yes">Confirmar el retiro</button>
+          <button type="button" id="retire-no">Cancelar</button>
+        </div>
+      </div>
       <p class="message" id="people-status" role="status"></p>
       <div class="actions"><button type="button" class="primary" id="teams-continue">Continuar</button></div>
     </section>
