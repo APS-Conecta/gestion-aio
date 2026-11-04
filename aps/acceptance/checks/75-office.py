@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Office as in vanilla Nextcloud: a staff member signed in at the suite's name opens the Office entry and creates a
-blank DOCX there, which opens in Euro-Office; they type a line and save, and the DOCX Nextcloud keeps holds it.
-Reopened from the Office entry, Euro-Office shows that line, and a second one saves too. The staff account is made
-here with occ, its password on stdin only and masked in the log."""
+"""Office as in vanilla Nextcloud: a staff member signed in at the suite's name opens the Office entry from the custom
+menu and creates a blank DOCX there, which opens in Euro-Office; they type a line and save, and the DOCX Nextcloud keeps
+holds it. Reopened from the Office entry, Euro-Office shows that line, and a second one saves too."""
 
 import base64
 import contextlib
 import io
-import json
 import os
 import secrets
 import sys
@@ -19,11 +17,10 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import chromium, machine  # noqa: E402
+from browser import NEXTCLOUD, chromium, machine, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 
 USER, FILE = "prueba.oficina", "acta-de-prueba.docx"
-NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"
 # In every frame, what the Euro-Office editor it holds reports: its document loaded, and whether it holds an edit the
 # document server does not have yet.
 EDITOR_STATE = """window.addEventListener('message', event => {
@@ -38,14 +35,8 @@ EDITOR_STATE = """window.addEventListener('message', event => {
 });"""
 
 evidence = Path(os.environ["EVIDENCE"])
-name = json.loads(machine("sudo docker exec nextcloud-aio-mastercontainer cat "
-                          "/mnt/docker-aio-config/data/configuration.json")).get("domain")
-if not name:
-    sys.exit("the suite has no name: «Dirección» claimed none")
-suite = f"https://{name}"
-password = os.environ["TEST_PASSWORD"]  # run.sh masked it
-machine(f"{NEXTCLOUD} sh -c 'read -r OC_PASS && export OC_PASS && "
-        f"php occ user:add --password-from-env --display-name \"Prueba Oficina\" {USER}'", stdin=f"{password}\n")
+suite = f"https://{suite_name()}"
+password = person(USER, "Prueba Oficina")
 
 
 def until(read, wait, failure):
@@ -98,8 +89,10 @@ def saved(*lines):
     print(f"{FILE} keeps {', '.join(lines)}")
 
 
-def documents(page):
-    """The Office entry's documents."""
+def office(page):
+    """The Office entry's documents, opened from the custom menu as staff open it."""
+    page.locator("#header .cm-opener").click()
+    page.locator('#side-menu a[href*="/apps/office"]').click()
     page.get_by_text("Documentos", exact=True).first.click()
 
 
@@ -114,14 +107,7 @@ with chromium() as browser:
         page.fill("#password", password)
         page.click("[data-login-form-submit]")
         page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
-        # Nextcloud's welcome slides, on a first login while the suite still runs them, marked seen as their own close
-        # button marks them.
-        page.evaluate("fetch('/index.php/apps/firstrunwizard/wizard', {method: 'DELETE', "
-                      "headers: {requesttoken: document.head.dataset.requesttoken}}).then(response => response.status)")
-        page.reload()
-
-        page.locator('#header a[href*="/apps/office"]:visible').first.click()
-        documents(page)
+        office(page)
         page.get_by_role("button", name="Vacío", exact=True).first.click()
         page.get_by_role("dialog").get_by_role("textbox").fill(FILE)
         with page.expect_response(lambda response: "/apps/files/api/v1/templates/create" in response.url) as created:
@@ -133,8 +119,8 @@ with chromium() as browser:
         saved(first)
 
         page = context.pages[0]
-        page.goto(f"{suite}/apps/office/")
-        documents(page)
+        page.goto(suite)
+        office(page)
         page.get_by_text(FILE, exact=True).first.click()
         page, frame = editor(context)
         frame.locator("#editor_sdk").click(position={"x": 300, "y": 200})
