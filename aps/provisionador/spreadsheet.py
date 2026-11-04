@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The people spreadsheet the operator uploads on «Equipos», as a spreadsheet saves it as CSV with «;»: a first line
 naming the columns, then one person per line. A person's groups are ids teams.py gives (sector-norte, role-medico),
-separated by spaces or commas; exactly one person is the first administrator, «sí» in primer_admin. The suite's
-administrator and the cargo accounts keep their usernames. Each error names its line, and a spreadsheet with any error
-loads nobody.
+separated by spaces or commas; exactly one person is the first administrator, «sí» in primer_admin, and not one
+retired with «Retirar». The suite's administrator and the cargo accounts keep their usernames. Each error names its
+line, and a spreadsheet with any error loads nobody.
 """
 
 import csv
@@ -39,14 +39,15 @@ BAD_EMAIL = "Línea {}: el correo «{}» no es válido."
 UNKNOWN = "Línea {}: el grupo «{}» no existe. Use los grupos que muestra «Equipos»."
 BAD_FIRST_ADMIN = "Línea {}: primer_admin dice «{}». Escriba «sí» o déjelo vacío."
 SECOND_ADMIN = "Línea {}: la línea {} ya marca al primer administrador. Marque solo una persona."
+RETIRED_ADMIN = "Línea {}: «{}» fue retirado/a y no puede ser el primer administrador. Marque a otra persona."
 NO_ADMIN = "Ninguna persona está marcada como primer administrador. Escriba «sí» en primer_admin para una sola."
 EMPTY = "La planilla no tiene personas. Agregue una por línea, bajo la que nombra las columnas."
 
 
-def read(text, declared, centre_type):
+def read(text, declared, centre_type, retired=()):
     """The people the spreadsheet's text loads, each with its username, display name, email, the groups its line lists
     and whether it is the first administrator, and its errors in Spanish: nobody while it has one. No text loads
-    nobody."""
+    nobody. `retired` holds the usernames retired with «Retirar»."""
     if not text:
         return [], []
     known = teams.groups(declared, centre_type)
@@ -72,7 +73,7 @@ def read(text, declared, centre_type):
         elif len(cells) != len(COLUMNS):
             errors.append(WIDTH.format(line, len(cells), len(COLUMNS)))
         else:
-            found, wrong = person(line, cells, known, reserved, seen, admins)
+            found, wrong = person(line, cells, known, reserved, retired, seen, admins)
             people += [found] if found else []
             errors += wrong
     if not end:
@@ -84,7 +85,7 @@ def read(text, declared, centre_type):
     return ([] if errors else people), errors
 
 
-def person(line, cells, known, reserved, seen, admins):
+def person(line, cells, known, reserved, retired, seen, admins):
     """The person a line with every column loads, or None, and its errors. `seen` and `admins` gather the usernames and
     the first administrators' lines so far."""
     user, first, last, email, groups, admin = cells
@@ -113,6 +114,7 @@ def person(line, cells, known, reserved, seen, admins):
         errors.append(BAD_FIRST_ADMIN.format(line, admin))
     elif FIRST_ADMIN[fold(admin)]:
         errors += [SECOND_ADMIN.format(line, admins[0])] if admins else []
+        errors += [RETIRED_ADMIN.format(line, user)] if user in retired else []
         admins.append(line)
     return None if errors else {"user": user, "name": name, "email": email, "groups": listed,
                                 "admin": FIRST_ADMIN[fold(admin)]}, errors

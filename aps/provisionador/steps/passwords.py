@@ -17,16 +17,19 @@ MISSING = ("El archivo de contraseñas del servidor no está completo o pueden l
            "«Reintentar».")
 
 
-def accounts(context):
-    kept = context.folder / ACCOUNTS
+def accounts(folder):
+    """Each account the install made a first password for, by username: the name the file shows and the password."""
+    kept = folder / ACCOUNTS
     return json.loads(kept.read_text(encoding="utf-8")) if kept.exists() else {}
 
 
 def first(context, named):
     """The first password of each account in `named`, {username: the name the file shows}: made the first time an
-    account is named and kept from then on, so a rerun never changes it. The passwords file lists it at once."""
-    kept = accounts(context)
-    new = {user: {"name": name, "password": token_hex(12)} for user, name in named.items() if user not in kept}
+    account is named and kept from then on, so a rerun or a new name never changes it. The passwords file lists it at
+    once, under the account's current name."""
+    kept = accounts(context.folder)
+    new = {user: {"name": name, "password": kept[user]["password"] if user in kept else token_hex(12)}
+           for user, name in named.items() if kept.get(user, {}).get("name") != name}
     if new:
         kept.update(new)
         write_root_only(context.folder / ACCOUNTS, json.dumps(kept, ensure_ascii=False, indent=1))
@@ -44,7 +47,7 @@ def text(context):
             "Página de AIO, para las copias de seguridad y la restauración\n"
             f"  Frase de contraseña: {secrets['passphrase']}\n"
             + "".join(f"\n{account['name']}\n  Usuario: {user}\n  Contraseña: {account['password']}\n"
-                      for user, account in accounts(context).items()))
+                      for user, account in accounts(context.folder).items()))
 
 
 def run(context):
