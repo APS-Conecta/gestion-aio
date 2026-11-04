@@ -22,6 +22,8 @@
 # Provisionador's journal (the name's credential, AIO's passphrase, its secrets and the first passwords blanked out) and
 # the disk usage, and the workflow attaches it to the run. The check that has the wizard claim a CI name writes its
 # DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it.
+# The VM has the bootstrap's memory floor (aps/bootstrap/install.sh), so a green run proves it. hardware.sh samples its
+# hardware use from the one command to the last check; the workflow attaches the peaks, whatever the outcome.
 # Usage: run.sh <tag>
 set -euo pipefail
 [[ "$#" -eq 1 && "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "usage: $0 <tag>" >&2; exit 2; }
@@ -82,6 +84,8 @@ blanked() { # <command>: what it printed on the machine, without the secrets mas
 }
 on_exit() { # a failure outside the checks names its stage and collects the same evidence
   local rc=$?
+  [ ! -s "$work/hardware/stages.txt" ] || aps/acceptance/hardware.sh report "$work/hardware" \
+    || echo "::warning title=No hardware peaks::hardware.sh report failed; samples.txt holds what was sampled"
   [ "$rc" -eq 0 ] || [ -z "$stage" ] || { echo "::error title=Acceptance run failed::$stage"; collect "$work/evidence/run"; }
 }
 stage="boot a fresh Debian 12 VM"
@@ -109,8 +113,10 @@ ssh-keygen -q -t ed25519 -N '' -C acceptance -f "$work/key"
 printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$work/key.pub")" > "$work/user-data"
 printf 'instance-id: gestion-acceptance\nlocal-hostname: gestion\n' > "$work/meta-data"
 cloud-localds "$work/seed.img" "$work/user-data" "$work/meta-data"
+memory="$(sed -n 's/^MIN_MEMORY_GIB=\([0-9][0-9]*\)$/\1/p' aps/bootstrap/install.sh)"
+[ -n "$memory" ] || { echo "aps/bootstrap/install.sh sets no MIN_MEMORY_GIB" >&2; exit 1; }
 : > "$work/evidence/serial.log" # the runner's own file, so the evidence upload can read it
-sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m 12G \
+sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m "${memory}G" \
   -drive "file=$work/disk.qcow2,if=virtio,format=qcow2" -drive "file=$work/seed.img,if=virtio,format=raw" \
   -netdev tap,id=lan,ifname=aps0,script=no,downscript=no -device virtio-net-pci,netdev=lan \
   -display none -serial "file:$work/evidence/serial.log" -daemonize
@@ -134,7 +140,10 @@ for _ in $(seq 60); do "$MACHINE" true 2> /dev/null && break; sleep 5; done
 # shellcheck disable=SC2016 # expands on the VM
 "$MACHINE" '. /etc/os-release; echo "$PRETTY_NAME, $(uname -m)"; [ "$ID $VERSION_ID" = "debian 12" ]'
 
+stage="sample the VM's hardware use"
+aps/acceptance/hardware.sh start "$work/hardware"
 stage="the one command"
+echo "$(date +%s) one-command" > "$work/hardware/stages.txt"
 echo "$COMMAND"
 aps/acceptance/one-command.sh "$CONSOLE"
 
@@ -143,6 +152,7 @@ failed=()
 for check in aps/acceptance/checks/*; do
   name="$(basename "${check%.*}")"
   export EVIDENCE="$work/evidence/$name"
+  echo "$(date +%s) $name" >> "$work/hardware/stages.txt"
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
   if timeout 15m "$check" < /dev/null; then

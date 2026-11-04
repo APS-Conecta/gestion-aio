@@ -1483,10 +1483,20 @@ class PeopleChanges(PeopleTest):
         self.assertEqual((state["people"], state["retired"]), (PEOPLE, []))
 
 
+def bootstrap_floors():
+    """The cores and the memory in GiB the bootstrap requires, as aps/bootstrap/install.sh alone sets them."""
+    script = (HERE.parent / "bootstrap" / "install.sh").read_text()
+    return {key: int(re.search(rf"^{variable}=(\d+)$", script, re.M)[1])
+            for key, variable in (("cpus", "MIN_CPUS"), ("memory_gib", "MIN_MEMORY_GIB"))}
+
+
 class Recording(InstallTest):
-    """Talk recording is on, with the components, on a server with at least 4 cores and 8 GiB, and off on any other:
-    the operator has nothing to choose, and «Revisar» lists it when it is on. The fake's server is the bootstrap's
-    minimum until a test changes it."""
+    """Talk recording is on, with the components, on a server with the bootstrap's floors plus one recording (about 2
+    cores and a 2 GiB browser), and off on any other: the operator has nothing to choose, and «Revisar» lists it when
+    it is on. The fake's server is the bootstrap's minimum until a test changes it."""
+
+    FLOORS = bootstrap_floors()
+    THRESHOLD = {key: least + 2 for key, least in FLOORS.items()}
 
     def switched(self, cpus, memory_gib):
         """The optional containers AIO runs once «Instalar» finished on a server with these cores and memory."""
@@ -1496,19 +1506,25 @@ class Recording(InstallTest):
         self.until("done")
         return self.suite.switched
 
+    def test_the_fake_server_is_the_bootstrap_minimum_which_does_not_record(self):
+        self.assertEqual(self.suite.machine, self.FLOORS)
+        self.assertEqual(self.switched(**self.FLOORS), COMPONENTS)
+
     def test_a_server_at_the_threshold_records_talk_calls(self):
-        self.assertEqual(self.switched(4, 8), COMPONENTS | {"talk-recording"})
+        self.assertEqual(self.switched(**self.THRESHOLD), COMPONENTS | {"talk-recording"})
 
     def test_a_server_one_core_short_does_not(self):
-        self.assertEqual(self.switched(3, 8), COMPONENTS)
+        short = {**self.THRESHOLD, "cpus": self.THRESHOLD["cpus"] - 1}
+        self.assertEqual(self.switched(**short), COMPONENTS)
 
     def test_a_server_one_gib_short_does_not(self):
-        self.assertEqual(self.switched(4, 7), COMPONENTS)
+        short = {**self.THRESHOLD, "memory_gib": self.THRESHOLD["memory_gib"] - 1}
+        self.assertEqual(self.switched(**short), COMPONENTS)
 
     def test_revisar_lists_recording_only_on_a_server_that_records(self):
         self.claim()
-        for cpus, listed in ((4, True), (3, False)):
-            self.suite.machine = {"cpus": cpus, "memory_gib": 8}
+        for cpus, listed in ((self.THRESHOLD["cpus"], True), (self.THRESHOLD["cpus"] - 1, False)):
+            self.suite.machine = {**self.THRESHOLD, "cpus": cpus}
             self.assertEqual("Grabador de Talk" in self.browser.get("/api/state")[1]["components"], listed, cpus)
 
 
@@ -1544,6 +1560,10 @@ class InterruptedInstall(InstallTest):
         self.suite.states = states
         self.install()
         self.until_step("Inicio de la suite", "running")
+        deadline = time.monotonic() + 10  # the step runs a moment before it presses AIO's start
+        while not self.suite.starts:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
         self.assertEqual(self.suite.starts, 1)
 
     def test_a_restart_while_aio_starts_waits_for_it_and_never_sends_its_start_again(self):

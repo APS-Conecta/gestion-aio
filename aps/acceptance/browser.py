@@ -49,9 +49,9 @@ def machine(command, stdin=""):
 
 
 def hardware():
-    """The machine's CPU cores and memory, the memory in GiB rounded as the bootstrap rounds it."""
+    """The machine's CPU cores and memory, the memory in GiB rounded up as the bootstrap rounds it."""
     cpus, memory = machine("nproc; awk '/^MemTotal:/ {print $2}' /proc/meminfo").split()
-    return {"cpus": int(cpus), "memory_gib": (int(memory) + 524288) // 1048576}
+    return {"cpus": int(cpus), "memory_gib": (int(memory) + 1048575) // 1048576}
 
 
 def fingerprint(pem):
