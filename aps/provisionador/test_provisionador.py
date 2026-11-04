@@ -495,8 +495,10 @@ class InstallTest(WizardTest):
             self.server.app.worker.join(10)
 
     def claim(self, code="999001"):
+        """The centre and its address, with the people spreadsheet «Instalar» needs."""
         self.browser.request("POST", "/api/centre", {"code": code})
         self.assertEqual(self.browser.request("POST", "/api/address", {})[0], 200)
+        self.browser.request("POST", "/api/people", {"spreadsheet": spreadsheet("ana;Ana;Rojas;;;sí")})
 
     def install(self, **body):
         return self.browser.request("POST", "/api/install", body)
@@ -1198,6 +1200,13 @@ class People(InstallTest):
         self.assertEqual(self.install()[0], 409)
         self.assertEqual(self.browser.request("POST", "/api/teams", TEAMS)[1]["errors"], [])
         self.assertEqual(self.install()[0], 202)
+
+    def test_there_is_no_install_without_people(self):
+        self.upload("")
+        status, body = self.install()
+        self.assertEqual(status, 409)
+        self.assertIn("planilla del personal", body["error"])
+        self.assertIsNone(self.progress())
 
     def test_a_spreadsheet_that_is_not_text_is_refused_and_changes_nothing(self):
         self.upload(SPREADSHEET)

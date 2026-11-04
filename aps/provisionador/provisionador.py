@@ -58,7 +58,7 @@ STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
 SERVICES = HERE.parent / "services.json"  # the release's name service and ACME directory
 PORT = 8081  # clear of AIO's 80, 443, 3478, 8080 and 8443
 COOKIE = "__Host-session"
-MAX_BODY = 64 * 1024
+MAX_BODY = 1024 * 1024  # a people spreadsheet of about 8,000 people
 
 NOT_JSON = "La solicitud no es JSON válido."
 NO_SESSION = "Abra el enlace que mostró el comando de instalación."
@@ -73,6 +73,7 @@ TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
 NOT_SPREADSHEET = "Suba la planilla del personal como texto CSV."
 PEOPLE_KEPT = "La planilla del personal ya no puede cambiarse: se presionó «Instalar»."
 PEOPLE_WRONG = "La planilla del personal tiene errores. Corríjalos en «Equipos» y súbala de nuevo."
+NO_PEOPLE = "Suba en «Equipos» la planilla del personal, con su primer administrador."
 NOT_OFFERED = "Elija solo entre las aplicaciones opcionales que ofrece «Revisar»."
 NOT_LISTO = "El archivo de contraseñas se entrega en «Listo», cuando la instalación terminó."
 CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gestión está instalada en https://{}.\n"
@@ -290,7 +291,7 @@ class Provisionador:
             declared = teams.declare(body.get("sectors", []), body.get("programs", []))
         except ValueError as refusal:
             return 400, {"error": str(refusal)}
-        with self.state.change() as s:
+        with self.install_lock, self.state.change() as s:
             if s.get("install"):
                 return 409, {"error": TEAMS_KEPT}
             s["teams"] = declared
@@ -303,11 +304,11 @@ class Provisionador:
     def post_people(self, query, body):
         """POST /api/people {"spreadsheet": its text}: the people spreadsheet, kept as uploaded. The plan then lists the
         people it loads or each of its errors, and reads it again whenever the teams change; «Instalar» waits for one
-        without errors. Once «Instalar» was pressed it stays."""
+        that loads people. Once «Instalar» was pressed it stays."""
         uploaded = body.get("spreadsheet")
         if not isinstance(uploaded, str):
             return 400, {"error": NOT_SPREADSHEET}
-        with self.state.change() as s:
+        with self.install_lock, self.state.change() as s:
             if s.get("install"):
                 return 409, {"error": PEOPLE_KEPT}
             s["spreadsheet"] = uploaded
@@ -355,8 +356,8 @@ class Provisionador:
             state = self.state.read()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
-            if not state.get("install") and plan(state)["errors"]:
-                return 409, {"error": PEOPLE_WRONG}
+            if not state.get("install") and not plan(state)["people"]:
+                return 409, {"error": PEOPLE_WRONG if plan(state)["errors"] else NO_PEOPLE}
             if not (self.busy() or state.get("install", {}).get("listo")):
                 if not state.get("install"):
                     with self.state.change() as s:
