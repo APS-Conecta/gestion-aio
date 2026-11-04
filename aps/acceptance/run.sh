@@ -35,7 +35,7 @@ TEST_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr '+/' '-_')"
 printf '::add-mask::%s\n' "$TEST_PASSWORD"
 export TEST_PASSWORD
 
-password="" passphrase="" administrator=""
+password="" passphrase="" administrator="" first=()
 secret() { # <variable> <command> [<jq filter>]: the secret the filter (.password by default) finds in the JSON the
   # command prints on the machine, masked in the log once found
   [ -z "${!1}" ] || return 0
@@ -43,11 +43,15 @@ secret() { # <variable> <command> [<jq filter>]: the secret the filter (.passwor
   [ -z "${!1}" ] || printf '\n::add-mask::%s\n' "${!1}"
 }
 mask_secrets() { # once «Dirección» claimed the name: its credential, AIO's passphrase and, once AIO made it, the
-  # administrator's first password, each on a line of its own
-  local aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
+  # administrator's first password, each on a line of its own; then each first password the install recorded so far
+  local aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json' found
   secret password 'sudo cat /var/lib/aps-conecta/name-service.json'
   secret passphrase "$aio"
   secret administrator "$aio" '.secrets.NEXTCLOUD_PASSWORD'
+  while IFS= read -r found; do
+    [ -z "$found" ] || [[ " ${first[*]} " == *" $found "* ]] || { first+=("$found"); printf '\n::add-mask::%s\n' "$found"; }
+  done < <("$MACHINE" 'sudo cat /var/lib/aps-conecta/provisionador/first-passwords.json' 2> /dev/null \
+    | jq -r '.[].password // empty' 2> /dev/null || true)
 }
 collect() { # <dir>: every container's log and the Provisionador's journal, without the secrets mask_secrets finds,
   # and the disk usage
@@ -62,11 +66,12 @@ collect() { # <dir>: every container's log and the Provisionador's journal, with
   blanked 'sudo journalctl --unit aps-provisionador --no-pager' > "$1/aps-provisionador.log"
 }
 blanked() { # <command>: what it printed on the machine, without the secrets mask_secrets finds
-  local log
+  local log found
   log="$("$MACHINE" "$1" 2>&1 || true)"
   [ -z "$password" ] || log="${log//"$password"/[credential]}"
   [ -z "$passphrase" ] || log="${log//"$passphrase"/[passphrase]}"
   [ -z "$administrator" ] || log="${log//"$administrator"/[administrator]}"
+  for found in "${first[@]}"; do log="${log//"$found"/[first password]}"; done
   printf '%s\n' "$log"
 }
 on_exit() { # a failure outside the checks names its stage and collects the same evidence
