@@ -5,9 +5,9 @@
 no certificate of the suite's own (only the staging roots, as browsers trust Let's Encrypt's production ones) and has
 a fake camera and a microphone that plays a tone, join one call from Talk's page, and each browser decodes the other's
 audio. Talk's signaling runs at wss://<name>/standalone-signaling/, and the TURN servers Talk hands the browsers are at
-<name>:3478, where a browser gets a relay. The Talk app is the official one: the app store's signature verifies each of
-its files. Talk recording is on exactly when the machine passes the recording threshold, and Talk then holds AIO's
-recording server."""
+<name>:443, where the community Caddy carries Talk's port and a browser gets a relay. The Talk app is the official one:
+the app store's signature verifies each of its files. Talk recording is on exactly when the machine passes the
+recording threshold, and Talk then holds AIO's recording server."""
 
 import base64
 import json
@@ -26,6 +26,7 @@ from playwright.sync_api import Error, expect  # noqa: E402
 from steps.components import RECORDING, chosen  # noqa: E402
 
 STAFF = ("llamada.uno", "llamada.dos")
+TURN_PORT = 443  # Talk's port, as the community Caddy sets it (community-containers/caddy/caddy.json: talk_port)
 NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"
 # Before Talk loads: every peer connection Talk opens, with the ICE servers it got.
 OBSERVE = """window.talkPeers = [];
@@ -197,8 +198,8 @@ signaling = f"wss://{name}/standalone-signaling/"
 print(f"signaling: {sorted({s for s in sockets if s.startswith(signaling)})}; TURN: {turn}")
 if not any(s.startswith(signaling) for s in sockets):
     sys.exit(f"the browsers did not reach Talk's signaling at {signaling}")
-if not turn["urls"] or any(not re.match(rf"turns?:{re.escape(name)}:3478(\?|$)", url) for url in turn["urls"]):
-    sys.exit(f"Talk handed the browsers TURN servers other than {name}:3478: {turn['urls']}")
+if not turn["urls"] or any(not re.match(rf"turns?:{re.escape(name)}:{TURN_PORT}(\?|$)", url) for url in turn["urls"]):
+    sys.exit(f"Talk handed the browsers TURN servers other than {name}:{TURN_PORT}: {turn['urls']}")
 if not turn["relays"]:
-    sys.exit(f"a browser got no relay from Talk's TURN server at {name}:3478")
+    sys.exit(f"a browser got no relay from Talk's TURN server at {name}:{TURN_PORT}")
 print(f"Talk's signaling and TURN work at {name}, with no certificate of the suite's own in the browsers")
