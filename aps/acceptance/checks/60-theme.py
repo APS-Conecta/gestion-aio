@@ -6,8 +6,11 @@ load the theme's stylesheet, theming's colours are the brand token file's, Nunit
 and the login page names the establishment. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
 the login page, the dashboard, Files, Talk or the personal settings, which link the suite's source code and its
 licence. The custom menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of
-Nextcloud's container, and the support app stays off."""
+Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme
+overrides texts of, after upstream's start updated them: Talk's, left stale before the restart, is its own Spanish as
+Nextcloud holds it with the theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh browser."""
 
+import json
 import os
 import sys
 import time
@@ -16,11 +19,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import chromium, machine, occ, person, suite_name  # noqa: E402
+from browser import NEXTCLOUD, chromium, machine, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
-from steps.theme import THEME  # noqa: E402
+from steps.theme import PLACED, THEME  # noqa: E402
 
 PERSON = "tema-prueba"
+WINDOW = {"viewport": {"width": 1280, "height": 900}, "locale": "es-CL"}
 SOURCE = "https://github.com/APS-Conecta/gestion-aio"
 PAGES = {"dashboard": ("/apps/dashboard/", "#app-dashboard"), "files": ("/apps/files/", "#app-navigation-vue"),
          "talk": ("/apps/spreed/", "#app-navigation-vue"), "settings": ("/settings/user", f'a[href="{SOURCE}"]')}
@@ -39,6 +43,8 @@ THEMED = """async () => {
 # In-page requests, so they go through Chromium's own TLS (which trusts the staging roots) and the page's session.
 TEXT = "url => fetch(url, {cache: 'no-store'}).then(r => r.text())"
 STATUS = "url => fetch(url, {cache: 'no-store'}).then(r => r.ok ? r.json() : {})"
+TALK = "/var/www/html/custom_apps/spreed/l10n/es"  # Talk's own Spanish, .json and .js
+BROWSER = f"{PLACED}/core/spreed/l10n/es.js"  # the theme's browser file for Talk, which the browser loads in its place
 
 tokens = brand.tokens()
 evidence = Path(os.environ["EVIDENCE"])
@@ -79,17 +85,44 @@ def login_page(page, label):
     return themed(page, label) + shows(page, label)
 
 
-problems = []
-with chromium() as browser:
-    page = browser.new_page(viewport={"width": 1280, "height": 900}, locale="es-CL")
-    problems += login_page(page, "login")
+def log_in(page):
     page.fill("#user", PERSON)
     page.fill("#password", password)
     page.click("button[type=submit]")
     page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
-    for label, (path, ready) in PAGES.items():
-        page.goto(f"{suite}{path}")
-        page.wait_for_selector(ready, timeout=60_000)
+
+
+def open_page(page, label):
+    path, ready = PAGES[label]
+    page.goto(f"{suite}{path}")
+    page.wait_for_selector(ready, timeout=60_000)
+
+
+def stale_talk_texts():
+    """Where the theme's browser file for Talk is not Talk's own Spanish, as Nextcloud holds it now, with the theme's
+    overrides on top: the texts that differ, or a wrong app id or plural form."""
+    own = json.loads(machine(f"{NEXTCLOUD} cat {TALK}.json"))
+    overrides = json.loads(machine(f"{NEXTCLOUD} cat {PLACED}/custom_apps/spreed/l10n/es.json"))["translations"]
+    script = machine(f"{NEXTCLOUD} cat {BROWSER}").strip().removeprefix("OC.L10N.register(").removesuffix(");")
+    app, texts, plural = json.loads(f"[{script}]")
+    expected = {**own["translations"], **overrides}
+    differ = sorted(key for key in expected.keys() | texts.keys() if texts.get(key) != expected.get(key))
+    stale = [f"Talk's browser file registers the app {app!r}, not 'spreed'"] if app != "spreed" else []
+    if plural != own["pluralForm"]:
+        stale.append(f"Talk's browser file has the plural form {plural!r}, not Talk's {own['pluralForm']!r}")
+    if differ:
+        stale.append(f"Talk's browser file is not its own Spanish with the theme's overrides on top for: {differ}")
+    print("Talk's browser texts after the restart:", "; ".join(stale) or "its own Spanish with the overrides on top")
+    return stale
+
+
+problems = []
+with chromium() as browser:
+    page = browser.new_page(**WINDOW)
+    problems += login_page(page, "login")
+    log_in(page)
+    for label in PAGES:
+        open_page(page, label)
         problems += (themed(page, label) if label == "dashboard" else []) + shows(page, label)
     if not page.locator(f'a[href="{SOURCE}"]').is_visible():
         problems.append("the personal settings do not link the source code")
@@ -99,6 +132,7 @@ with chromium() as browser:
     if f"--side-menu-background-color: {tokens['--aps-violet-dark']}" not in menu:
         problems.append("the custom menu's stylesheet does not paint it in the token file's dark violet")
 
+    machine(f"{NEXTCLOUD} cp {TALK}.js {BROWSER}")  # a stale browser file for Talk: its own, naming «Nextcloud»
     page.goto(f"{suite}/status.php")  # a page with no script of its own to reload it while Nextcloud restarts
     machine("sudo docker restart nextcloud-aio-nextcloud")
     deadline = time.monotonic() + 10 * 60
@@ -112,8 +146,11 @@ with chromium() as browser:
         if time.monotonic() > deadline:
             sys.exit("Nextcloud did not answer within 10 minutes of its container's restart")
         time.sleep(10)
-    page.context.clear_cookies()
+    page = browser.new_page(**WINDOW)  # a new context: no cookie and no cached file
     problems += login_page(page, "login-after-restart")
+    log_in(page)
+    open_page(page, "talk")
+    problems += shows(page, "talk-after-restart") + stale_talk_texts()
     support = occ("config:app:get support enabled")
     print(f"support app after the restart: {support.strip()}")
     if support.strip() != "no":
@@ -121,4 +158,5 @@ with chromium() as browser:
 
 if problems:
     sys.exit("\n".join(problems))
-print("the theme is on every page, with no «Nextcloud», and survives a restart of Nextcloud's container")
+print("the theme is on every page, with no «Nextcloud», and survives a restart of Nextcloud's container, which "
+      "rebuilds Talk's browser texts")

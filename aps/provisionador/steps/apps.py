@@ -181,7 +181,9 @@ def ensure(context, *ids):
 
 
 def run(context):
-    return install_missing(context, chosen(context))
+    reasons = install_missing(context, chosen(context))
+    context.suite.browser_texts()  # an app the theme overrides texts of may be new
+    return reasons
 
 
 def check(context):
