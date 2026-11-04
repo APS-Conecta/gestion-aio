@@ -8,15 +8,18 @@ A step module, whose name is its id, declares:
   run(context)    its work, idempotent; it returns what went wrong as Spanish reasons, which the red list shows, and
                   None or [] once the work is done: no step reports success without doing its work
   check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
-                  differences between the running suite and what the step declared, None or [] when it is clean
+                  differences between what the step declared and what holds now (the running suite, or for people
+                  what «Equipos» declares now), None or [] when it is clean
 Both answer the same way; only the suite port raises, Unreachable with its Spanish reason, and the runner turns that
 into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
 address (`inside`), the folder the Provisionador keeps its files in (`folder`), the ids of the steps a
 Provisionador restart cut short (`interrupted`) and of the optional apps the operator ticked on «Revisar»
-(`optional`), and the teams declared on «Equipos» (`teams`, as teams.py names them) and the people its spreadsheet
-loads (`people`, as spreadsheet.py reads them). A new step is a new module: no other file lists the steps. A step that
-configures an app gets it through `steps.apps.ensure` rather than NEEDS "apps".
+(`optional`), and the teams declared on «Equipos» (`teams`, as teams.py names them), the people its spreadsheet
+loads (`people`, as spreadsheet.py reads them) and the usernames retired there (`retired`), as they were when «Instalar»
+or «Reintentar» was pressed; `declared()` answers those people and usernames as «Equipos» declares them now. A new
+step is a new module: no other file lists the steps. A step that configures an app gets it through `steps.apps.ensure`
+rather than NEEDS "apps".
 """
 
 import json

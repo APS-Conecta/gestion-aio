@@ -27,7 +27,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
 
 import provisionador
-from steps import apps
+from steps import apps, people
 from suite import FakeSuite
 
 HERE = Path(__file__).resolve().parent
@@ -148,7 +148,8 @@ class OneTimeLink(WizardTest):
         browser = Browser(self.link().url)
         for method, path in (("GET", "/api/state"), ("GET", "/api/register"),
                              ("GET", "/api/establishments?name=castanos"), ("POST", "/api/centre"),
-                             ("POST", "/api/address"), ("POST", "/api/teams"), ("POST", "/api/install")):
+                             ("POST", "/api/address"), ("POST", "/api/teams"), ("POST", "/api/retire"),
+                             ("POST", "/api/install")):
             status, body = browser.request(method, path, {} if method == "POST" else None)
             self.assertEqual(status, 401, path)
             self.assertIn("enlace", body["error"])
@@ -1097,17 +1098,20 @@ PEOPLE = [{"user": "ana.rojas", "name": "Ana María Rojas Núñez", "email": "an
           {"user": "pedro.munoz", "name": "Pedro Muñoz Tapia", "email": "pedro.munoz@example.org",
            "groups": ["sector-sur", "prog-atencion-domiciliaria", "role-medico"], "admin": False}]
 PEOPLE_STEP = "Cuentas del personal"
+CHANGED = people.CHANGED
 
 
 def spreadsheet(*lines):
     return "usuario;nombre;apellidos;correo;grupos;primer_admin\n" + "".join(f"{line}\n" for line in lines)
 
 
-class People(InstallTest):
-    """The people spreadsheet on «Equipos»: the operator downloads it blank, fills it in and uploads it; every error is
-    named by its line, and the people list shows everyone the install will create. The install creates each account
-    with its display name, email and groups, the first administrator's admin rights among them, and a first password
-    the passwords file lists, made once."""
+# Ana's surname and email corrected; Pedro moved from Sector Sur and Atención Domiciliaria to Sector Norte.
+CORRECTED = spreadsheet("ana.rojas;Ana María;Rojas Muñoz;ana.rojas@salud.example.org;sector-norte role-enfermeria;sí",
+                        "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-norte role-medico;")
+
+
+class PeopleTest(InstallTest):
+    """A claimed centre with its teams, where the operator uploads the people spreadsheet."""
 
     def setUp(self):
         super().setUp()
@@ -1125,6 +1129,13 @@ class People(InstallTest):
 
     def member_of(self, user):
         return {gid for gid, group in self.suite.groups.items() if user in group["members"]}
+
+
+class People(PeopleTest):
+    """The people spreadsheet on «Equipos»: the operator downloads it blank, fills it in and uploads it; every error is
+    named by its line, and the people list shows everyone the install will create. The install creates each account
+    with its display name, email and groups, the first administrator's admin rights among them, and a first password
+    the passwords file lists, made once."""
 
     def test_the_blank_spreadsheet_has_the_columns_and_loads_nobody(self):
         status, body = self.browser.get("/api/spreadsheet")
@@ -1229,37 +1240,171 @@ class People(InstallTest):
         self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico", "sector-sur",
                                                          "prog-atencion-domiciliaria"})
 
-    def test_the_passwords_file_lists_each_persons_first_password_and_reintentar_never_changes_one(self):
-        self.upload(SPREADSHEET)
-        self.suite.answering = False
-        self.install()
-        self.until_checked("Dirección de la suite")
-        first = {user: self.suite.users[user]["password"] for user in ("ana.rojas", "pedro.munoz")}
-        self.suite.groups["sector-sur"]["members"].discard("pedro.munoz")
-        self.suite.users["ana.rojas"]["email"] = ""
-        self.suite.answering = True
-        status, reason = self.steps(self.until("failed"))[PEOPLE_STEP]
-        self.assertEqual(status, "failed")
-        self.assertIn("ana.rojas, pedro.munoz", reason)
-        self.install()
-        self.assertEqual(self.steps(self.until("done"))["Archivo de contraseñas"], ("green", None))
-        self.assertIn("sector-sur", self.member_of("pedro.munoz"))
-        self.assertEqual(self.suite.users["ana.rojas"]["email"], "ana.rojas@example.org")
-        self.assertEqual({user: self.suite.users[user]["password"] for user in first}, first)
-        self.assertNotEqual(*first.values())
-        passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
-        for person in PEOPLE:
-            self.assertIn(f"\n{person['name']}\n  Usuario: {person['user']}\n  Contraseña: {first[person['user']]}\n",
-                          passwords)
-
-    def test_once_instalar_was_pressed_the_spreadsheet_stays(self):
+    def test_the_passwords_file_lists_each_persons_first_password(self):
         self.upload(SPREADSHEET)
         self.install()
         self.until("done")
-        status, body = self.upload(spreadsheet("luis;Luis;Vera;;;sí"))
+        passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
+        for person in PEOPLE:
+            password = self.suite.users[person["user"]]["password"]
+            self.assertIn(f"\n{person['name']}\n  Usuario: {person['user']}\n  Contraseña: {password}\n", passwords)
+        self.assertNotEqual(self.suite.users["ana.rojas"]["password"], self.suite.users["pedro.munoz"]["password"])
+
+
+class PeopleChanges(PeopleTest):
+    """From «Instalar» until «Listo», «Equipos» takes a corrected spreadsheet and «Retirar», and «Reintentar» applies
+    them: names, emails and teams follow the spreadsheet, a moved person leaves the old team's group, and a retired
+    person's account is disabled and in no team, kept with its files and shares. Only the groups the install manages
+    change, and no password does. The end-of-install check never flags what an administrator changes in Nextcloud; at
+    «Listo», Nextcloud's Users page owns the people."""
+
+    def setUp(self):
+        super().setUp()
+        self.upload(SPREADSHEET)
+
+    def retire(self, *users):
+        return self.browser.request("POST", "/api/retire", {"users": list(users)})
+
+    def until_people(self):
+        """«Instalar», held at its end-of-install check while the suite does not answer at its name: every account
+        exists."""
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+
+    def reintentar(self):
+        """The suite answers: the end-of-install check finds the people changed, and «Reintentar» applies them."""
+        self.suite.answering = True
+        self.assertEqual(self.steps(self.until("failed"))[PEOPLE_STEP], ("failed", CHANGED))
+        self.install()
+        return self.until("done")
+
+    def passwords(self):
+        return {user: self.suite.users[user]["password"] for user in ("ana.rojas", "pedro.munoz")}
+
+    def test_a_corrected_spreadsheet_updates_names_emails_and_teams_and_a_moved_person_leaves_the_old_team(self):
+        self.until_people()
+        first = self.passwords()
+        self.suite.groups["comite-calidad"] = {"name": "Comité de Calidad", "members": {"pedro.munoz"}}  # an admin's
+        status, body = self.upload(CORRECTED)
+        self.assertEqual((status, body["errors"]), (200, []))
+        self.reintentar()
+        ana = self.suite.users["ana.rojas"]
+        self.assertEqual((ana["name"], ana["email"]), ("Ana María Rojas Muñoz", "ana.rojas@salud.example.org"))
+        self.assertEqual(self.member_of("pedro.munoz"),
+                         {"all-staff", "cat-clinicos", "role-medico", "sector-norte", "comite-calidad"})
+        self.assertEqual(self.passwords(), first)
+        passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
+        self.assertIn(f"\nAna María Rojas Muñoz\n  Usuario: ana.rojas\n  Contraseña: {first['ana.rojas']}\n", passwords)
+        self.assertNotIn("Rojas Núñez", passwords)
+
+    def test_a_display_name_that_starts_with_a_dash_is_set_as_written(self):
+        self.until_people()
+        self.upload(SPREADSHEET.replace(";Ana María;", ";-Ana María;"))
+        self.reintentar()
+        self.assertEqual(self.suite.users["ana.rojas"]["name"], "-Ana María Rojas Núñez")
+
+    def test_a_change_while_the_install_runs_holds_listo_until_reintentar_applies_it(self):
+        """The install applies the people as they were when «Instalar» was pressed."""
+        self.suite.release.clear()
+        self.install()
+        self.until_step("Inicio de la suite", "running")
+        status, body = self.retire("pedro.munoz")
+        self.assertEqual((status, body["retired"]), (200, ["pedro.munoz"]))
+        self.suite.release.set()
+        install = self.until("failed")
+        self.assertEqual(self.steps(install)[PEOPLE_STEP], ("failed", CHANGED))
+        self.assertEqual(self.named(install, "failed"), {PEOPLE_STEP})
+        self.assertTrue(self.suite.users["pedro.munoz"]["enabled"])
+        first = self.passwords()
+        self.suite.groups["comite-calidad"] = {"name": "Comité de Calidad", "members": {"pedro.munoz"}}  # an admin's
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")),
+                         (False, {"comite-calidad"}), "disabled and in no team, the account and its files kept")
+        self.assertEqual(self.passwords(), first)
+        self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
+
+    def test_a_retired_person_stays_retired_when_the_people_step_runs_again(self):
+        self.retire("pedro.munoz")
+        self.until_people()
+        retired = (self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz"))
+        self.assertEqual(retired, (False, set()), "retired before «Instalar», the account is made disabled")
+        self.upload(CORRECTED)
+        self.reintentar()
+        self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")), retired)
+        self.assertEqual(self.suite.users["ana.rojas"]["email"], "ana.rojas@salud.example.org")
+        self.assertEqual(self.browser.get("/api/state")[1]["retired"], ["pedro.munoz"])
+
+    def test_moving_primer_admin_takes_the_old_first_administrator_out_of_admin_and_retiring_them_out_of_every_group(
+            self):
+        self.suite.down = {"issuer"}
+        self.install()
+        self.until("failed")
+        self.upload(spreadsheet("ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;sector-norte role-enfermeria;",
+                                "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur role-medico;sí"))
+        self.install()
+        self.until("failed")
+        self.assertNotIn("admin", self.member_of("ana.rojas"))
+        self.assertIn("admin", self.member_of("pedro.munoz"))
+        self.assertEqual(self.retire("ana.rojas")[0], 200)
+        self.suite.down = set()
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.users["ana.rojas"]["enabled"], self.member_of("ana.rojas")), (False, set()))
+
+    def test_retirar_takes_people_the_list_shows_and_never_the_first_administrator(self):
+        for users in ("pedro.munoz", [], ["nadie"], [3]):
+            status, body = self.browser.request("POST", "/api/retire", {"users": users})
+            self.assertEqual(status, 400, users)
+            self.assertTrue(body["error"], users)
+        status, body = self.retire("pedro.munoz", "ana.rojas")
         self.assertEqual(status, 409)
-        self.assertIn("«Instalar»", body["error"])
-        self.assertEqual(self.browser.get("/api/state")[1]["people"], PEOPLE)
+        self.assertIn("Ana María Rojas Núñez", body["error"])
+        self.assertEqual(self.browser.get("/api/state")[1]["retired"], [])
+        self.retire("pedro.munoz")
+        errors = self.errors(spreadsheet("ana.rojas;Ana;Rojas;;;", "pedro.munoz;Pedro;Muñoz;;;sí"))
+        self.assertEqual([error.split(":")[0] for error in errors], ["Línea 3"])
+        self.assertIn("«pedro.munoz»", errors[0])
+
+    def test_reintentar_answers_409_while_the_spreadsheet_has_errors(self):
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[PEOPLE_STEP], ("green", None))
+        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;sector-oriente;sí"))
+        self.assertEqual(self.steps(self.progress())[PEOPLE_STEP], ("failed", CHANGED))
+        status, body = self.install()
+        self.assertEqual(status, 409)
+        self.assertIn("«Equipos»", body["error"])
+        self.suite.down = set()
+        self.upload(CORRECTED)
+        self.assertEqual(self.install()[0], 202)
+        self.until("done")
+        self.assertEqual(self.suite.users["ana.rojas"]["email"], "ana.rojas@salud.example.org")
+
+    def test_the_end_of_install_check_does_not_flag_people_added_or_changed_later_in_nextcloud(self):
+        self.until_people()
+        ana = self.suite.users["ana.rojas"]
+        ana.update(name="Ana Rojas", email="ana@example.org")
+        self.suite.users["pedro.munoz"]["enabled"] = False
+        self.suite.groups["sector-sur"]["members"].discard("pedro.munoz")
+        self.suite.groups["sector-norte"]["members"].add("pedro.munoz")
+        self.suite.add_user("rosa.soto", "Rosa Soto", "contraseña de Rosa")
+        self.suite.groups["all-staff"]["members"].add("rosa.soto")
+        self.suite.answering = True
+        self.until("done")
+        self.assertEqual((ana["name"], ana["email"]), ("Ana Rojas", "ana@example.org"))
+        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico", "sector-norte",
+                                                         "prog-atencion-domiciliaria"})
+
+    def test_at_listo_the_people_stay_as_they_are_for_nextclouds_users_page(self):
+        self.install()
+        self.until("done")
+        for status, body in (self.upload(spreadsheet("luis;Luis;Vera;;;sí")), self.retire("pedro.munoz")):
+            self.assertEqual(status, 409)
+            self.assertIn("«Cuentas»", body["error"])
+        state = self.browser.get("/api/state")[1]
+        self.assertEqual((state["people"], state["retired"]), (PEOPLE, []))
 
 
 class InterruptedInstall(InstallTest):

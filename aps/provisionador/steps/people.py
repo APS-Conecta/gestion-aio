@@ -1,8 +1,15 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Each person the people spreadsheet loads gets an account with their display name, email and groups: the listed ones,
-the staff-wide group, each listed role's category and, for the first administrator, Nextcloud's admin group. Their
-first passwords are made once and the passwords file lists them; an account that exists keeps its own."""
+the staff-wide group, each listed role's category and, for the first administrator, Nextcloud's admin group. A person
+retired with «Retirar» keeps their account, files and shares, disabled and in none of the groups the install manages
+(teams.py's and admin); a corrected spreadsheet takes a person out of the managed groups it no longer lists. Any other
+group stays as Nextcloud has it. Their first passwords are made once and the passwords file lists them under their
+current name; an account that exists keeps its own.
+
+The step applies the people as «Equipos» declared them when «Instalar» or «Reintentar» was pressed. Its part of the
+end-of-install check compares them with what «Equipos» declares now, never with Nextcloud, where an administrator may
+change people: a change made since then waits for «Reintentar»."""
 
 import json
 
@@ -12,8 +19,11 @@ from steps import passwords
 NAME = "Cuentas del personal"
 NEEDS = ("groups",)
 ADMINS = "admin"  # Nextcloud's administrators
-MISSING = ("Estas personas no tienen su cuenta con su nombre, su correo y sus grupos: {}. Presione «Reintentar»; si "
+NEW = {"display_name": None, "email": None, "groups": (), "enabled": True}  # an account that does not exist yet
+MISSING = ("Las cuentas de estas personas no quedaron como las declara «Equipos»: {}. Presione «Reintentar»; si "
            "vuelve a ocurrir, contacte a APS Conecta.")
+WRONG = "La planilla del personal tiene errores. Corríjalos en «Equipos» y presione «Reintentar»."
+CHANGED = "El personal cambió en «Equipos» después de aplicarse. Presione «Reintentar» para aplicar los cambios."
 
 
 def groups(person):
@@ -24,34 +34,51 @@ def groups(person):
 
 
 def accounts(suite):
-    """Every account, by its username: its display name, email and groups, among others."""
+    """Every account, by its username: its display name, email, whether it is enabled and its groups, among others."""
     return json.loads(suite.occ("user:list", "--info", "--limit=0", "--output=json")) or {}
 
 
-def held(person, account):
-    """Whether the account holds the person's display name, email and groups."""
-    return bool(account) and (account["display_name"], account["email"]) == (person["name"], person["email"]) and (
-        groups(person) <= set(account["groups"]))
+def differences(context, found):
+    """By username, the occ commands that bring each account the step reconciles to what it declares: a listed person's
+    display name, email and groups, and a retired person's account disabled. A retired person the spreadsheet no longer
+    lists is reconciled while their account exists."""
+    managed, retired = {*teams.groups(context.teams, context.centre["type"]), ADMINS}, set(context.retired)
+    listed = {person["user"]: person for person in context.people}
+    needed = {}
+    for user in [*listed, *sorted(retired & (found.keys() - listed.keys()))]:
+        account, person, commands = found.get(user, NEW), listed.get(user), []
+        if person:
+            commands += [("user:setting", "--", user, "settings", key, value)  # «--»: a name may start with «-»
+                         for key, value in (("display_name", person["name"]), ("email", person["email"]))
+                         if account[key] != value]
+        wanted = set() if user in retired else groups(person)
+        held = set(account["groups"])
+        commands += [("group:removeuser", group, user) for group in sorted(held & (managed - wanted))]
+        commands += [("group:adduser", group, user) for group in sorted(wanted - held)]
+        if user in retired and account["enabled"]:
+            commands.append(("user:disable", user))
+        needed[user] = commands
+    return needed
 
 
 def run(context):
     suite, people = context.suite, context.people
+    if not people:
+        return [WRONG]
     first = passwords.first(context, {person["user"]: person["name"] for person in people})
     found = accounts(suite)
-    for person in people:
-        user = person["user"]
-        if user not in found:
-            suite.add_user(user, person["name"], first[user])
-        account = found.get(user, {"display_name": person["name"], "email": "", "groups": []})
-        for key, wanted in (("display_name", person["name"]), ("email", person["email"])):
-            if account[key] != wanted:
-                suite.occ("user:setting", user, "settings", key, wanted)
-        for group in sorted(groups(person) - set(account["groups"])):
-            suite.occ("group:adduser", group, user)
-    return check(context)
+    created = [person for person in people if person["user"] not in found]
+    for person in created:
+        suite.add_user(person["user"], person["name"], first[person["user"]])
+    for commands in differences(context, accounts(suite) if created else found).values():
+        for command in commands:
+            suite.occ(*command)
+    missing = [user for user, commands in differences(context, accounts(suite)).items() if commands]
+    return [MISSING.format(", ".join(missing))] if missing else check(context)
 
 
 def check(context):
-    found = accounts(context.suite)
-    missing = [person["user"] for person in context.people if not held(person, found.get(person["user"]))]
-    return [MISSING.format(", ".join(missing))] if missing else []
+    people, retired = context.declared()
+    if not people:
+        return [WRONG]
+    return [CHANGED] if (people, retired) != (context.people, context.retired) else []
