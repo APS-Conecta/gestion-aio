@@ -76,8 +76,8 @@ textarea { resize: vertical; }
 .progress li[data-state="failed"], .progress li[data-state="waiting"] { color: var(--aps-error-text); }
 .progress li[data-state="failed"] span, .progress li[data-state="waiting"] span { color: inherit; font-weight: 700; }
 
-/* The install's log, under the progress and on «Listo»: monospace, each line at its time, newest at the bottom. */
-.log { list-style: none; max-width: 60rem; max-height: 18rem; overflow: auto; margin: 0; padding: .5rem .75rem; border: 1px solid var(--aps-border); border-radius: var(--radius); background: var(--aps-violet-wash); font: .8rem/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+/* The install's log, under the progress and on «Listo»: each line at its time, newest at the bottom. */
+.log { list-style: none; max-width: 60rem; max-height: 18rem; overflow: auto; margin: 0; padding: .5rem .75rem; border: 1px solid var(--aps-border); border-radius: var(--radius); background: var(--aps-paper); font-size: .85rem; line-height: 1.5; overflow-wrap: anywhere; }
 .log time { color: var(--aps-muted); }
 
 /* Simple buttons: one primary action, the rest secondary. */

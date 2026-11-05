@@ -594,6 +594,18 @@ class InstallTest(WizardTest):
         """The steps with that status."""
         return {name for name, (now, _) in self.steps(install).items() if now == status}
 
+    @staticmethod
+    def texts(install):
+        """The install's log, by its lines' texts."""
+        return [line["text"] for line in install["log"]]
+
+    def until_logged(self, text):
+        deadline = time.monotonic() + 10
+        while text not in self.texts(install := self.progress()):
+            self.assertLess(time.monotonic(), deadline, install["log"])
+            time.sleep(0.02)
+        return install
+
 
 class Instalar(InstallTest):
     """«Revisar» and «Instalar»: one summary, then the install's steps, each once the steps it needs are green; the
@@ -1437,6 +1449,28 @@ class PeopleChanges(PeopleTest):
         self.assertEqual(self.passwords(), first)
         self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
 
+    def test_a_change_while_the_people_step_runs_logs_its_failure(self):
+        ran, posted = threading.Event(), threading.Event()
+        real = people.run
+
+        # No seam reaches the window inside the people step: wrap the real step.
+        def run(context):
+            found = real(context)
+            ran.set()
+            posted.wait(10)
+            return found
+
+        with mock.patch.object(people, "run", run):
+            self.install()
+            self.assertTrue(ran.wait(10))
+            self.assertEqual(self.retire("pedro.munoz")[0], 200)
+            posted.set()
+            install = self.until("failed")
+        self.assertEqual(self.steps(install)[PEOPLE_STEP], ("failed", CHANGED))
+        texts = self.texts(install)
+        self.assertEqual(texts.count(f"Paso «{PEOPLE_STEP}»: no se completó. {CHANGED}"), 1)
+        self.assertNotIn(f"Paso «{PEOPLE_STEP}»: completado.", texts)
+
     def test_a_change_while_the_people_check_runs_holds_listo_until_reintentar_applies_it(self):
         """The change lands once the people step's check read «Equipos», before the runner records what it found."""
         self.until_people()
@@ -1702,6 +1736,23 @@ class InterruptedInstall(InstallTest):
         self.until("done")
         self.assertEqual(self.suite.starts, 1)
 
+    def test_once_aio_started_the_suite_a_silent_log_names_the_containers_not_running_yet(self):
+        """Apache runs as the resumed step reads the containers: AIO started them all, and the step waits for the rest."""
+        clock = [0.0]
+        self.interrupted_start({"nextcloud-aio-apache": ("Apache", "stopped"), "nextcloud-aio-talk": ("Talk", "stopped")})
+        self.suite.states = {"nextcloud-aio-apache": ("Apache", "running"), "nextcloud-aio-talk": ("Talk", "starting")}
+        # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
+        with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            self.restart()
+            install = self.until_logged("Inicio de la suite: AIO inició todos los contenedores.")
+            resumed = self.texts(install).index("El Provisionador se reinició y continúa la instalación.")
+            self.assertIn("Inicio de la suite: AIO inició todos los contenedores.", self.texts(install)[resumed:])
+            clock[0] = start.HEARTBEAT
+            self.until_logged("Inicio de la suite: aún no están en ejecución: Talk.")
+            self.suite.states["nextcloud-aio-talk"] = ("Talk", "running")
+            self.until("done")
+        self.assertEqual(self.suite.starts, 1)
+
     def test_a_resumed_install_says_so_in_its_log(self):
         self.interrupted_start({"nextcloud-aio-database": ("PostgreSQL", "running"),
                                 "nextcloud-aio-apache": ("Apache", "stopped")})
@@ -1729,16 +1780,6 @@ class InstallLog(InstallTest):
 
     START = "Inicio de la suite"
 
-    @staticmethod
-    def texts(install):
-        return [line["text"] for line in install["log"]]
-
-    def until_logged(self, text):
-        deadline = time.monotonic() + 10
-        while text not in self.texts(install := self.progress()):
-            self.assertLess(time.monotonic(), deadline, install["log"])
-            time.sleep(0.02)
-
     def test_each_step_logs_when_it_starts_and_finishes_and_the_journal_has_the_same_lines(self):
         self.claim()
         self.install()
@@ -1762,7 +1803,7 @@ class InstallLog(InstallTest):
         install = self.until("failed")
         reason = self.steps(install)["Componentes"][1]
         self.assertIn(f"Paso «Componentes»: no se completó. {reason}", self.texts(install))
-        self.assertIn(f"Paso «{self.START}»: en espera. Espera a que se complete: «Componentes», «Copias de seguridad».",
+        self.assertIn(f"Paso «{self.START}»: aún no comienza. Espera a que se complete: «Componentes», «Copias de seguridad».",
                       self.texts(install))
         before = len(install["log"])
         self.suite.down = set()
@@ -1788,56 +1829,37 @@ class InstallLog(InstallTest):
         self.suite.release.set()
         texts = self.texts(self.until("done"))
         start, end = texts.index(f"Paso «{self.START}»: en curso."), texts.index(f"Paso «{self.START}»: completado.")
-        self.assertEqual(texts[start + 1:end], ["Contenedor «PostgreSQL»: en ejecución.",
-                                                "Contenedor «Servidor de aplicaciones»: iniciando.",
-                                                "Contenedor «Búsqueda de texto completo»: en espera.",
-                                                self.counted(1, 3),
-                                                "Contenedor «Búsqueda de texto completo»: iniciando.",
-                                                "Contenedor «Servidor de aplicaciones»: en ejecución.",
-                                                "Contenedor «Búsqueda de texto completo»: en ejecución."])
-        self.assertEqual([t for t in texts if t.startswith("Contenedor")],
-                         [t for t in texts[start + 1:end] if t.startswith("Contenedor")])
+        self.assertEqual([t for t in texts[start + 1:end] if t.startswith("Contenedor")], [
+            "Contenedor «PostgreSQL»: en ejecución.", "Contenedor «Servidor de aplicaciones»: iniciando.",
+            "Contenedor «Búsqueda de texto completo»: en espera.", "Contenedor «Búsqueda de texto completo»: iniciando.",
+            "Contenedor «Servidor de aplicaciones»: en ejecución.",
+            "Contenedor «Búsqueda de texto completo»: en ejecución."])
+        self.assertEqual(set(texts[start + 1:end]) - {t for t in texts if t.startswith("Contenedor")},
+                         {f"{self.START}: AIO inició todos los contenedores."})
+        self.assertEqual(len([t for t in texts if t.startswith("Contenedor")]), 6, "only while the suite starts")
 
-    def counted(self, running, total):
-        return (f"{self.START}: {running} de {total} contenedores en ejecución; AIO sigue descargando e iniciando el "
-                "resto.")
-
-    def counts(self):
-        return [t for t in self.texts(self.progress()) if t.startswith(f"{self.START}: ")]
-
-    def until_counts(self, *expected):
-        deadline = time.monotonic() + 10
-        while (counts := self.counts()) != [self.counted(n, 3) for n in expected]:
-            self.assertLess(time.monotonic(), deadline, counts)
-            time.sleep(0.02)
-
-    def test_while_aio_starts_the_suite_the_log_counts_the_running_containers(self):
-        """At the step's start, then at least every HEARTBEAT seconds and whenever the count changes, never twice within
-        half of it, as long as a container does not run yet."""
+    def test_while_aio_starts_the_suite_a_silent_log_says_how_many_containers_run(self):
+        """Once the step wrote nothing for HEARTBEAT seconds while a container does not run yet."""
         clock = [0.0]
+        counted = f"{self.START}: AIO descarga e inicia los contenedores; 1 de 3 en ejecución."
         self.claim()
         self.suite.release.clear()
         self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
                              "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
                              "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
+        # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
         with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
             self.install()
-            self.until_counts(1)
-            clock[0] = start.HEARTBEAT / 2 - 1
-            self.suite.states["nextcloud-aio-nextcloud"] = ("Servidor de aplicaciones", "running")
-            self.until_logged("Contenedor «Servidor de aplicaciones»: en ejecución.")
+            self.until_logged("Contenedor «Búsqueda de texto completo»: en espera.")
+            clock[0] = start.HEARTBEAT - 1
             time.sleep(start.POLL * 1.5)
-            self.assertEqual(self.counts(), [self.counted(1, 3)], "a changed count waits for half a heartbeat")
-            clock[0] = start.HEARTBEAT / 2
-            self.until_counts(1, 2)
-            clock[0] = start.HEARTBEAT * 1.5 - 1
-            time.sleep(start.POLL * 1.5)
-            self.assertEqual(self.counts(), [self.counted(1, 3), self.counted(2, 3)])
-            clock[0] = start.HEARTBEAT * 1.5
-            self.until_counts(1, 2, 2)
+            self.assertNotIn(counted, self.texts(self.progress()))
+            clock[0] = start.HEARTBEAT
+            self.until_logged(counted)
             self.suite.release.set()
-            self.until("done")
-        self.assertEqual(self.counts(), [self.counted(n, 3) for n in (1, 2, 2)], "once every container runs, no count")
+            texts = self.texts(self.until("done"))
+        self.assertEqual(texts.count(counted), 1)
+        self.assertLess(texts.index(counted), texts.index(f"{self.START}: AIO inició todos los contenedores."))
 
     def test_the_log_keeps_its_latest_lines_newest_last(self):
         self.claim()
