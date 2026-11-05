@@ -8,6 +8,7 @@ sent; while it does, the step waits for it instead of sending another one.
 
 Every reading the step makes goes through one reader, which writes to the install's log each container's state as first
 read and whenever it changes; a thread reads only while AIO's start runs, and the step reads again once it is joined.
+While AIO's start answers, the reader also writes each container whose image AIO begins to download, as the answer says.
 Once the reader wrote nothing for HEARTBEAT seconds while a container does not run, it says how the start goes: until
 AIO started every container, how many run; from then on, which do not.
 """
@@ -29,6 +30,7 @@ NOT_RUNNING = ("Estos contenedores de la suite no quedaron en ejecución: {}. Pr
                "ocurrir, contacte a APS Conecta.")
 CONTAINER_LINE = "Contenedor «{}»: {}."
 STATES = {"stopped": "en espera", "starting": "iniciando", "running": "en ejecución"}  # as the progress shows them
+DOWNLOADING = "AIO descarga su imagen"
 STARTING = NAME + ": AIO descarga e inicia los contenedores; {} de {} en ejecución."
 STARTED = NAME + ": AIO inició todos los contenedores."
 LATE = NAME + ": aún no están en ejecución: {}."
@@ -72,6 +74,10 @@ class Reader:
                      else STARTING.format(len(listed) - len(waiting), len(listed)))
         return listed
 
+    def downloading(self, container):
+        """AIO begins to download the container's image."""
+        self.log(CONTAINER_LINE.format(named(container), DOWNLOADING))
+
     def started(self):
         """AIO started every container: from now on a silent log names those that do not run yet."""
         self.answered = True
@@ -108,7 +114,7 @@ def run(context):
         read.started()
     else:
         with reading(read):
-            context.suite.start()
+            context.suite.start(read.downloading)
         read.started()
     return problems(until(read, lambda now: not problems(now), WAIT))
 

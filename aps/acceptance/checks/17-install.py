@@ -40,6 +40,7 @@ from steps.passwords import FILE  # noqa: E402
 from steps.people import CHANGED, NAME as ACCOUNTS  # noqa: E402
 from steps.start import NAME as START  # noqa: E402
 
+LISTO_WITHIN = 20  # minutes: the install's GitHub downloads alone can take several on a slow day
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
 # As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people but the one retired.
@@ -137,7 +138,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.screenshot(path=evidence / "retirar.png")
     page.click("#teams-continue")
     seen = {}  # each container's states, in the order the page showed them
-    deadline, stored = time.monotonic() + 12 * 60, False
+    deadline, stored = time.monotonic() + LISTO_WITHIN * 60, False
     while not page.locator("#listo").is_visible():
         for container, state in page.eval_on_selector_all(
                 "#progress li", "items => items.map(i => [i.querySelector('strong').textContent, i.dataset.state])"):
@@ -151,7 +152,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
             page.click("#install")
         elif page.locator("#install").is_visible() or time.monotonic() > deadline:
             page.screenshot(path=evidence / "revisar-failed.png")
-            sys.exit(f"no «Listo» within 12 minutes: {page.inner_text('#install-status')}\n{page.inner_text('#steps')}")
+            sys.exit(f"no «Listo» within {LISTO_WITHIN} minutes: {page.inner_text('#install-status')}\n{page.inner_text('#steps')}")
         if {"running", "stopped"} <= {s[-1] for s in seen.values()} and not (evidence / "progress.png").exists():
             expect(page.locator("#log")).to_contain_text(f"Paso «{START}»: en curso.")
             page.locator("#log").scroll_into_view_if_needed()
