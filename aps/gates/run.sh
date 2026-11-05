@@ -10,6 +10,7 @@ python3 -I aps/gates/conformance.py
 python3 -I aps/gates/deis_codes.py
 python3 -I aps/gates/manifest.py
 python3 -I aps/gates/brand.py
+python3 -I aps/gates/release.py
 python3 -I aps/provisionador/deis.py slugs > /dev/null
 python3 -I -B -m unittest discover -s aps/provisionador
 node --test aps/name-service/names.test.mjs

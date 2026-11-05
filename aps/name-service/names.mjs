@@ -4,7 +4,8 @@
 // credential that changes only that name's address records and, through acme-dns's POST /update, its
 // certificate's challenge record, and that can release the name. Claims need no account, so a limit per client
 // address and a rolling weekly budget slow squatting but cannot prevent it; APS releases a name a squatter took
-// (accepted risk).
+// (accepted risk). The test establishments' codes (`tests`, by code their slug) claim their names only with APS's
+// token, so no one but a release's acceptance run holds them.
 
 import { CloudflareError, dnsRecords } from "./cloudflare.mjs";
 
@@ -57,6 +58,9 @@ const shaped = (body, ...keys) =>
 /** The DEIS code a claim or a release names, or null when the body is not {"code": "<code>"}. */
 const codeIn = (body) => (shaped(body, "code") && typeof body.code === "string" ? body.code : null);
 
+/** The table's own entry for a code: never one Object.prototype lends it. */
+const entry = (table, code) => (Object.hasOwn(table, code) ? table[code] : undefined);
+
 /** Whether `key` may make one more change: at most CHANGES_PER_MINUTE in the last minute of `now()`. */
 function rateLimiter(now) {
   const recent = new Map();
@@ -81,7 +85,7 @@ function serializer() {
   };
 }
 
-export function nameService({ storage, fetch, token, zone, suffix, slugs, claimLimits, now = Date.now }) {
+export function nameService({ storage, fetch, token, zone, suffix, slugs, tests = {}, claimLimits, now = Date.now }) {
   const dns = dnsRecords({ fetch, token, zone });
   const exclusive = serializer();
   const mayChange = rateLimiter(now);
@@ -90,13 +94,22 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs, claimL
   const nameKey = (slug) => `name:${slug}`;
   const fqdn = (slug) => `${slug}.${suffix}`;
 
+  /** Whether the request carries APS's token as its bearer. */
+  async function byAps(request) {
+    const bearer = (request.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
+    return Boolean(token) && equalDigests(await sha256(bearer), await sha256(token));
+  }
+
   /** A code takes its name once: neither the code nor the name may be held already. Each claim is logged (its
    * time and a hash of the client address) for a week, to keep within claimLimits; a release gives none back. */
   async function claim(request, body) {
     const code = codeIn(body);
     if (code === null) return answer(400, { error: 'a claim is {"code": "<DEIS code>"}' });
-    if (!Object.hasOwn(slugs, code)) return answer(404, { error: `${code} is not a DEIS code of the register` });
-    const slug = slugs[code];
+    const slug = entry(slugs, code) ?? entry(tests, code);
+    if (slug === undefined) return answer(404, { error: `${code} is not a DEIS code of the register` });
+    if (entry(slugs, code) === undefined && !(await byAps(request))) {
+      return answer(401, { error: `${code} is a test establishment's: its name needs APS's token` });
+    }
     return exclusive("claims", async () => {
       const held = (await storage.get(codeKey(code)))?.slug ?? ((await storage.get(nameKey(slug))) && slug);
       if (held) return answer(409, { error: `${fqdn(held)} is already claimed; APS Conecta can release it` });
@@ -178,8 +191,7 @@ export function nameService({ storage, fetch, token, zone, suffix, slugs, claimL
         return free(code, record);
       });
     }
-    const bearer = (request.headers.get("Authorization") ?? "").replace(/^Bearer /, "");
-    if (!token || !equalDigests(await sha256(bearer), await sha256(token))) return answer(401, { error: "release needs APS's token" });
+    if (!(await byAps(request))) return answer(401, { error: "release needs APS's token" });
     const code = codeIn(body);
     if (code === null) return answer(400, { error: 'a release is {"code": "<DEIS code>"}' });
     return exclusive(codeKey(code), async () => {

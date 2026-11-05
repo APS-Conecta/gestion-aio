@@ -2,15 +2,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # The clean-machine acceptance run (Seam 1): the one command from a pre-release on a fresh Debian 12 VM,
 # then every check module (aps/acceptance/run.sh documents their interface). The release pipeline calls
-# it for every release candidate; a maintainer can dispatch it for any test build, whose wizard claims a
-# CI name that the run releases at its end.
+# it for every test build and release candidate; a maintainer can dispatch it for any of them. A test build's
+# wizard claims a CI name. For a release's, the run first claims the production name of the register's hidden test
+# establishment with APS's token, which only that name needs, and the wizard takes that claim; the suite then gets a
+# real certificate. Either way the run releases the name at its end with APS's token.
 name: APS acceptance
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Pre-release to install, such as v0.0.0-ci.6
+        description: Pre-release to install, such as v0.0.0-ci.6 or a release's candidate
         required: true
         type: string
   workflow_call:
@@ -33,12 +35,15 @@ jobs:
     name: The one command on a fresh Debian 12 VM
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Every run shares the name service's one CI deployment: one deploy-and-claim at a time.
+    # Every test build shares the name service's one CI deployment, and every release the test establishment's
+    # production name: one deploy-and-claim, or claim, at a time.
     concurrency:
-      group: aps-name-service-ci
+      group: ${{ startsWith(inputs.tag, 'v0.0.0-ci.') && 'aps-name-service-ci' || 'aps-acceptance-production-name' }}
       cancel-in-progress: false
     permissions:
       contents: read
+    env:
+      TEST_BUILD: ${{ startsWith(inputs.tag, 'v0.0.0-ci.') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,20 +63,38 @@ jobs:
           "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium > /dev/null
           echo "$RUNNER_TEMP/browser/bin" >> "$GITHUB_PATH"
       - name: Deploy the name service's CI deployment, gestion-nombres-ci.apsconecta.workers.dev, from this commit
+        if: env.TEST_BUILD == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: aps/name-service/deploy.sh ci
+      - name: Claim the test establishment's production name with APS's token, for the wizard to take (a release only)
+        id: claim
+        if: env.TEST_BUILD != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          tests="$(python3 -I aps/provisionador/deis.py tests)"
+          mapfile -t codes < <(jq -r 'keys[]' <<< "$tests")
+          [ "${#codes[@]}" -eq 1 ] || { echo "::error::The register has ${#codes[@]} test establishments, not one."; exit 1; }
+          echo "code=${codes[0]}" >> "$GITHUB_OUTPUT"
+          claim="$RUNNER_TEMP/acceptance/claim.json" # the credential: on the runner alone, never in the log
+          mkdir -p "${claim%/*}"
+          if ! (umask 077; aps/name-service/names.sh production claim "${codes[0]}" > "$claim"); then
+            echo "::error::The production name service refused the claim: $(jq -r '.error // empty' "$claim" 2> /dev/null)"
+            exit 1
+          fi
       - name: Run the one command on the VM, then every check
         id: run
         env:
           TAG: ${{ inputs.tag }}
         run: aps/acceptance/run.sh "$TAG"
-      - name: Release the CI name the wizard claimed
-        if: always() && steps.run.outputs.code != ''
+      - name: Release the name the run claimed
+        if: always() && (steps.claim.outputs.code != '' || steps.run.outputs.code != '')
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CODE: ${{ steps.run.outputs.code }}
-        run: aps/name-service/names.sh ci release "$CODE"
+          CODE: ${{ steps.claim.outputs.code || steps.run.outputs.code }}
+          DEPLOYMENT: ${{ env.TEST_BUILD == 'true' && 'ci' || 'production' }}
+        run: aps/name-service/names.sh "$DEPLOYMENT" release "$CODE"
       - name: Attach the evidence (the failing check's container logs and disk usage)
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

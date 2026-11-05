@@ -1,0 +1,2 @@
+codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud
+900001,CESFAM,Centro de Salud Familiar Prueba APS Conecta,Sin dirección: establecimiento de prueba de APS Conecta,13101,Santiago,13,Metropolitana de Santiago,Servicio de Salud Metropolitano Central,Municipal,-33.4378,-70.6505

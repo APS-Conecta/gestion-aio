@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The acceptance run's one way to open a browser: Chromium through Playwright, whose context adds trust only for
-Let's Encrypt's staging roots, which the suite's certificate comes from in CI, and for the certificates a check
-pins after verifying them itself: the wizard's, by the fingerprint the one command printed, and AIO's own :8080
-one, read from the machine. No check ignores certificate errors. A check that calls gets fake media devices: Chromium's
-fake camera and a microphone that plays a steady tone.
+"""The acceptance run's one way to open a browser: Chromium through Playwright, which trusts the suite's roots alone: in
+a test build Let's Encrypt's staging roots, which its certificate comes from, added to its context; in a release the
+system's real roots, as Let's Encrypt's production service issues it. The context adds trust only for those and for
+the certificates a check pins after verifying them itself: the wizard's, by the fingerprint the one command printed,
+and AIO's own :8080 one, read from the machine. No check ignores certificate errors. A check that calls gets fake media
+devices: Chromium's fake camera and a microphone that plays a steady tone.
 
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
 It also gives what checks read on the machine (AIO's configuration, the suite's name), makes staff accounts and
-sends a staff member's own requests to Nextcloud, trusting the staging roots alone.
+sends a staff member's own requests to Nextcloud, trusting the suite's roots alone.
 """
 
 import base64
@@ -32,6 +33,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
+# A test build (v0.0.0-ci.*, aps/release/package.sh) uses the name service's CI deployment and Let's Encrypt's staging
+# service, whose roots alone the checks trust; a release's candidate, production's, whose roots the system holds.
+TEST_BUILD = os.environ["TAG"].startswith("v0.0.0-ci.")
+ROOTS = STAGING_ROOTS if TEST_BUILD else None  # None: the system's roots
 AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its configuration and its other files
 NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
 # Fake media devices, granted to every page (the headless browser refuses them otherwise), whose sound and video a
@@ -110,15 +115,19 @@ def person(user, display_name):
     return password
 
 
+def tls():
+    """TLS as a staff member's own client verifies the suite: trusting the suite's roots alone."""
+    return ssl.create_default_context(cafile=ROOTS)
+
+
 def as_person(user, password, method, url, body=None, headers=None):
     """The status and body Nextcloud answers at `url` to a request the person's own client makes with their password,
-    over TLS that trusts the staging roots alone."""
+    over TLS that trusts the suite's roots alone."""
     login = base64.b64encode(f"{user}:{password}".encode()).decode()
     request = urllib.request.Request(url, body, {"Authorization": f"Basic {login}", "OCS-APIRequest": "true",
                                                  **(headers or {})}, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=120,
-                                    context=ssl.create_default_context(cafile=STAGING_ROOTS)) as answer:
+        with urllib.request.urlopen(request, timeout=120, context=tls()) as answer:
             return answer.status, answer.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
@@ -144,13 +153,14 @@ def tone(path):
 
 @contextlib.contextmanager
 def chromium(pinned=(), args=(), media=False):
-    """A Chromium browser trusting the staging roots (in its own NSS database) and the pinned PEM certificates; with
+    """A Chromium browser trusting the suite's roots (in its own NSS database) and the pinned PEM certificates; with
     `media`, its camera and microphone are the fake ones."""
     with tempfile.TemporaryDirectory() as home, sync_playwright() as playwright:
         nssdb = Path(home, ".pki", "nssdb")
         nssdb.mkdir(parents=True)
         subprocess.run(["certutil", "-N", "-d", f"sql:{nssdb}", "--empty-password"], check=True)
-        roots = re.findall(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n", STAGING_ROOTS.read_text(), re.S)
+        added = ROOTS.read_text() if ROOTS else ""
+        roots = re.findall(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n", added, re.S)
         for n, root in enumerate(roots):
             subprocess.run(["certutil", "-A", "-d", f"sql:{nssdb}", "-n", f"staging-{n}", "-t", "C,,", "-a"],
                            input=root, text=True, check=True)

@@ -7,7 +7,7 @@
 #
 # A check is an executable file aps/acceptance/checks/<NN>-<name>.<sh|py>; NN orders it. It runs on the
 # runner, from the repo root, with:
-#   TAG       the pre-release under test
+#   TAG       the pre-release under test: a test build (v0.0.0-ci.*) or a release's candidate
 #   COMMAND   the one command, as the manual prints it
 #   CONSOLE   a file holding what the first run of COMMAND printed, one-time link included; it stays out of
 #             the evidence, and one-command.sh runs COMMAND again with the link's secret masked
@@ -20,8 +20,11 @@
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
 # Provisionador's journal (the name's credential, AIO's passphrase, its secrets and the first passwords blanked out) and
-# the disk usage, and the workflow attaches it to the run. The check that has the wizard claim a CI name writes its
-# DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it.
+# the disk usage, and the workflow attaches it to the run. In a test build, the check that has the wizard claim a CI
+# name writes its DEIS code as code= to $GITHUB_OUTPUT first, and the workflow releases it; a release's workflow claims
+# the test establishment's production name before run.sh, the wizard takes that claim, and the workflow releases it.
+# A test build gets a staging certificate and the checks trust the staging roots alone (browser.py); a release's
+# candidate gets a real one, which the system's real roots alone verify.
 # The VM has the bootstrap's memory floor (aps/bootstrap/install.sh), so a green run proves it. hardware.sh samples its
 # hardware use from the one command to the last check; the workflow attaches the peaks, whatever the outcome.
 # Usage: run.sh <tag>
@@ -97,8 +100,11 @@ echo "0464b5d4ae3aa4f658468d88da83af7857b71548b30d46dcb6282770955a747fb95a983476
   | sha512sum --check --quiet
 qemu-img create -q -f qcow2 -F qcow2 -b "$work/debian.qcow2" "$work/disk.qcow2" 60G
 
-# The shared network: a tap device, DHCP and DNS from dnsmasq, NAT to the internet. Its DNS has no answer for
-# Let's Encrypt's production service: the suite gets its certificate from the staging one (checks/25-certificate.py).
+# The shared network: a tap device, DHCP and DNS from dnsmasq, NAT to the internet. For a test build its DNS has no
+# answer for Let's Encrypt's production service: the suite gets its certificate from the staging one; a release's
+# candidate gets a real one (checks/25-certificate.py).
+blocked=()
+[[ "$TAG" != v0.0.0-ci.* ]] || blocked=(--address=/acme-v02.api.letsencrypt.org/)
 sudo ip tuntap add dev aps0 mode tap
 sudo ip address add 192.168.77.1/24 dev aps0
 sudo ip link set aps0 up
@@ -107,7 +113,7 @@ sudo iptables -t nat -A POSTROUTING -s 192.168.77.0/24 ! -o aps0 -j MASQUERADE
 sudo iptables -I FORWARD -i aps0 -j ACCEPT
 sudo iptables -I FORWARD -o aps0 -j ACCEPT
 sudo dnsmasq --interface=aps0 --except-interface=lo --bind-interfaces --dhcp-range="$ADDRESS,$ADDRESS,12h" \
-  --address=/acme-v02.api.letsencrypt.org/
+  "${blocked[@]}"
 
 ssh-keygen -q -t ed25519 -N '' -C acceptance -f "$work/key"
 printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$work/key.pub")" > "$work/user-data"

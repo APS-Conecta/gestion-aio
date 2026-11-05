@@ -1,9 +1,16 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# A test build: our three images built from the release commit, the official images checked against
-# upstream's v14.4.3 set, the bundle and the pre-release v0.0.0-ci.<run>; then the bootstrap
-# is run from that pre-release on fresh runners and in the clean-machine acceptance run, and the
-# thin Caddy image gets a staging certificate through the name service's CI deployment.
+# A test build, on a pull request or a dispatch without a version: our three images built from the release commit, the
+# official images checked against upstream's v14.4.3 set, the bundle and the pre-release v0.0.0-ci.<run>; then the
+# bootstrap is run from that pre-release on fresh runners and in the clean-machine acceptance run, and the thin Caddy
+# image gets a staging certificate through the name service's CI deployment.
+# A release, dispatched from main with a new version (gh workflow run aps-release.yml --ref main -f version=v1.0.0),
+# needs no other step. Its candidate, built the same way for production's name service and Let's Encrypt with no
+# staging root, is published as a pre-release kept from «Latest»; the same checks run on it, the acceptance run with
+# a real certificate for the production name of the register's hidden test establishment (aps/deis/). Only once every
+# check passed does the candidate become the release «Latest», which the one command installs:
+#   curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/latest/download/install.sh | sudo bash
+# A candidate that did not pass is withdrawn with its tag. aps/gates/release.py holds this workflow to these rules.
 name: APS release
 
 on:
@@ -24,6 +31,11 @@ on:
       - Containers/mastercontainer/**
       - php/**
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release to cut from main, such as v1.0.0; empty for a test build
+        required: false
+        type: string
 
 permissions: {}
 
@@ -32,8 +44,8 @@ defaults:
     shell: bash # -eo pipefail
 
 concurrency:
-  group: aps-release-${{ github.head_ref || github.ref }}
-  cancel-in-progress: true
+  group: aps-release-${{ inputs.version != '' && 'version' || github.head_ref || github.ref }}
+  cancel-in-progress: ${{ inputs.version == '' }}
 
 env:
   MASTERCONTAINER: ghcr.io/aps-conecta/gestion-mastercontainer
@@ -54,12 +66,24 @@ jobs:
       nextcloud: ${{ steps.nextcloud.outputs.pinned }}
       caddy: ${{ steps.caddy.outputs.pinned }}
     steps:
-      - name: Name the test build (on a pull request, its commit is the merge preview)
+      - name: Name the build (on a pull request, its commit is the merge preview); a release is a new version of main
         id: release
         env:
           COMMIT: ${{ github.sha }}
-          TAG: v0.0.0-ci.${{ github.run_number }}
-        run: printf 'tag=%s\ncommit=%s\n' "$TAG" "$COMMIT" >> "$GITHUB_OUTPUT"
+          TEST_TAG: v0.0.0-ci.${{ github.run_number }}
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$VERSION" ]; then
+            [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::A release's version is vX.Y.Z."; exit 1; }
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::A release is cut from main, not $GITHUB_REF."; exit 1; }
+            tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/")')"
+            ! grep -qxF "$VERSION" <<< "$tags" || { echo "::error::$VERSION exists already."; exit 1; }
+            newest="$({ grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' <<< "$tags" || true; } | sort -V | tail -n 1)"
+            [ -z "$newest" ] || [ "$(printf '%s\n' "$newest" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ] \
+              || { echo "::error::$VERSION is not above the newest release tag, $newest."; exit 1; }
+          fi
+          printf 'tag=%s\ncommit=%s\n' "${VERSION:-$TEST_TAG}" "$COMMIT" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -139,13 +163,20 @@ jobs:
           PINNED_NEXTCLOUD: ${{ needs.images.outputs.nextcloud }}
           PINNED_CADDY: ${{ needs.images.outputs.caddy }}
         run: aps/release/package.sh "$TAG" "$PINNED_MASTERCONTAINER" "$PINNED_NEXTCLOUD" "$PINNED_CADDY" dist
-      - name: Publish the pre-release
+      - name: Publish the pre-release, kept from «Latest»
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
         run: |
+          if [ -n "$VERSION" ]; then
+            title="APS Conecta Gestión $TAG (candidata)"
+            notes="Candidata en verificación en una máquina limpia: no la instale. Será la versión vigente solo si pasa todas las comprobaciones."
+          else
+            title="APS Conecta Gestión $TAG (prueba)"
+            notes="Versión de prueba, no apta para establecimientos. Instalación: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
+          fi
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$COMMIT" --prerelease --latest=false \
-            --title "APS Conecta Gestión $TAG (prueba)" \
-            --notes "Versión de prueba, no apta para establecimientos. Instalación: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
+            --title "$title" --notes "$notes"
           [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = true ]
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
           [ "$latest" != "$TAG" ] || { echo "::error::$TAG became Latest"; exit 1; }
@@ -200,6 +231,7 @@ jobs:
   certificate:
     name: A staging certificate through the name service, with no open port
     needs: images
+    if: inputs.version == '' # a release gets a real certificate in its acceptance run
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Every run shares the one CI deployment: one deploy-and-prove at a time.
@@ -303,3 +335,67 @@ jobs:
           short="$(refusal $(( (floor - 1) * 1048576 )))"
           echo "$short"
           grep -q "tiene $(( floor - 1 )) GiB de memoria; se requieren al menos $floor GiB$" <<< "$short"
+
+  publish:
+    name: The candidate becomes the release «Latest» once every check passed, and the one command installs it
+    needs: [images, release, bootstrap, host-checks, acceptance]
+    if: inputs.version != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.images.outputs.tag }}
+      COMMAND: curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sudo bash
+    steps:
+      - name: Publish the release as «Latest»
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest \
+            --title "APS Conecta Gestión $TAG" \
+            --notes "Instale APS Conecta Gestión en una máquina limpia con este comando: $COMMAND"
+      - name: Within about 10 minutes, «Latest» is the release and the one command fetches the install.sh it checked
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          expected="$(curl -fsSL --retry 5 "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/SHA256SUMS" \
+            | awk '$2 == "install.sh" {print $1}')"
+          [ -n "$expected" ] || { echo "::error::$TAG's SHA256SUMS lists no install.sh"; exit 1; }
+          for _ in $(seq 60); do
+            latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || true)"
+            served="$({ curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh" || true; } \
+              | sha256sum | cut -d ' ' -f 1)"
+            if [ "$latest" = "$TAG" ] && [ "$served" = "$expected" ]; then
+              echo "«Latest» is $TAG, and $COMMAND installs it"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::After 10 minutes «Latest» is ${latest:-unknown}, and the one command's install.sh is $served, not $TAG's $expected"
+          exit 1
+
+  withdraw:
+    name: A candidate that did not pass is withdrawn with its tag, so the version can be cut again
+    needs: [images, release, publish]
+    if: always() && inputs.version != '' && needs.release.result != 'skipped' && needs.publish.result != 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.images.outputs.tag }}
+      COMMIT: ${{ needs.images.outputs.commit }}
+    steps:
+      - name: Delete this run's candidate pre-release and its tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! candidate="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+              --jq '"\(.prerelease) \(.target_commitish)"' 2> "$RUNNER_TEMP/withdraw.err")"; then
+            cat "$RUNNER_TEMP/withdraw.err" >&2
+            grep -q '(HTTP 404)' "$RUNNER_TEMP/withdraw.err" || exit 1
+            echo "No release $TAG is left to withdraw."
+            exit 0
+          fi
+          [ "$candidate" = "true $COMMIT" ] || { echo "$TAG is not this run's candidate of $COMMIT: nothing withdrawn."; exit 0; }
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          echo "$TAG did not pass every check: its candidate and its tag were withdrawn."
