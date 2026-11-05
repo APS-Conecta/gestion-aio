@@ -861,7 +861,7 @@ class Apps(InstallTest):
         self.install()
         self.until("done")
         self.assertLessEqual(DEFAULT_APPS, self.enabled())
-        self.assertFalse(OPTIONAL_APPS & set(self.suite.apps), "no optional app is installed unless ticked")
+        self.assertFalse(OPTIONAL_APPS & self.enabled(), "no optional app is installed unless ticked")
         self.assertEqual(self.suite.api_calls, 0, "the latest releases are compatible: GitHub's API is not called")
         defaults = [app for app in RELEASED if not app.get("optional")]
         self.assertEqual(self.lock(), {app["id"]: self.newest(app) for app in defaults})
@@ -874,7 +874,7 @@ class Apps(InstallTest):
         self.assertEqual(self.install(optional=["farmacia"])[0], 202)
         self.until("done")
         self.assertIn("farmacia", self.enabled())
-        self.assertFalse({"estadistica", "totem"} & set(self.suite.apps))
+        self.assertFalse({"estadistica", "totem"} & (self.enabled() | set(self.lock())))
         self.assertIn("farmacia", self.lock())
         chosen = {a["id"]: a["chosen"] for a in self.browser.get("/api/state")[1]["optional_apps"]}
         self.assertEqual(chosen, {"farmacia": True, "estadistica": False, "totem": False})
@@ -1023,6 +1023,63 @@ class Apps(InstallTest):
         self.until("done")
         self.assertEqual(self.lock()[app["id"]], locked, "a retry installs the tag the lock file records")
         self.assertIn(app["id"], self.enabled())
+
+
+ESTABLISHMENT_STEP = "Establecimiento en Estadística"
+
+
+class EstadisticaEstablishment(InstallTest):
+    """Estadística reads the centre from its app settings: the DEIS code, the register's type and the comuna's CUT."""
+
+    REGISTER = REGISTER + "99905,CESFAM,Centro de Salud Familiar Código Corto,Calle Cinco 500,13101,Santiago,13," \
+                          "Metropolitana de Santiago,Servicio de Salud Metropolitano Central,Municipal,-33.46,-70.65\n"
+
+    def held(self):
+        return {key: json.loads(self.suite.occ("config:app:get", "estadistica", key, "--output=json"))
+                for key in ("deis_code", "establishment_type", "comuna_cut")}
+
+    def test_instalar_with_estadistica_gives_it_the_centres_establishment(self):
+        self.claim("999002")
+        self.install(optional=["estadistica"])
+        self.until("done")
+        self.assertEqual(self.suite.apps["estadistica"]["enabled"], "yes")
+        self.assertEqual(self.held(), {"deis_code": "999002", "establishment_type": "CECOSF", "comuna_cut": "12101"})
+
+    def test_without_estadistica_the_keys_are_set_so_an_estadistica_enabled_later_finds_them(self):
+        self.claim("999003")
+        self.install()
+        self.until("done")
+        self.assertNotEqual(self.suite.apps["estadistica"].get("enabled"), "yes")
+        self.assertEqual(self.held(), {"deis_code": "999003", "establishment_type": "SAPU", "comuna_cut": "05201"})
+
+    def test_a_code_that_is_not_six_digits_stops_the_step_naming_it(self):
+        self.claim("99905")
+        self.install(optional=["estadistica"])
+        status, reason = self.steps(self.until("failed"))[ESTABLISHMENT_STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn("«99905», no tiene seis dígitos", reason)
+        self.assertNotIn("deis_code", self.suite.apps["estadistica"])
+
+    def test_a_rerun_sets_the_keys_again_only_when_nextcloud_no_longer_holds_them(self):
+        def writes():
+            return sum("estadistica" in settings.get("apps", {}) for settings in self.suite.imports)
+
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[ESTABLISHMENT_STEP], ("green", None))
+        self.install()
+        self.until("failed")
+        self.assertEqual(writes(), 1, "Reintentar does not rerun a green step")
+        self.suite.apps["estadistica"]["deis_code"] = "999004"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[ESTABLISHMENT_STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn("estadistica.deis_code", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual((self.held()["deis_code"], writes()), ("999001", 2))
 
 
 TEAMS = {"sectors": ["Norte", "Sector Sur", "sector norte", " "],
