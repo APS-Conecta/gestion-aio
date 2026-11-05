@@ -5,6 +5,7 @@
 import json
 import os
 import re
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -314,8 +315,19 @@ class MaintenanceWindowGate(unittest.TestCase):
                 self.assertIn(f"{path} names no maintenance-window hour", out)
 
 
+class AioStartAnswer(unittest.TestCase):
+    """The suite port reads AIO's start answer for the text AIO writes as it begins to download a container's image:
+    once AIO writes another text, the gates fail instead of the install's log going quiet."""
+
+    def test_aio_writes_before_each_image_download_the_text_the_suite_port_reads(self):
+        text = runpy.run_path(str(REPO / "aps" / "provisionador" / "suite.py"))["DOWNLOADING"]
+        pull = (REPO / "php" / "src" / "Docker" / "DockerActionManager.php").read_text(encoding="utf-8")
+        self.assertEqual(pull.count(f'$addToStreamingResponseBody("{text}", $container);'), 1,
+                         f"DockerActionManager::PullImage no longer writes «{text}»")
+
+
 DEIS = GATES.parent / "provisionador" / "deis.py"
-HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
+HEADER ="codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 
 
 def slug_table(rows, tests=(), command="slugs"):

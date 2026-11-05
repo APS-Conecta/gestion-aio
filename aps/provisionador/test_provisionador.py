@@ -1889,12 +1889,32 @@ class InstallLog(InstallTest):
         start, end = texts.index(f"Paso «{self.START}»: en curso."), texts.index(f"Paso «{self.START}»: completado.")
         self.assertEqual([t for t in texts[start + 1:end] if t.startswith("Contenedor")], [
             "Contenedor «PostgreSQL»: en ejecución.", "Contenedor «Servidor de aplicaciones»: iniciando.",
-            "Contenedor «Búsqueda de texto completo»: en espera.", "Contenedor «Búsqueda de texto completo»: iniciando.",
+            "Contenedor «Búsqueda de texto completo»: en espera.",
+            "Contenedor «Búsqueda de texto completo»: AIO descarga su imagen.",
+            "Contenedor «Búsqueda de texto completo»: iniciando.",
             "Contenedor «Servidor de aplicaciones»: en ejecución.",
             "Contenedor «Búsqueda de texto completo»: en ejecución."])
         self.assertEqual(set(texts[start + 1:end]) - {t for t in texts if t.startswith("Contenedor")},
                          {f"{self.START}: AIO inició todos los contenedores."})
-        self.assertEqual(len([t for t in texts if t.startswith("Contenedor")]), 6, "only while the suite starts")
+        self.assertEqual(len([t for t in texts if t.startswith("Contenedor")]), 7, "only while the suite starts")
+
+    def test_as_aio_answers_its_start_the_log_names_each_container_whose_image_it_downloads(self):
+        """In turn, by the name the progress shows, in our own words: nothing AIO wrote reaches the log."""
+        self.claim()
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped"),
+                             "nextcloud-aio-apache": ("Apache & Caddy", "stopped")}
+        self.install()
+        texts = self.texts(self.until("done"))
+        start, end = (texts.index(f"Paso «{self.START}»: en curso."),
+                      texts.index(f"{self.START}: AIO inició todos los contenedores."))
+        self.assertEqual([t for t in texts[start + 1:end] if "imagen" in t], [
+            "Contenedor «Búsqueda de texto completo»: AIO descarga su imagen.",
+            "Contenedor «Apache & Caddy»: AIO descarga su imagen."])
+        self.assertEqual(len([t for t in texts if "imagen" in t]), 2, "only while AIO's start answers")
+        for raw in ("Descargando", "Iniciando", "<", "&amp;"):
+            self.assertNotIn(raw, "\n".join(texts))
+            self.assertNotIn(raw, self.journal.getvalue())
 
     def test_while_aio_starts_the_suite_a_silent_log_says_how_many_containers_run(self):
         """Once the step wrote nothing for HEARTBEAT seconds while a container does not run yet."""
@@ -1908,7 +1928,7 @@ class InstallLog(InstallTest):
         # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
         with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
             self.install()
-            self.until_logged("Contenedor «Búsqueda de texto completo»: en espera.")
+            self.until_logged("Contenedor «Búsqueda de texto completo»: AIO descarga su imagen.")
             clock[0] = start.HEARTBEAT - 1
             time.sleep(start.POLL * 1.5)
             self.assertNotIn(counted, self.texts(self.progress()))

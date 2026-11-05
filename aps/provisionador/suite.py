@@ -24,6 +24,7 @@ aps/images/nextcloud/browser-texts.php build the browser's texts.
 """
 
 import base64
+import html
 import http.client
 import io
 import json
@@ -82,6 +83,12 @@ HIDDEN = "***REMOVED SENSITIVE VALUE***"  # what occ config:list shows of a valu
 # How AIO's start answer ends once every container started (DockerController::getStreamingResponseHtmlEnd); when one
 # fails, it stops short or Slim's error page follows.
 STARTED = "</body>\n</html>"
+# How that answer says AIO begins to download a container's image, after AIO's name for it, HTML-escaped
+# (DockerActionManager::PullImage, written by DockerController::getAddToStreamingResponseBody; the gates hold AIO to
+# this text). A progress mark, <span class='progress-indicator'></span>, follows every few seconds while the download
+# moves, then «Iniciando el contenedor» once AIO created the container.
+DOWNLOADING = "Descargando la imagen"
+DOWNLOAD_LINE = re.compile(rf"<div>([^<]*): {DOWNLOADING}</div>")
 
 
 class Taken(Exception):
@@ -221,6 +228,22 @@ for ca in /usr/local/share/ca-certificates/*.crt; do php /var/www/html/occ secur
 """
 
 
+def downloads(listed, downloading):
+    """A reader of AIO's start answer, given its text so far each time more arrives: it hands `downloading` each
+    container of `listed`, as `containers` lists them, whose image AIO begins to download, once and in turn."""
+    by_name, told = {c["name"]: c for c in listed}, 0
+
+    def read(text):
+        nonlocal told
+        found = DOWNLOAD_LINE.findall(text)
+        for name in found[told:]:
+            if (container := by_name.get(html.unescape(name))) is not None:
+                downloading(container)
+        told = len(found)
+
+    return read
+
+
 def write_root_only(path, text):
     """Replace the file with `text`, readable by its owner (root, on the server) alone."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -243,8 +266,8 @@ class AioPage:
         self.cookie = ""
         self.csrf = {}
 
-    def request(self, method, path, form=None, timeout=60):
-        """The status and text AIO answers."""
+    def request(self, method, path, form=None, timeout=60, each=None):
+        """The status and text AIO answers; `each`, if given, gets the text so far each time more of it arrives."""
         headers = {"Host": self.host, "Sec-Fetch-Site": "same-origin"}
         if self.cookie:
             headers["Cookie"] = self.cookie
@@ -256,7 +279,12 @@ class AioPage:
         try:
             connection.request(method, path, body, headers)
             response = connection.getresponse()
-            text = response.read().decode(errors="replace")
+            data = b""
+            while chunk := response.read1():
+                data += chunk
+                if each:
+                    each(data.decode(errors="replace"))
+            text = data.decode(errors="replace")
         except (OSError, http.client.HTTPException) as error:
             print(f"AIO {path}: {error}", file=sys.stderr)
             raise Unreachable(SUITE_DOWN) from error
@@ -266,8 +294,8 @@ class AioPage:
             self.cookie = cookie.split(";", 1)[0]  # AIO's one session cookie
         return response.status, text
 
-    def post(self, path, form, expected=201, timeout=60):
-        status, text = self.request("POST", path, form, timeout)
+    def post(self, path, form, expected=201, timeout=60, each=None):
+        status, text = self.request("POST", path, form, timeout, each)
         if status != expected:
             print(f"AIO {path}: {status} {text[-2000:]}", file=sys.stderr)
             raise Unreachable(SUITE_REFUSED.format(code=status))
@@ -480,9 +508,12 @@ class Suite:
         self._signed_in().post("/api/configuration", {"borg_backup_host_location": folder, "borg_remote_repo": "",
                                                       "daily_backup_time": time, "success_notification": "on"})
 
-    def start(self):
-        """AIO's start button: it pulls, creates and starts every container in order, and answers once it is done."""
-        text = self._signed_in().post("/api/docker/start", {}, expected=200, timeout=900)
+    def start(self, downloading):
+        """AIO's start button: it pulls, creates and starts every container in order, and answers once it is done. As
+        its answer arrives, `downloading` gets each container whose image AIO begins to download."""
+        page = self._signed_in()
+        text = page.post("/api/docker/start", {}, expected=200, timeout=900,
+                         each=downloads(self.containers(), downloading))
         if not text.rstrip().endswith(STARTED):
             print(f"AIO did not start the suite: {text[-2000:]}", file=sys.stderr)
             raise Unreachable(NOT_STARTED)
@@ -635,9 +666,19 @@ class FakeSuite:
         self._signed_in()
         self.backup = (folder, time)
 
-    def start(self):
-        """AIO's start answers once every container it started runs."""
+    def start(self, downloading):
+        """AIO's start answers once every container it started runs. Its answer streams as AIO's does: each container
+        that does not run, in turn, has its image downloaded, with a progress mark, and is started."""
         self._signed_in()
+        listed = self.containers()
+        read, text = downloads(listed, downloading), ""
+        for c in listed:
+            if c["state"] == "stopped":
+                name = html.escape(c["name"])
+                text += f"<div>{name}: {DOWNLOADING}</div><span class='progress-indicator'></span>"
+                read(text)
+                text += f"<div>{name}: Iniciando el contenedor</div>"
+                read(text)
         self.starts += 1
         self.release.wait()
         if self.dies:
