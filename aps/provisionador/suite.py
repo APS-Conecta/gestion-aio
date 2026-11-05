@@ -83,11 +83,12 @@ HIDDEN = "***REMOVED SENSITIVE VALUE***"  # what occ config:list shows of a valu
 # How AIO's start answer ends once every container started (DockerController::getStreamingResponseHtmlEnd); when one
 # fails, it stops short or Slim's error page follows.
 STARTED = "</body>\n</html>"
-# How that answer says AIO begins to download a container's image, by AIO's name for it, HTML-escaped
-# (DockerActionManager::PullImage, written by DockerController::getAddToStreamingResponseBody). A progress mark, <span
-# class='progress-indicator'></span>, follows every few seconds while the download moves, then «Iniciando el
-# contenedor» once AIO created the container.
-DOWNLOADING = re.compile(r"<div>([^<]*): Descargando la imagen</div>")
+# How that answer says AIO begins to download a container's image, after AIO's name for it, HTML-escaped
+# (DockerActionManager::PullImage, written by DockerController::getAddToStreamingResponseBody; the gates hold AIO to
+# this text). A progress mark, <span class='progress-indicator'></span>, follows every few seconds while the download
+# moves, then «Iniciando el contenedor» once AIO created the container.
+DOWNLOADING = "Descargando la imagen"
+DOWNLOAD_LINE = re.compile(rf"<div>([^<]*): {DOWNLOADING}</div>")
 
 
 class Taken(Exception):
@@ -234,7 +235,7 @@ def downloads(listed, downloading):
 
     def read(text):
         nonlocal told
-        found = DOWNLOADING.findall(text)
+        found = DOWNLOAD_LINE.findall(text)
         for name in found[told:]:
             if (container := by_name.get(html.unescape(name))) is not None:
                 downloading(container)
@@ -674,7 +675,7 @@ class FakeSuite:
         for c in listed:
             if c["state"] == "stopped":
                 name = html.escape(c["name"])
-                text += f"<div>{name}: Descargando la imagen</div><span class='progress-indicator'></span>"
+                text += f"<div>{name}: {DOWNLOADING}</div><span class='progress-indicator'></span>"
                 read(text)
                 text += f"<div>{name}: Iniciando el contenedor</div>"
                 read(text)
