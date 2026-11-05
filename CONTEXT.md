@@ -63,17 +63,17 @@ It points to the server's inside address.
 One idempotent unit of the install, with the steps it depends on.
 
 **End-of-install check**:
-The differences, step by step, between what each install step declared and what holds now: the running suite, or
-for people what «Equipos» declares now. «Listo» needs it clean.
+The differences, step by step, between what each install step declared and what holds now: the running suite, and
+for people also what «Equipos» declares now. «Listo» needs it clean.
 
 **Passwords file** (archivo de contraseñas):
 The root-only file on the server with each person's first password, the administrator's, AIO's passphrase and the
 encryption password of AIO's backup, which a restore asks for. «Listo» hands it over; then the wizard closes.
 
 **Component** (componente):
-An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
-full-text search and the app server (HaRP), and Talk recording on a server that passes the recording threshold. Every
-other optional container stays off.
+An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV and
+full-text search, and Talk recording on a server that passes the recording threshold. Every other optional container
+stays off.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.

@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The components: AIO's optional containers the suite runs, on through AIO's own switches; every other one is off.
-Talk recording is one of them on a server that passes the recording threshold, with no choice for the operator."""
+"""The components: AIO's optional containers the suite runs, on through AIO's own switches; every other one is off,
+HaRP among them, as no app the suite adds is an ExApp and HaRP reaches the Docker socket. Talk recording is one of them
+on a server that passes the recording threshold, with no choice for the operator."""
 
 NAME = "Componentes"
 NEEDS = ()
 # By AIO's switch, with the name «Revisar» and the progress show.
 COMPONENTS = {"talk": "Talk", "eurooffice": "Euro-Office", "imaginary": "Imaginary", "clamav": "ClamAV (antivirus)",
-              "fulltextsearch": "Búsqueda de texto completo", "harp": "HaRP (servidor de aplicaciones externas)"}
+              "fulltextsearch": "Búsqueda de texto completo"}
 RECORDING = "talk-recording"  # AIO's switch for Talk's recording server
 # The least a server needs to record Talk calls: the bootstrap's floors (aps/bootstrap/install.sh; the Recording tests
 # hold this to them) plus one recording, which takes about 200% CPU and a 2 GiB browser
