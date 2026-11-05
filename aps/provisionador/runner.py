@@ -4,8 +4,8 @@
 after the steps it needs. A step that fails gets its Spanish reason; its dependents wait, and say for what; a step that
 does not need it still runs. «Reintentar» runs the failed and waiting steps again, never a green one. Once every step
 is green, the end-of-install check gives, step by step, the differences between what the step declared and what holds
-now: the running suite, or for people what «Equipos» declares now. A step whose part differs turns red again. «Listo»
-needs every step green and a clean check.
+now: the running suite, and for people also what «Equipos» declares now. A step whose part differs turns red again.
+«Listo» needs every step green and a clean check.
 
 Each step's status is kept in the wizard's state as it changes: pending, running, green, failed or waiting. A step still
 running when the Provisionador starts was cut short by a restart, and the install resumes by itself.

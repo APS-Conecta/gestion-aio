@@ -219,9 +219,21 @@ jobs:
           [ ! -e /opt/aps-conecta ]
           [ -z "$(command -v docker)" ]
       - name: Run the one command, as an operator would
-        run: curl -fsSL "$RELEASE_URL/install.sh" | sudo bash
+        run: curl -fsSL "$RELEASE_URL/install.sh" | sudo bash | tee first.log
       - name: Docker Engine came from Docker's packages
         run: apt-cache policy docker-ce | grep 'https://download.docker.com/linux/ubuntu' > /dev/null
+      - name: With the install folder gone, the one command restores it and prints a fresh one-time link
+        run: |
+          sudo rm -rf /opt/aps-conecta/gestion
+          printed="$(curl -fsSL "$RELEASE_URL/install.sh" | sudo bash)" # the new link stays out of the log
+          [ "$(cat /opt/aps-conecta/gestion/VERSION)" = "$TAG" ]
+          [ -f /opt/aps-conecta/gestion/provisionador/provisionador.py ]
+          link='https://[^[:space:]]*/#[^[:space:]]*'
+          fresh="$(grep -o "$link" <<< "$printed" || true)"
+          if [ -z "$fresh" ] || [ "$fresh" = "$(grep -o "$link" first.log)" ]; then
+            echo "::error::the rerun printed no fresh one-time link"
+            exit 1
+          fi
       - name: Show the containers and the logs
         if: failure()
         run: |

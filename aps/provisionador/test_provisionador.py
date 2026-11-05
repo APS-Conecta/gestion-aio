@@ -455,7 +455,7 @@ class Direccion(WizardTest):
         self.assertEqual((status, body["address"]["name"], self.suite.domain), (200, NAME, NAME))
 
 
-COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch", "harp"}
+COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch"}  # HaRP stays off: no app is an ExApp
 # This ticket's steps, by what they need of the suite: Nextcloud's command line, or AIO and the name service alone.
 # Later tickets add steps of their own; these tests go by these.
 NEEDS_NEXTCLOUD = {"Certificado del ISP", "Idioma y formato regional", "Sesiones y registro de auditoría",
@@ -601,8 +601,7 @@ class Instalar(InstallTest):
         self.assertEqual((state["centre"]["name"], state["address"]["name"], state["install"]),
                          ("Centro de Salud Familiar Los Castaños", NAME, None))
         self.assertEqual(state["components"], [
-            "Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo",
-            "HaRP (servidor de aplicaciones externas)"])
+            "Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo"])
         self.assertEqual(state["backup_folder"], "/var/backups/aps-conecta")
 
     def test_there_is_no_install_before_the_address_is_claimed(self):
@@ -626,7 +625,7 @@ class Instalar(InstallTest):
             "default_language": "es", "force_language": "es", "default_locale": "es_CL", "default_phone_region": "CL",
             "default_timezone": "America/Punta_Arenas", "logtimezone": "America/Punta_Arenas",
             "remember_login_cookie_lifetime": 0, "session_lifetime": 900, "session_keepalive": False,
-            "maintenance_window_start": 5}.items(), self.suite.system.items())
+            "maintenance_window_start": 1}.items(), self.suite.system.items())
         self.assertEqual((self.suite.apps["admin_audit"]["enabled"], self.suite.apps["core"]["backgroundjobs_mode"]),
                          ("yes", "cron"))
         self.assertEqual(self.suite.issuers, ["www.ispch.gob.cl"])
@@ -1419,9 +1418,10 @@ class People(PeopleTest):
 class PeopleChanges(PeopleTest):
     """From «Instalar» until «Listo», «Equipos» takes a corrected spreadsheet and «Retirar», and «Reintentar» applies
     them: names, emails and teams follow the spreadsheet, a moved person leaves the old team's group, and a retired
-    person's account is disabled and in no team, kept with its files and shares. Only the groups the install manages
-    change, and no password does. The end-of-install check never flags what an administrator changes in Nextcloud; at
-    «Listo», Nextcloud's Users page owns the people."""
+    person's account is disabled and in no team, kept with its files and shares; a dropped person listed again is
+    enabled. Only the groups the install manages change, and no password does. Of what an administrator changes in
+    Nextcloud, the end-of-install check flags only a listed person's disabled account the install made; at «Listo»,
+    Nextcloud's Users page owns the people."""
 
     def setUp(self):
         super().setUp()
@@ -1550,6 +1550,24 @@ class PeopleChanges(PeopleTest):
         self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")),
                          (False, {"comite-calidad"}))
 
+    def test_a_dropped_person_listed_again_is_enabled_in_their_teams_unless_retirar_retired_them(self):
+        listed = SPREADSHEET + "luis.vera;Luis;Vera Soto;;sector-norte;\r\n"
+        self.upload(listed)
+        self.retire("luis.vera")
+        self.until_people()
+        teams = self.member_of("pedro.munoz")
+        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;sector-norte;sí"))
+        self.suite.answering = True
+        self.until("failed")
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        self.assertEqual([self.suite.users[user]["enabled"] for user in ("pedro.munoz", "luis.vera")], [False, False])
+        self.upload(listed)
+        self.reintentar()
+        self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")), (True, teams))
+        self.assertEqual((self.suite.users["luis.vera"]["enabled"], self.member_of("luis.vera")), (False, set()))
+
     def test_a_dropped_person_who_never_got_an_account_is_forgotten(self):
         self.upload(SPREADSHEET + "luis.vera;Luis;Vera;;sector-norte;\r\n")
         self.upload(SPREADSHEET)
@@ -1605,7 +1623,6 @@ class PeopleChanges(PeopleTest):
         self.until_people()
         ana = self.suite.users["ana.rojas"]
         ana.update(name="Ana Rojas", email="ana@example.org")
-        self.suite.users["pedro.munoz"]["enabled"] = False
         self.suite.groups["sector-sur"]["members"].discard("pedro.munoz")
         self.suite.groups["sector-norte"]["members"].add("pedro.munoz")
         self.suite.add_user("rosa.soto", "Rosa Soto", "contraseña de Rosa")
@@ -1615,6 +1632,25 @@ class PeopleChanges(PeopleTest):
         self.assertEqual((ana["name"], ana["email"]), ("Ana Rojas", "ana@example.org"))
         self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico", "sector-norte",
                                                          "prog-atencion-domiciliaria"})
+
+    def test_the_end_of_install_check_flags_a_listed_persons_disabled_account_and_reintentar_enables_it(self):
+        self.retire("pedro.munoz")
+        self.upload(SPREADSHEET + "luis.vera;Luis;Vera Soto;;sector-norte;\r\n")
+        self.until_people()
+        self.suite.users["luis.vera"]["enabled"] = False
+        self.suite.answering = True
+        self.assertEqual(self.steps(self.until("failed"))[PEOPLE_STEP], ("failed", people.MISSING.format("luis.vera")))
+        self.install()
+        self.until("done")
+        self.assertEqual([self.suite.users[user]["enabled"] for user in ("luis.vera", "pedro.munoz")], [True, False])
+
+    def test_a_listed_persons_disabled_account_the_install_did_not_make_stays_disabled_and_listo_follows(self):
+        self.suite.add_user("pedro.munoz", "Pedro Muñoz Tapia", "contraseña de Pedro")
+        self.suite.users["pedro.munoz"]["enabled"] = False
+        self.install()
+        self.until("done")
+        self.assertFalse(self.suite.users["pedro.munoz"]["enabled"])
+        self.assertNotIn("pedro.munoz", self.browser.request("POST", "/api/close", {})[1]["passwords"])
 
     def test_at_listo_the_people_stay_as_they_are_for_nextclouds_users_page(self):
         self.install()
