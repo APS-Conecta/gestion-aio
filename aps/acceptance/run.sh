@@ -161,7 +161,7 @@ for check in aps/acceptance/checks/*; do
   echo "$(date +%s) $name" >> "$work/hardware/stages.txt"
   mkdir -p "$EVIDENCE"
   echo "::group::$name"
-  if timeout 15m "$check" < /dev/null; then
+  if timeout 25m "$check" < /dev/null; then  # 17-install waits up to 20 minutes for «Listo»
     mask_secrets
     echo "::endgroup::"
     echo "passed: $name"
