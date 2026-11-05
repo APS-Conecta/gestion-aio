@@ -17,7 +17,8 @@ address (`inside`), the folder the Provisionador keeps its files in (`folder`), 
 Provisionador restart cut short (`interrupted`) and of the optional apps the operator ticked on «Revisar»
 (`optional`), and the teams declared on «Equipos» (`teams`, as teams.py names them), the people its spreadsheet
 loads (`people`, as spreadsheet.py reads them) and the usernames retired there (`retired`), as they were when «Instalar»
-or «Reintentar» was pressed; `declared()` answers those people and usernames as «Equipos» declares them now. A new
+or «Reintentar» was pressed; `declared()` answers those people and usernames as «Equipos» declares them now, and
+`log(text)` adds our own Spanish line, never a secret nor what occ or AIO printed, to the install's log. A new
 step is a new module: no other file lists the steps. A step that configures an app gets it through `steps.apps.ensure`
 rather than NEEDS "apps".
 """

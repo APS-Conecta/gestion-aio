@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -29,7 +30,8 @@ from urllib.parse import urlencode, urlsplit
 
 import brand
 import provisionador
-from steps import apps, people
+import runner
+from steps import apps, people, start
 from suite import FakeSuite
 
 HERE = Path(__file__).resolve().parent
@@ -532,6 +534,9 @@ class InstallTest(WizardTest):
 
     def setUp(self):
         super().setUp()
+        journal = mock.patch("sys.stdout", io.StringIO())  # the Provisionador's journal, out of the tests' output
+        self.journal = journal.start()
+        self.addCleanup(journal.stop)
         self.addCleanup(self.settle)
         self.browser = self.operator()
         publish(self.suite)
@@ -588,6 +593,18 @@ class InstallTest(WizardTest):
     def named(self, install, status):
         """The steps with that status."""
         return {name for name, (now, _) in self.steps(install).items() if now == status}
+
+    @staticmethod
+    def texts(install):
+        """The install's log, by its lines' texts."""
+        return [line["text"] for line in install["log"]]
+
+    def until_logged(self, text):
+        deadline = time.monotonic() + 10
+        while text not in self.texts(install := self.progress()):
+            self.assertLess(time.monotonic(), deadline, install["log"])
+            time.sleep(0.02)
+        return install
 
 
 class Instalar(InstallTest):
@@ -1432,6 +1449,28 @@ class PeopleChanges(PeopleTest):
         self.assertEqual(self.passwords(), first)
         self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
 
+    def test_a_change_while_the_people_step_runs_logs_its_failure(self):
+        ran, posted = threading.Event(), threading.Event()
+        real = people.run
+
+        # No seam reaches the window inside the people step: wrap the real step.
+        def run(context):
+            found = real(context)
+            ran.set()
+            posted.wait(10)
+            return found
+
+        with mock.patch.object(people, "run", run):
+            self.install()
+            self.assertTrue(ran.wait(10))
+            self.assertEqual(self.retire("pedro.munoz")[0], 200)
+            posted.set()
+            install = self.until("failed")
+        self.assertEqual(self.steps(install)[PEOPLE_STEP], ("failed", CHANGED))
+        texts = self.texts(install)
+        self.assertEqual(texts.count(f"Paso «{PEOPLE_STEP}»: no se completó. {CHANGED}"), 1)
+        self.assertNotIn(f"Paso «{PEOPLE_STEP}»: completado.", texts)
+
     def test_a_change_while_the_people_check_runs_holds_listo_until_reintentar_applies_it(self):
         """The change lands once the people step's check read «Equipos», before the runner records what it found."""
         self.until_people()
@@ -1697,6 +1736,34 @@ class InterruptedInstall(InstallTest):
         self.until("done")
         self.assertEqual(self.suite.starts, 1)
 
+    def test_once_aio_started_the_suite_a_silent_log_names_the_containers_not_running_yet(self):
+        """Apache runs as the resumed step reads the containers: AIO started them all, and the step waits for the rest."""
+        clock = [0.0]
+        self.interrupted_start({"nextcloud-aio-apache": ("Apache", "stopped"), "nextcloud-aio-talk": ("Talk", "stopped")})
+        self.suite.states = {"nextcloud-aio-apache": ("Apache", "running"), "nextcloud-aio-talk": ("Talk", "starting")}
+        # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
+        with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            self.restart()
+            install = self.until_logged("Inicio de la suite: AIO inició todos los contenedores.")
+            resumed = self.texts(install).index("El Provisionador se reinició y continúa la instalación.")
+            self.assertIn("Inicio de la suite: AIO inició todos los contenedores.", self.texts(install)[resumed:])
+            clock[0] = start.HEARTBEAT
+            self.until_logged("Inicio de la suite: aún no están en ejecución: Talk.")
+            self.suite.states["nextcloud-aio-talk"] = ("Talk", "running")
+            self.until("done")
+        self.assertEqual(self.suite.starts, 1)
+
+    def test_a_resumed_install_says_so_in_its_log(self):
+        self.interrupted_start({"nextcloud-aio-database": ("PostgreSQL", "running"),
+                                "nextcloud-aio-apache": ("Apache", "stopped")})
+        self.restart()
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-apache": ("Apache", "running")}
+        texts = [line["text"] for line in self.until("done")["log"]]
+        resumed = texts.index("El Provisionador se reinició y continúa la instalación.")
+        self.assertEqual(texts.count(texts[resumed]), 1)
+        self.assertEqual(texts[resumed + 1], "Paso «Inicio de la suite»: en curso.")
+
     def test_a_suite_aio_started_while_the_provisionador_was_down_counts_as_started(self):
         """Once Apache runs, AIO's login is closed: nothing is asked of AIO's page again."""
         self.interrupted_start({"nextcloud-aio-apache": ("Apache", "stopped")})
@@ -1704,6 +1771,127 @@ class InterruptedInstall(InstallTest):
         self.restart()
         self.assertEqual(self.steps(self.until("done"))["Inicio de la suite"], ("green", None))
         self.assertEqual(self.suite.starts, 1)
+
+
+class InstallLog(InstallTest):
+    """«Registro de la instalación»: a timestamped Spanish line for each «Instalar» and «Reintentar», each step that
+    starts, finishes or fails with its reason, and each change in AIO's reading of a container while the suite starts;
+    the latest of them, newest last, the same in the Provisionador's journal. No line carries a secret."""
+
+    START = "Inicio de la suite"
+
+    def test_each_step_logs_when_it_starts_and_finishes_and_the_journal_has_the_same_lines(self):
+        self.claim()
+        self.install()
+        install = self.until("done")
+        for line in install["log"]:
+            self.assertEqual(set(line), {"time", "text"})
+            self.assertIsNotNone(datetime.fromisoformat(line["time"]).tzinfo)
+        texts = self.texts(install)
+        self.assertEqual(texts[0], "«Instalar»: comienza la instalación.")
+        self.assertEqual(texts[-2:], ["Comienza la comprobación final de la instalación.", "La instalación terminó."])
+        for name in self.steps(install):
+            started, green = f"Paso «{name}»: en curso.", f"Paso «{name}»: completado."
+            self.assertEqual((texts.count(started), texts.count(green)), (1, 1), name)
+            self.assertLess(texts.index(started), texts.index(green), name)
+        self.assertEqual(self.journal.getvalue().splitlines(), texts)
+
+    def test_a_failed_step_logs_its_reason_and_reintentar_adds_lines(self):
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        install = self.until("failed")
+        reason = self.steps(install)["Componentes"][1]
+        self.assertIn(f"Paso «Componentes»: no se completó. {reason}", self.texts(install))
+        self.assertIn(f"Paso «{self.START}»: aún no comienza. Espera a que se complete: «Componentes», «Copias de seguridad».",
+                      self.texts(install))
+        before = len(install["log"])
+        self.suite.down = set()
+        self.install()
+        retried = self.texts(self.until("done"))[before:]
+        self.assertEqual(retried[0], "«Reintentar»: se repiten los pasos que no se completaron.")
+        self.assertIn("Paso «Componentes»: completado.", retried)
+        self.assertNotIn("Paso «Dirección de la suite»: en curso.", retried, "a green step does not run again")
+
+    def test_each_change_in_aios_reading_of_a_container_while_the_suite_starts_is_logged(self):
+        self.claim()
+        self.suite.release.clear()
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
+                             "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
+        self.install()
+        deadline = time.monotonic() + 10  # the step reads the containers once, then presses AIO's start
+        while not self.suite.starts:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
+        self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
+        self.until_logged("Contenedor «Búsqueda de texto completo»: iniciando.")
+        self.suite.release.set()
+        texts = self.texts(self.until("done"))
+        start, end = texts.index(f"Paso «{self.START}»: en curso."), texts.index(f"Paso «{self.START}»: completado.")
+        self.assertEqual([t for t in texts[start + 1:end] if t.startswith("Contenedor")], [
+            "Contenedor «PostgreSQL»: en ejecución.", "Contenedor «Servidor de aplicaciones»: iniciando.",
+            "Contenedor «Búsqueda de texto completo»: en espera.", "Contenedor «Búsqueda de texto completo»: iniciando.",
+            "Contenedor «Servidor de aplicaciones»: en ejecución.",
+            "Contenedor «Búsqueda de texto completo»: en ejecución."])
+        self.assertEqual(set(texts[start + 1:end]) - {t for t in texts if t.startswith("Contenedor")},
+                         {f"{self.START}: AIO inició todos los contenedores."})
+        self.assertEqual(len([t for t in texts if t.startswith("Contenedor")]), 6, "only while the suite starts")
+
+    def test_while_aio_starts_the_suite_a_silent_log_says_how_many_containers_run(self):
+        """Once the step wrote nothing for HEARTBEAT seconds while a container does not run yet."""
+        clock = [0.0]
+        counted = f"{self.START}: AIO descarga e inicia los contenedores; 1 de 3 en ejecución."
+        self.claim()
+        self.suite.release.clear()
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
+                             "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
+        # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
+        with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            self.install()
+            self.until_logged("Contenedor «Búsqueda de texto completo»: en espera.")
+            clock[0] = start.HEARTBEAT - 1
+            time.sleep(start.POLL * 1.5)
+            self.assertNotIn(counted, self.texts(self.progress()))
+            clock[0] = start.HEARTBEAT
+            self.until_logged(counted)
+            self.suite.release.set()
+            texts = self.texts(self.until("done"))
+        self.assertEqual(texts.count(counted), 1)
+        self.assertLess(texts.index(counted), texts.index(f"{self.START}: AIO inició todos los contenedores."))
+
+    def test_the_log_keeps_its_latest_lines_newest_last(self):
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        self.until("failed")
+        for _ in range(runner.LINES):
+            self.install()
+            log = self.until("failed")["log"]
+            if "«Instalar»: comienza la instalación." not in self.texts({"log": log}):
+                break
+        self.assertEqual(len(log), runner.LINES)
+        self.assertEqual([line["time"] for line in log], sorted(line["time"] for line in log))
+        self.assertIn("«Reintentar»: se repiten los pasos que no se completaron.", self.texts({"log": log}))
+
+    def test_no_line_carries_a_password_the_passphrase_or_the_links_secret(self):
+        link = self.link()
+        self.browser = Browser(link.url)
+        self.assertEqual(self.browser.open(link.url)[0], 200)
+        self.claim()
+        self.suite.down = {"nextcloud"}
+        self.install()
+        self.until("failed")
+        self.suite.down = set()
+        self.install()
+        logged = "\n".join(self.texts(self.until("done")))
+        passwords = [user["password"] for user in self.suite.users.values()]
+        self.assertGreater(len(passwords), 1, "the install made people's accounts")
+        for secret in (FakeSuite.PASSPHRASE, FakeSuite.ADMINISTRATOR, FakeSuite.BACKUP_PASSWORD,
+                       urlsplit(link.url).fragment, *passwords):
+            self.assertNotIn(secret, logged)
+            self.assertNotIn(secret, self.journal.getvalue())
 
 
 TOKENS = brand.tokens()

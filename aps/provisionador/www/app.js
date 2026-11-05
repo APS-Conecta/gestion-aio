@@ -21,6 +21,7 @@ let searching = null;
 let polling = null;
 let typing = null;
 let installed = false;
+let following = true;  // the install's log keeps its newest line in view, unless the operator scrolled up to read
 
 async function api(method, path, body) {
   let response;
@@ -39,9 +40,11 @@ async function api(method, path, body) {
   return answer;
 }
 
-// The screens in order; the navigation opens every one up to the furthest reached.
+// The screens in order; the navigation opens every one up to the furthest reached. The install's log shows on «Revisar»
+// and «Listo» only.
 function show(step) {
   clearTimeout(polling);
+  if (step !== "revisar" && step !== "listo") $("log-panel").hidden = true;
   for (const link of document.querySelectorAll(".step-link")) {
     const current = link.dataset.step === step;
     $(link.dataset.step).hidden = !current;
@@ -380,10 +383,23 @@ function item(name, state, label, reason) {
   return node;
 }
 
+// The install's log, newest at the bottom, each line at this computer's time.
+function showLog(lines) {
+  $("log").replaceChildren(...lines.map((line) => {
+    const node = element("li", ` ${line.text}`);
+    node.prepend(Object.assign(element("time", new Date(line.time).toLocaleTimeString("es-CL", {hourCycle: "h23"})),
+      {dateTime: line.time}));
+    return node;
+  }));
+  if (following) $("log").scrollTop = $("log").scrollHeight;
+}
+
 // `jump`: at «Listo», go on to its screen (not when the operator came back to «Revisar»). A failed or waiting step is
-// red, with its reason; «Reintentar» runs those again.
+// red, with its reason; «Reintentar» runs those again. The install's log follows, there and on «Listo».
 function follow(state, jump = true) {
   const install = state.install;
+  $("log-panel").hidden = !install;
+  showLog(install?.log || []);
   $("install").hidden = Boolean(install) && install.status !== "failed";
   $("install").textContent = install?.status === "failed" ? "Reintentar" : "Instalar";
   for (const box of $("optional-apps").querySelectorAll("input")) box.disabled = Boolean(install);
@@ -505,11 +521,15 @@ async function start() {
   });
   $("teams-continue").addEventListener("click", async () => (await keepTeams()) && revisar());
   $("install").addEventListener("click", install);
+  $("log").addEventListener("scroll", () => {
+    const log = $("log");
+    following = log.scrollTop + log.clientHeight >= log.scrollHeight - 1;
+  });
   if (state.centre) {
     select({...state.centre, point: state.centre.official_point}, state.centre.point);
     confirmed(state.centre);
   }
-  if (state.install?.status === "done") listo(state.address.name);
+  if (state.install?.status === "done") follow(state);
   else if (state.install) revisar();
   else if (state.centre) direccion();
   else show("centro");
