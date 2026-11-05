@@ -278,6 +278,39 @@ class BrandGate(unittest.TestCase):
         self.assertIn("no brand token file", out)
 
 
+JOBS, IMAGE = "aps/provisionador/steps/jobs.py", "aps/images/nextcloud/Dockerfile"
+WINDOW = {JOBS: 'NAME = "Tareas"\nMAINTENANCE_WINDOW = 1\nSETTINGS = {}\n',
+          IMAGE: "FROM nextcloud\nENV NEXTCLOUD_MAINTENANCE_WINDOW=1\n"}
+
+
+class MaintenanceWindowGate(unittest.TestCase):
+    """The jobs install step and the thin Nextcloud image name one maintenance-window hour, the same one."""
+
+    def setUp(self):
+        self.repo = Repo(WINDOW)
+        self.addCleanup(self.repo.close)
+
+    def test_the_same_hour_in_both_passes(self):
+        code, out = run_gate("maintenance_window.py", self.repo)
+        self.assertEqual(code, 0, out)
+
+    def test_hours_that_differ_fail_naming_each(self):
+        self.repo.write({IMAGE: "FROM nextcloud\nENV NEXTCLOUD_MAINTENANCE_WINDOW=5\n"})
+        code, out = run_gate("maintenance_window.py", self.repo)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"{JOBS}: 1", out)
+        self.assertIn(f"{IMAGE}: 5", out)
+
+    def test_a_file_that_names_no_hour_fails_naming_it(self):
+        for path, text in ((JOBS, 'NAME = "Tareas"\n'), (IMAGE, "FROM nextcloud\n")):
+            with self.subTest(path):
+                repo = Repo({**WINDOW, path: text})
+                self.addCleanup(repo.close)
+                code, out = run_gate("maintenance_window.py", repo)
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"{path} names no maintenance-window hour", out)
+
+
 DEIS = GATES.parent / "provisionador" / "deis.py"
 HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 

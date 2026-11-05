@@ -625,7 +625,7 @@ class Instalar(InstallTest):
             "default_language": "es", "force_language": "es", "default_locale": "es_CL", "default_phone_region": "CL",
             "default_timezone": "America/Punta_Arenas", "logtimezone": "America/Punta_Arenas",
             "remember_login_cookie_lifetime": 0, "session_lifetime": 900, "session_keepalive": False,
-            "maintenance_window_start": 5}.items(), self.suite.system.items())
+            "maintenance_window_start": 1}.items(), self.suite.system.items())
         self.assertEqual((self.suite.apps["admin_audit"]["enabled"], self.suite.apps["core"]["backgroundjobs_mode"]),
                          ("yes", "cron"))
         self.assertEqual(self.suite.issuers, ["www.ispch.gob.cl"])
