@@ -4,7 +4,7 @@
 """The people the spreadsheet uploaded on «Equipos» (17-install) loaded, in the installed suite: each one not retired
 (48-retire checks those) has an enabled account with their display name, email and groups, the staff-wide group and
 their roles' categories among them, and the first administrator is in the admin group. Each logs in at the suite's
-name, in a browser that trusts the staging roots alone, with the first password the passwords file lists for them; the
+name, in a browser that trusts the suite's roots alone, with the first password the passwords file lists for them; the
 passwords are masked in the log, never printed."""
 
 import json

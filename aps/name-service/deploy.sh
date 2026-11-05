@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Deploys the name service from the checked-out tree: the slug table generated from the DEIS register is
-# bundled, the locked wrangler deploys it with CLOUDFLARE_API_TOKEN (from the environment), which also becomes
-# the Worker's secret.
+# Deploys the name service from the checked-out tree: the slug tables generated from the DEIS register, of its listed
+# and of its test establishments, are bundled, the locked wrangler deploys it with CLOUDFLARE_API_TOKEN (from the
+# environment), which also becomes the Worker's secret.
 # Usage: deploy.sh <production|ci>
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -15,6 +15,7 @@ esac
 [ -n "${CLOUDFLARE_API_TOKEN:-}" ] \
   || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is missing, so the name service was not deployed."; exit 1; }
 python3 -I aps/provisionador/deis.py slugs > aps/name-service/slugs.json
+python3 -I aps/provisionador/deis.py tests > aps/name-service/tests.json
 cloudflare() {
   printf 'Authorization: Bearer %s\n' "$CLOUDFLARE_API_TOKEN" \
     | curl -sS --fail-with-body --retry 3 -H @- -H 'Content-Type: application/json' "${@:2}" "https://api.cloudflare.com/client/v4$1"

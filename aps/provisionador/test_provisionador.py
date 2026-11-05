@@ -312,6 +312,39 @@ class CentroChoice(WizardTest):
             self.assertEqual((status, body["centre"]["timezone"]), (200, timezone), code)
 
 
+class HiddenTestEstablishment(WizardTest):
+    """A test establishment beside the register, in establecimientos-prueba.csv: the API takes its code, as a release's
+    acceptance run sends it, and «Dirección» names it from the slug table, but «Centro» never lists it."""
+
+    TESTS = HEADER + "999009,CESFAM,Centro de Salud Familiar Prueba,Sin dirección,13132,Vitacura,13,Metropolitana de " \
+                     "Santiago,Servicio de Salud Metropolitano Oriente,Municipal,-33.39,-70.59\n"
+
+    def setUp(self):
+        super().setUp()
+        self.register.with_name("establecimientos-prueba.csv").write_text(self.TESTS, encoding="utf-8")
+        self.stop()
+        self.start()
+        self.browser = self.operator()
+
+    def test_the_api_takes_its_code_and_direccion_claims_its_name(self):
+        status, body = self.browser.request("POST", "/api/centre", {"code": "999009"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["centre"]["name"], "Centro de Salud Familiar Prueba")
+        self.assertEqual(self.browser.get("/api/state")[1]["address"],
+                         {"name": "cesfam-prueba.gestion.apsconecta.cl", "claimed": False})
+        status, body = self.browser.request("POST", "/api/address", {})
+        self.assertEqual((status, self.suite.claims), (200, ["999009"]), body)
+
+    def test_centro_never_lists_it(self):
+        for query in ({}, {"name": "prueba"}, {"region": "13"}, {"comuna": "13132"}, {"type": "CESFAM"}):
+            status, body = self.browser.get("/api/establishments?" + urlencode(query))
+            self.assertEqual(status, 200, body)
+            self.assertNotIn("999009", [row["code"] for row in body["rows"]], query)
+        self.assertEqual(self.browser.get("/api/establishments")[1]["total"], 4)
+        register = self.browser.get("/api/register")[1]
+        self.assertNotIn("13132", [comuna["code"] for comuna in register["comunas"]])
+
+
 NAME = "cesfam-los-castanos.gestion.apsconecta.cl"
 
 

@@ -27,6 +27,14 @@ conformance gate enforces it.
 A published version of this repo: bootstrap (carrying its bundle's checksum), our images, the pins of the official images, theme and data.
 It contains no apps.
 
+**Release candidate** (candidata):
+A Suite release before its clean-machine acceptance run: a pre-release under its version, never «Latest». It becomes the
+release «Latest» once every check passes, and is withdrawn otherwise.
+
+**Test establishment** (establecimiento de prueba):
+APS Conecta's own entry beside the DEIS register, under a code outside DEIS's. «Centro» never lists it, and only APS's
+token claims its name: a release's acceptance run claims it in production.
+
 **Operator** (operador):
 The person who runs the install.
 

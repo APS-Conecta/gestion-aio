@@ -13,7 +13,6 @@ import base64
 import json
 import os
 import re
-import ssl
 import sys
 import time
 import urllib.request
@@ -21,7 +20,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import STAGING_ROOTS, chromium, hardware, machine  # noqa: E402
+from browser import chromium, hardware, machine, tls  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 from steps.components import RECORDING, chosen  # noqa: E402
 
@@ -153,7 +152,7 @@ request = urllib.request.Request(f"{suite}/ocs/v2.php/apps/spreed/api/v4/room", 
                                  data=json.dumps({"roomType": 1, "invite": STAFF[1]}).encode(),
                                  headers={"Authorization": f"Basic {basic}", "OCS-APIRequest": "true",
                                           "Accept": "application/json", "Content-Type": "application/json"})
-with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=STAGING_ROOTS), timeout=30) as answer:
+with urllib.request.urlopen(request, context=tls(), timeout=30) as answer:
     token = json.load(answer)["ocs"]["data"]["token"]
 
 sockets, pages = [], []

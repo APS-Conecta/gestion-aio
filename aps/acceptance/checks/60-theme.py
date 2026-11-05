@@ -40,7 +40,7 @@ THEMED = """async () => {
     establishment: headline ? getComputedStyle(headline, '::before').content : null,
   };
 }""" % THEME
-# In-page requests, so they go through Chromium's own TLS (which trusts the staging roots) and the page's session.
+# In-page requests, so they go through Chromium's own TLS (which trusts the suite's roots) and the page's session.
 TEXT = "url => fetch(url, {cache: 'no-store'}).then(r => r.text())"
 STATUS = "url => fetch(url, {cache: 'no-store'}).then(r => r.ok ? r.json() : {})"
 TALK = "/var/www/html/custom_apps/spreed/l10n/es"  # Talk's own Spanish, .json and .js

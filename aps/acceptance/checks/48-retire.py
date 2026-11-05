@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Retirar» in the installed suite: each person the operator retired on «Equipos» while the install ran (17-install),
 after storing a file in their own files, cannot log in at the suite's name with the first password the passwords file
-lists, in a browser that trusts the staging roots alone. Nextcloud keeps their account, disabled and in none of the
+lists, in a browser that trusts the suite's roots alone. Nextcloud keeps their account, disabled and in none of the
 groups the install manages, with that file; the passwords are masked in the log, never printed."""
 
 import json
