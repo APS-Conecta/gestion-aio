@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import aio_config, as_person, chromium, hardware, occ, person, suite_name  # noqa: E402
+from browser import aio_config, as_person, chromium, hardware, log_in, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
 from steps.components import RECORDING, chosen  # noqa: E402
 
@@ -148,11 +148,7 @@ with chromium(media=True) as browser:
         context.add_init_script(OBSERVE)
         page = context.new_page()
         page.on("websocket", lambda socket: sockets.append(socket.url))
-        page.goto(f"{suite}/login")
-        page.fill("#user", user)
-        page.fill("#password", password)
-        page.click("[data-login-form-submit]")
-        page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
+        log_in(page, suite, user, password)
         pages.append(page)
     for user, page in zip(STAFF, pages):  # the invited one opens the conversation once the first one's call rings
         page.goto(f"{suite}/call/{token}")

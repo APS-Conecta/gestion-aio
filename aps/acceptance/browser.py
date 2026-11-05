@@ -9,8 +9,8 @@ fake camera and a microphone that plays a steady tone.
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
 It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
-files, and the first password the passwords file lists for an account), makes staff accounts and sends a staff
-member's own requests to Nextcloud, trusting the staging roots alone.
+files, and the first password the passwords file lists for an account), makes staff accounts, signs a person in at the
+suite's login page and sends a staff member's own requests to Nextcloud, trusting the staging roots alone.
 """
 
 import base64
@@ -181,3 +181,12 @@ def chromium(pinned=(), args=(), media=False):
             yield browser
         finally:
             browser.close()
+
+
+def log_in(page, suite, user, password):
+    """Sign `user` in on the suite's login page, as staff do; it fails the check unless the page then leaves /login."""
+    page.goto(f"{suite}/login")
+    page.fill("#user", user)
+    page.fill("#password", password)
+    page.click("[data-login-form-submit]")
+    page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)

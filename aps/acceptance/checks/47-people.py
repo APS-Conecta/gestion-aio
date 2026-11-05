@@ -14,7 +14,8 @@ from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
 import spreadsheet  # noqa: E402
-from browser import chromium, first_password, occ, provisionador_file, provisionador_state, suite_name  # noqa: E402
+from browser import chromium, first_password, log_in, occ, provisionador_file, provisionador_state  # noqa: E402
+from browser import suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 from steps.people import groups  # noqa: E402
@@ -28,7 +29,7 @@ people, errors = spreadsheet.read(state.get("spreadsheet"), state.get("teams", [
 if errors or not people:
     sys.exit(f"«Equipos» loaded no people: {errors}")
 people = [person for person in people if person["user"] not in state.get("retired", [])]
-name = suite_name()
+suite = f"https://{suite_name()}"
 passwords = provisionador_file(FILE)  # never printed
 wrong, first = [], {}
 for person in people:
@@ -52,18 +53,14 @@ with chromium() as browser:
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()
         try:
-            page.goto(f"https://{name}/login")
-            page.fill("#user", user)
-            page.fill("#password", password)
-            page.click("[data-login-form-submit]")
-            page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
+            log_in(page, suite, user, password)
             signed_in = page.evaluate(WHOAMI)
         except Error as error:
             page.screenshot(path=evidence / f"{user}.png")
-            sys.exit(f"{user} does not log in at https://{name} with their first password: "
+            sys.exit(f"{user} does not log in at {suite} with their first password: "
                      f"{error.message.splitlines()[0]}")
         page.screenshot(path=evidence / f"{user}.png")
-        print(f"{user} logs in at https://{name} and lands on {page.url}")
+        print(f"{user} logs in at {suite} and lands on {page.url}")
         if signed_in != user:
             sys.exit(f"logging in as {user} opened a session for {signed_in}")
         context.close()
