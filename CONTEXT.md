@@ -71,9 +71,9 @@ The root-only file on the server with each person's first password, the administ
 encryption password of AIO's backup, which a restore asks for. «Listo» hands it over; then the wizard closes.
 
 **Component** (componente):
-An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV,
-full-text search and the app server (HaRP), and Talk recording on a server that passes the recording threshold. Every
-other optional container stays off.
+An optional AIO container the suite runs, switched on with AIO's own switch: Talk, Euro-Office, Imaginary, ClamAV and
+full-text search, and Talk recording on a server that passes the recording threshold. Every other optional container
+stays off.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.

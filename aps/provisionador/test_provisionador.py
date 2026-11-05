@@ -455,7 +455,7 @@ class Direccion(WizardTest):
         self.assertEqual((status, body["address"]["name"], self.suite.domain), (200, NAME, NAME))
 
 
-COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch", "harp"}
+COMPONENTS = {"talk", "eurooffice", "imaginary", "clamav", "fulltextsearch"}  # HaRP stays off: no app is an ExApp
 # This ticket's steps, by what they need of the suite: Nextcloud's command line, or AIO and the name service alone.
 # Later tickets add steps of their own; these tests go by these.
 NEEDS_NEXTCLOUD = {"Certificado del ISP", "Idioma y formato regional", "Sesiones y registro de auditoría",
@@ -601,8 +601,7 @@ class Instalar(InstallTest):
         self.assertEqual((state["centre"]["name"], state["address"]["name"], state["install"]),
                          ("Centro de Salud Familiar Los Castaños", NAME, None))
         self.assertEqual(state["components"], [
-            "Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo",
-            "HaRP (servidor de aplicaciones externas)"])
+            "Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo"])
         self.assertEqual(state["backup_folder"], "/var/backups/aps-conecta")
 
     def test_there_is_no_install_before_the_address_is_claimed(self):
