@@ -58,7 +58,7 @@ CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org;
        "connect-src 'self' https://*.gestion.apsconecta.cl; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
 SERVICES = HERE.parent / "services.json"  # the release's name service and ACME directory
-PORT = 8081  # clear of AIO's 80, 443, 3478, 8080 and 8443
+PORT = 8081  # clear of AIO's 80, 8080 and 8443 and the suite's 443 (Talk's TURN included)
 COOKIE = "__Host-session"
 MAX_BODY = 1024 * 1024  # a people spreadsheet of about 8,000 people
 
