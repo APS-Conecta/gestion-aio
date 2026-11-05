@@ -63,8 +63,8 @@ It points to the server's inside address.
 One idempotent unit of the install, with the steps it depends on.
 
 **End-of-install check**:
-The differences, step by step, between what each install step declared and what holds now: the running suite, or
-for people what «Equipos» declares now. «Listo» needs it clean.
+The differences, step by step, between what each install step declared and what holds now: the running suite, and
+for people also what «Equipos» declares now. «Listo» needs it clean.
 
 **Passwords file** (archivo de contraseñas):
 The root-only file on the server with each person's first password, the administrator's, AIO's passphrase and the

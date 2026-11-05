@@ -804,10 +804,10 @@ class FakeSuite:
                                      "enabled": user["enabled"],
                                      "groups": sorted(g for g, group in self.groups.items() if uid in group["members"])}
                                for uid, user in self.users.items()})
-        if command == "user:disable" and len(args) == 1:
+        if command in ("user:disable", "user:enable") and len(args) == 1:
             if args[0] not in self.users:
                 raise failed
-            self.users[args[0]]["enabled"] = False
+            self.users[args[0]]["enabled"] = command == "user:enable"
             return ""
         ends = args.index("--") if "--" in args else len(args)
         if any(arg.startswith("-") for arg in args[:ends]):
