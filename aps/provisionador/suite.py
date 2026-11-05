@@ -450,10 +450,10 @@ class Suite:
 
     @staticmethod
     def hardware():
-        """The CPU cores and the memory of this server, which runs the suite; the memory in GiB, rounded to the
-        nearest as the bootstrap's check rounds it."""
+        """The CPU cores and the memory of this server, which runs the suite; the memory in GiB, rounded up as the
+        bootstrap's check rounds it."""
         memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-        return {"cpus": len(os.sched_getaffinity(0)), "memory_gib": (memory + 2 ** 29) // 2 ** 30}
+        return {"cpus": len(os.sched_getaffinity(0)), "memory_gib": (memory + 2 ** 30 - 1) // 2 ** 30}
 
     def switch(self, components):
         """Turn the given optional containers on and every other one off, with AIO's optional-containers form
@@ -544,7 +544,7 @@ class FakeSuite:
         self.groups = {"admin": {"name": "admin", "members": {"admin"}}}  # each group, by its id: its name and members
         self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
         self.answering = True  # whether the suite's reverse proxy answers at its name
-        self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: the bootstrap's minimum
+        self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
