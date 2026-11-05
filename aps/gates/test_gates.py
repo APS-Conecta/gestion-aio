@@ -3,7 +3,10 @@
 """Behaviour of the static gates and the release bundle, driven through their command lines."""
 
 import json
+import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -278,6 +281,39 @@ class BrandGate(unittest.TestCase):
         self.assertIn("no brand token file", out)
 
 
+JOBS, IMAGE = "aps/provisionador/steps/jobs.py", "aps/images/nextcloud/Dockerfile"
+WINDOW = {JOBS: 'NAME = "Tareas"\nMAINTENANCE_WINDOW = 1\nSETTINGS = {}\n',
+          IMAGE: "FROM nextcloud\nENV NEXTCLOUD_MAINTENANCE_WINDOW=1\n"}
+
+
+class MaintenanceWindowGate(unittest.TestCase):
+    """The jobs install step and the thin Nextcloud image name one maintenance-window hour, the same one."""
+
+    def setUp(self):
+        self.repo = Repo(WINDOW)
+        self.addCleanup(self.repo.close)
+
+    def test_the_same_hour_in_both_passes(self):
+        code, out = run_gate("maintenance_window.py", self.repo)
+        self.assertEqual(code, 0, out)
+
+    def test_hours_that_differ_fail_naming_each(self):
+        self.repo.write({IMAGE: "FROM nextcloud\nENV NEXTCLOUD_MAINTENANCE_WINDOW=5\n"})
+        code, out = run_gate("maintenance_window.py", self.repo)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"{JOBS}: 1", out)
+        self.assertIn(f"{IMAGE}: 5", out)
+
+    def test_a_file_that_names_no_hour_fails_naming_it(self):
+        for path, text in ((JOBS, 'NAME = "Tareas"\n'), (IMAGE, "FROM nextcloud\n")):
+            with self.subTest(path):
+                repo = Repo({**WINDOW, path: text})
+                self.addCleanup(repo.close)
+                code, out = run_gate("maintenance_window.py", repo)
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"{path} names no maintenance-window hour", out)
+
+
 DEIS = GATES.parent / "provisionador" / "deis.py"
 HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 
@@ -440,6 +476,97 @@ class ReleaseWorkflowGate(unittest.TestCase):
         code, out = self.gate(" --prerelease=false --latest ", " ")
         self.assertEqual(code, 1, out)
         self.assertIn("no job makes a release «Latest»", out)
+
+
+class DockerPackages(unittest.TestCase):
+    """aps/bootstrap/install.sh: Docker's packages for a system, as its docker_repo names them. A derivative takes the
+    Ubuntu or Debian release it is built on, as its own codename has no packages."""
+
+    FUNCTION = re.search(r"^docker_repo\(\) \(.*?^\)$", (REPO / "aps" / "bootstrap" / "install.sh").read_text(),
+                         re.S | re.M).group(0)
+
+    def repo(self, os_release, debian_version=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "os-release").write_text(os_release)
+            if debian_version:
+                Path(tmp, "debian_version").write_text(debian_version)
+            env = {"OS_RELEASE": f"{tmp}/os-release", "DEBIAN_VERSION": f"{tmp}/debian_version"}
+            return subprocess.run(["bash", "-c", self.FUNCTION + "\ndocker_repo"], env=env, capture_output=True,
+                                  text=True, check=True).stdout.strip()
+
+    def test_debian_and_ubuntu_take_their_own_codename(self):
+        self.assertEqual(self.repo("ID=debian\nVERSION_CODENAME=bookworm\n"), "debian bookworm")
+        self.assertEqual(self.repo("ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble\n"), "ubuntu noble")
+
+    def test_a_derivative_takes_the_release_it_is_built_on(self):
+        lmde = 'PRETTY_NAME="LMDE 7 (gigi)"\nID=linuxmint\nID_LIKE=debian\nVERSION_CODENAME=gigi\nDEBIAN_CODENAME=trixie\n'
+        mint = "ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nVERSION_CODENAME=wilma\nUBUNTU_CODENAME=noble\n"
+        self.assertEqual(self.repo(lmde), "debian trixie")
+        self.assertEqual(self.repo(mint), "ubuntu noble")
+
+    def test_a_debian_derivative_naming_no_release_takes_it_from_debian_version(self):
+        self.assertEqual(self.repo("ID=mx\nID_LIKE=debian\nVERSION_CODENAME=libretto\n", "12.7\n"), "debian bookworm")
+
+    def test_another_system_gets_none(self):
+        self.assertEqual(self.repo("ID=fedora\nVERSION_CODENAME=\n"), "")
+
+
+class BootstrapRefusals(unittest.TestCase):
+    """aps/bootstrap/install.sh, as a release fills it in, as root on a server with Docker: another installation, or
+    the configuration one left, is refused before anything changes. `docker`, `id` and `curl` are fakes first on PATH;
+    each answers only the calls the case names and fails loudly on any other, and every call is recorded."""
+
+    TAG = "v1.0.1"
+    INSPECT = "docker container inspect -f {{.Config.Image}} nextcloud-aio-mastercontainer"
+    VOLUME = "docker volume inspect nextcloud_aio_mastercontainer"
+
+    def bootstrap(self, answers):
+        """The exit code, the output and the calls made of the release's install.sh, with `answers` as
+        {call: (exit code, output)}; and what its folder's parent holds afterwards besides the test's own files."""
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        text = (REPO / "aps" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
+        for old, new in (('\nRELEASE_TAG=""\n', f'\nRELEASE_TAG="{self.TAG}"\n'),
+                         ('\nBUNDLE_SHA256=""\n', f'\nBUNDLE_SHA256="{"0" * 64}"\n'),
+                         ("\nINSTALL_DIR=/opt/aps-conecta/gestion\n", f"\nINSTALL_DIR={tmp}/gestion\n")):
+            self.assertEqual(text.count(old), 1, old)
+            text = text.replace(old, new)
+        (tmp / "install.sh").write_text(text, encoding="utf-8")
+        fake = ["#!/bin/sh", 'printf "%s\\n" "${0##*/} $*" >> "$CALLS"', 'case "${0##*/} $*" in']
+        fake += [f"  {shlex.quote(call)}) printf %s {shlex.quote(out)}; exit {code} ;;"
+                 for call, (code, out) in {"id -u": (0, "0"), **answers}.items()]
+        fake += ['  *) echo "fake: unexpected call: ${0##*/} $*" >&2; exit 99 ;;', "esac", ""]
+        (tmp / "bin").mkdir()
+        for name in ("docker", "id", "curl"):
+            (tmp / "bin" / name).write_text("\n".join(fake), encoding="utf-8")
+            (tmp / "bin" / name).chmod(0o755)
+        (tmp / "calls").touch()
+        r = subprocess.run([shutil.which("bash"), str(tmp / "install.sh")], capture_output=True, encoding="utf-8",
+                           env={"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "CALLS": str(tmp / "calls")})
+        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls"})
+        return r.returncode, r.stdout + r.stderr, (tmp / "calls").read_text().splitlines(), made
+
+    def test_another_aio_installation_is_refused_naming_its_image(self):
+        code, out, calls, made = self.bootstrap({self.INSPECT: (0, "nextcloud/all-in-one:latest")})
+        self.assertEqual((code, calls, made), (1, ["id -u", self.INSPECT], []), out)
+        self.assertIn("ya tiene otra instalación de Nextcloud All-in-One (imagen nextcloud/all-in-one:latest)", out)
+        self.assertIn("Elimínela, o use otro servidor, antes de volver a ejecutar el instalador. No se modificó nada.",
+                      out)
+
+    def test_another_release_of_ours_is_refused_naming_the_command_that_opens_its_wizard(self):
+        ours = "ghcr.io/aps-conecta/gestion-mastercontainer"
+        code, out, calls, made = self.bootstrap({self.INSPECT: (0, f"{ours}:v1.0.0")})
+        self.assertEqual((code, calls, made), (1, ["id -u", self.INSPECT], []), out)
+        self.assertIn("ya tiene APS Conecta Gestión v1.0.0. Para abrir su asistente, ejecute:\n"
+                      "  curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/download/v1.0.0/install.sh"
+                      " | sudo bash\nNo se ofrece actualizar una instalación. No se modificó nada.", out)
+
+    def test_a_volume_another_installation_left_is_refused_on_a_fresh_install(self):
+        code, out, calls, made = self.bootstrap({self.INSPECT: (1, ""), self.VOLUME: (0, "[]")})
+        self.assertEqual((code, calls, made), (1, ["id -u", self.INSPECT, self.VOLUME], []), out)
+        self.assertIn("No se modificó nada.", out)
+        self.assertIn("  - Docker conserva el volumen nextcloud_aio_mastercontainer de una instalación anterior de"
+                      " Nextcloud All-in-One, que el instalador no toca; elimínelo, o use otro servidor, antes de"
+                      " volver a ejecutar el instalador\n", out)
 
 
 if __name__ == "__main__":
