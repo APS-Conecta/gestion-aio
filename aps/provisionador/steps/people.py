@@ -5,13 +5,14 @@ the staff-wide group, each listed role's category and, for the first administrat
 retired with «Retirar» keeps their account, files and shares, disabled and in none of the groups the install manages
 (teams.py's and admin), and so does a person a corrected spreadsheet drops once the install made their account, until a
 later spreadsheet lists them again. A corrected spreadsheet takes a person out of the managed groups it no longer lists.
-Any other group, and any account the install did not make, stays as Nextcloud has it. Their first passwords are made
-once and the passwords file lists them under their current name; an account that exists keeps its own.
+Any other group, and any account the install did not make, stays as Nextcloud has it. The first passwords of the
+accounts it makes are made once and the passwords file lists them under their current name; an account that existed
+before keeps its own and is not listed.
 
 The step applies the people as «Equipos» declared them when «Instalar» or «Reintentar» was pressed. Its part of the
 end-of-install check compares them with what «Equipos» declares now (a change made since then waits for «Reintentar»)
-and flags a listed person «Retirar» did not retire whose account is disabled; any other change an administrator makes
-in Nextcloud it leaves alone."""
+and flags a disabled account the install made for a listed person «Retirar» did not retire; any other change an
+administrator makes in Nextcloud it leaves alone."""
 
 import json
 
@@ -49,12 +50,13 @@ def made(folder, declared, centre_type):
 
 def differences(context, found):
     """By username, the occ commands that bring each account the step reconciles to what it declares: a listed person's
-    display name, email and groups, their account enabled unless «Retirar» retired them, and the account of a person
-    retired, or dropped from the spreadsheet once the install made it, disabled. A person the spreadsheet no longer
-    lists is reconciled while their account exists."""
+    display name, email and groups, and their account enabled if the install made it and «Retirar» did not retire them;
+    the account of a person retired, or dropped from the spreadsheet once the install made it, disabled. A person the
+    spreadsheet no longer lists is reconciled while their account exists."""
     managed, retired = {*teams.groups(context.teams, context.centre["type"]), ADMINS}, set(context.retired)
     listed = {person["user"]: person for person in context.people}
-    leaving = retired | set(made(context.folder, context.teams, context.centre["type"]))
+    ours = set(made(context.folder, context.teams, context.centre["type"]))
+    leaving = retired | ours
     needed = {}
     for user in [*listed, *sorted(leaving & (found.keys() - listed.keys()))]:
         account, person, commands = found.get(user, NEW), listed.get(user), []
@@ -69,7 +71,7 @@ def differences(context, found):
         commands += [("group:adduser", group, user) for group in sorted(wanted - held)]
         if gone and account["enabled"]:
             commands.append(("user:disable", user))
-        elif not gone and not account["enabled"]:
+        elif not gone and not account["enabled"] and user in ours:
             commands.append(("user:enable", user))
         needed[user] = commands
     return needed
@@ -79,8 +81,9 @@ def run(context):
     suite, people = context.suite, context.people
     if not people:
         return [WRONG]
-    first = passwords.first(context, {person["user"]: person["name"] for person in people})
-    found = accounts(suite)
+    found, kept = accounts(suite), passwords.accounts(context.folder)
+    first = passwords.first(context, {person["user"]: person["name"] for person in people
+                                      if person["user"] not in found or person["user"] in kept})
     created = [person for person in people if person["user"] not in found]
     for person in created:
         suite.add_user(person["user"], person["name"], first[person["user"]])

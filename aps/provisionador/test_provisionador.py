@@ -1362,8 +1362,8 @@ class PeopleChanges(PeopleTest):
     them: names, emails and teams follow the spreadsheet, a moved person leaves the old team's group, and a retired
     person's account is disabled and in no team, kept with its files and shares; a dropped person listed again is
     enabled. Only the groups the install manages change, and no password does. Of what an administrator changes in
-    Nextcloud, the end-of-install check flags only a listed person's disabled account; at «Listo», Nextcloud's Users
-    page owns the people."""
+    Nextcloud, the end-of-install check flags only a listed person's disabled account the install made; at «Listo»,
+    Nextcloud's Users page owns the people."""
 
     def setUp(self):
         super().setUp()
@@ -1585,6 +1585,14 @@ class PeopleChanges(PeopleTest):
         self.install()
         self.until("done")
         self.assertEqual([self.suite.users[user]["enabled"] for user in ("luis.vera", "pedro.munoz")], [True, False])
+
+    def test_a_listed_persons_disabled_account_the_install_did_not_make_stays_disabled_and_listo_follows(self):
+        self.suite.add_user("pedro.munoz", "Pedro Muñoz Tapia", "contraseña de Pedro")
+        self.suite.users["pedro.munoz"]["enabled"] = False
+        self.install()
+        self.until("done")
+        self.assertFalse(self.suite.users["pedro.munoz"]["enabled"])
+        self.assertNotIn("pedro.munoz", self.browser.request("POST", "/api/close", {})[1]["passwords"])
 
     def test_at_listo_the_people_stay_as_they_are_for_nextclouds_users_page(self):
         self.install()
