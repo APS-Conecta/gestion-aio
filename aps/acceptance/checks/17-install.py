@@ -48,7 +48,7 @@ PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
-            "isFulltextsearchEnabled": True, "isHarpEnabled": True,
+            "isFulltextsearchEnabled": True, "isHarpEnabled": False,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 

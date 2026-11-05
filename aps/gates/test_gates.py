@@ -278,6 +278,39 @@ class BrandGate(unittest.TestCase):
         self.assertIn("no brand token file", out)
 
 
+JOBS, IMAGE = "aps/provisionador/steps/jobs.py", "aps/images/nextcloud/Dockerfile"
+WINDOW = {JOBS: 'NAME = "Tareas"\nMAINTENANCE_WINDOW = 1\nSETTINGS = {}\n',
+          IMAGE: "FROM nextcloud\nENV NEXTCLOUD_MAINTENANCE_WINDOW=1\n"}
+
+
+class MaintenanceWindowGate(unittest.TestCase):
+    """The jobs install step and the thin Nextcloud image name one maintenance-window hour, the same one."""
+
+    def setUp(self):
+        self.repo = Repo(WINDOW)
+        self.addCleanup(self.repo.close)
+
+    def test_the_same_hour_in_both_passes(self):
+        code, out = run_gate("maintenance_window.py", self.repo)
+        self.assertEqual(code, 0, out)
+
+    def test_hours_that_differ_fail_naming_each(self):
+        self.repo.write({IMAGE: "FROM nextcloud\nENV NEXTCLOUD_MAINTENANCE_WINDOW=5\n"})
+        code, out = run_gate("maintenance_window.py", self.repo)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"{JOBS}: 1", out)
+        self.assertIn(f"{IMAGE}: 5", out)
+
+    def test_a_file_that_names_no_hour_fails_naming_it(self):
+        for path, text in ((JOBS, 'NAME = "Tareas"\n'), (IMAGE, "FROM nextcloud\n")):
+            with self.subTest(path):
+                repo = Repo({**WINDOW, path: text})
+                self.addCleanup(repo.close)
+                code, out = run_gate("maintenance_window.py", repo)
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"{path} names no maintenance-window hour", out)
+
+
 DEIS = GATES.parent / "provisionador" / "deis.py"
 HEADER = "codigo,tipo,nombre,direccion,comuna_codigo,comuna,region_codigo,region,servicio_salud,dependencia,latitud,longitud\n"
 
@@ -440,6 +473,39 @@ class ReleaseWorkflowGate(unittest.TestCase):
         code, out = self.gate(" --prerelease=false --latest ", " ")
         self.assertEqual(code, 1, out)
         self.assertIn("no job makes a release «Latest»", out)
+
+
+class DockerPackages(unittest.TestCase):
+    """aps/bootstrap/install.sh: Docker's packages for a system, as its docker_repo names them. A derivative takes the
+    Ubuntu or Debian release it is built on, as its own codename has no packages."""
+
+    FUNCTION = re.search(r"^docker_repo\(\) \(.*?^\)$", (REPO / "aps" / "bootstrap" / "install.sh").read_text(),
+                         re.S | re.M).group(0)
+
+    def repo(self, os_release, debian_version=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "os-release").write_text(os_release)
+            if debian_version:
+                Path(tmp, "debian_version").write_text(debian_version)
+            env = {"OS_RELEASE": f"{tmp}/os-release", "DEBIAN_VERSION": f"{tmp}/debian_version"}
+            return subprocess.run(["bash", "-c", self.FUNCTION + "\ndocker_repo"], env=env, capture_output=True,
+                                  text=True, check=True).stdout.strip()
+
+    def test_debian_and_ubuntu_take_their_own_codename(self):
+        self.assertEqual(self.repo("ID=debian\nVERSION_CODENAME=bookworm\n"), "debian bookworm")
+        self.assertEqual(self.repo("ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=noble\n"), "ubuntu noble")
+
+    def test_a_derivative_takes_the_release_it_is_built_on(self):
+        lmde = 'PRETTY_NAME="LMDE 7 (gigi)"\nID=linuxmint\nID_LIKE=debian\nVERSION_CODENAME=gigi\nDEBIAN_CODENAME=trixie\n'
+        mint = "ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nVERSION_CODENAME=wilma\nUBUNTU_CODENAME=noble\n"
+        self.assertEqual(self.repo(lmde), "debian trixie")
+        self.assertEqual(self.repo(mint), "ubuntu noble")
+
+    def test_a_debian_derivative_naming_no_release_takes_it_from_debian_version(self):
+        self.assertEqual(self.repo("ID=mx\nID_LIKE=debian\nVERSION_CODENAME=libretto\n", "12.7\n"), "debian bookworm")
+
+    def test_another_system_gets_none(self):
+        self.assertEqual(self.repo("ID=fedora\nVERSION_CODENAME=\n"), "")
 
 
 if __name__ == "__main__":
