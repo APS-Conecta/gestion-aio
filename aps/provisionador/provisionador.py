@@ -212,6 +212,7 @@ class Provisionador:
             s["server"] = {"host": host, "port": port, "fingerprint": self.fingerprint}
             install = s.get("install")
         if install and runner.unfinished(install):
+            runner.log(self.state, runner.RESUMED)
             self.run_install({name for name, step in install["steps"].items() if step["status"] == "running"})
         return httpd
 

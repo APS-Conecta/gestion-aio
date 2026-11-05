@@ -11,9 +11,9 @@ Each step's status is kept in the wizard's state as it changes: pending, running
 running when the Provisionador starts was cut short by a restart, and the install resumes by itself.
 
 The install's log, «Registro de la instalación», keeps the latest timestamped Spanish lines, which the Provisionador's
-journal gets too: each «Instalar» and «Reintentar», each step that starts, finishes or fails with its reason, the
-end-of-install check and what it finds, «Listo», and what a step adds with `context.log`. Only our own texts go there,
-with names and reasons the progress shows anyway: never a secret, nor what occ or AIO printed.
+journal gets too: each «Instalar», «Reintentar» and resumed install, each step that starts, finishes, fails or waits,
+with its reason, the end-of-install check and what it finds, «Listo», and what a step adds with `context.log`. Only our
+own texts go there, with names and reasons the progress shows anyway: never a secret, nor what occ or AIO printed.
 """
 
 import importlib
@@ -30,9 +30,10 @@ WAITING = "Espera a que se complete: {}."
 LINES = 200  # the install's log keeps its latest lines
 INSTALAR = "«Instalar»: comienza la instalación."
 REINTENTAR = "«Reintentar»: se repiten los pasos que no se completaron."
-STARTED = "Paso «{}»: en curso."
-GREEN = "Paso «{}»: completado."
-FAILED = "Paso «{}»: no se completó. {}"
+RESUMED = "El Provisionador se reinició y continúa la instalación."
+# A step's line in the log for each status the runner sets, its reason after it.
+SAID = {"running": "Paso «{}»: en curso.", "green": "Paso «{}»: completado.", "failed": "Paso «{}»: no se completó.",
+        "waiting": "Paso «{}»: en espera."}
 CHECK = "Comienza la comprobación final de la instalación."
 LISTO = "La instalación terminó."
 
@@ -92,20 +93,15 @@ def problems(call, context):
         return [UNEXPECTED]
 
 
-def record(state, name, status, reasons=(), line=None):
-    """A step's status, with `line` in the install's log. What its run or check found lands only while it runs: a step
-    the wizard reopened meanwhile keeps the wizard's reason."""
+def record(state, name, status, reasons=(), logged=True):
+    """A step's status and, if `logged`, its line in the install's log. What its run or check found lands only while it
+    runs: a step the wizard reopened meanwhile keeps the wizard's reason."""
     with state.change() as s:
         if status in ("green", "failed") and s["install"]["steps"][name]["status"] != "running":
             return
         s["install"]["steps"][name] = {"status": status, **({"reason": " ".join(reasons)} if reasons else {})}
-        if line:
-            note(s["install"], line)
-
-
-def failure(step, found):
-    """The log's line for what a step's run or check found wrong, if anything."""
-    return FAILED.format(step.NAME, " ".join(found)) if found else None
+        if logged:
+            note(s["install"], " ".join([SAID[status].format(STEPS[name].NAME), *reasons]))
 
 
 def run(state, context):
@@ -119,17 +115,17 @@ def run(state, context):
         if blocked:
             record(state, name, "waiting", [WAITING.format(", ".join(blocked))])
             continue
-        record(state, name, "running", line=STARTED.format(step.NAME))
+        record(state, name, "running")
         found = problems(step.run, context)
-        record(state, name, "failed" if found else "green", found, failure(step, found) or GREEN.format(step.NAME))
+        record(state, name, "failed" if found else "green", found)
     if any(r["status"] != "green" for r in state.read()["install"]["steps"].values()):
         return
     log(state, CHECK)
     for name, step in STEPS.items():
         if hasattr(step, "check"):
-            record(state, name, "running")
+            record(state, name, "running", logged=False)
             found = problems(step.check, context)
-            record(state, name, "failed" if found else "green", found, failure(step, found))
+            record(state, name, "failed" if found else "green", found, logged=bool(found))
     with state.change() as s:  # a step the wizard reopened meanwhile keeps «Listo» away
         install = s["install"]
         install["listo"] = all(step["status"] == "green" for step in install["steps"].values())

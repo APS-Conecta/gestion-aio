@@ -5,11 +5,13 @@
 The step goes by AIO's own reading of the containers. Once Apache runs, AIO started the suite (and closed its login), so
 the step does not press start again. After a Provisionador restart cut the step short, AIO goes on with the start it was
 sent; while it does, the step waits for it instead of sending another one. While the step waits, AIO's start included,
-each change in AIO's reading of a container goes to the install's log.
+the install's log gets AIO's first reading of each container and each change in it, and, while some container does not
+run yet, how many do.
 """
 
 import contextlib
 import threading
+import time
 
 from steps import POLL, until
 from steps.components import named
@@ -23,6 +25,10 @@ NOT_RUNNING = ("Estos contenedores de la suite no quedaron en ejecución: {}. Pr
                "ocurrir, contacte a APS Conecta.")
 CHANGED = "Contenedor «{}»: {}."
 STATES = {"stopped": "en espera", "starting": "iniciando", "running": "en ejecución"}  # as the progress shows them
+COUNTED = NAME + ": {} de {} contenedores en ejecución; AIO sigue descargando e iniciando el resto."
+# Seconds: while some container does not run, its count goes to the log at least this often, and when it changes, but
+# never twice within half of it.
+HEARTBEAT = 2 * 60
 
 
 def states(suite):
@@ -39,23 +45,33 @@ def problems(listed):
 
 
 @contextlib.contextmanager
-def watched(context, seen):
-    """While the block runs, a line in the install's log each time a container's state differs from the reading before,
-    `seen` the first; one last reading follows once the block ends."""
+def watched(context, first):
+    """While the block runs, AIO's readings of the containers, `first` the first and one last once the block ends, in
+    the install's log: each container's state as first read and whenever it changes, and the count of those running,
+    while some do not, as HEARTBEAT says."""
+    seen, counted, at = {}, None, float("-inf")
     done = threading.Event()
 
-    def watch(seen):
+    def read(listed):
+        nonlocal seen, counted, at
+        for id_, c in listed.items():
+            if seen.get(id_, {}).get("state") != c["state"]:
+                context.log(CHANGED.format(named(c), STATES[c["state"]]))
+        seen = listed
+        running, now = sum(c["state"] == "running" for c in listed.values()), time.monotonic()
+        if running < len(listed) and (now - at >= HEARTBEAT or running != counted and now - at >= HEARTBEAT / 2):
+            context.log(COUNTED.format(running, len(listed)))
+            counted, at = running, now
+
+    def watch():
         last = False
         while not last:
             last = done.wait(POLL)
             with contextlib.suppress(Unreachable):  # the progress says why; the next reading asks again
-                listed = states(context.suite)
-                for id_, c in listed.items():
-                    if seen.get(id_, {}).get("state") != c["state"]:
-                        context.log(CHANGED.format(named(c), STATES[c["state"]]))
-                seen = listed
+                read(states(context.suite))
 
-    watcher = threading.Thread(target=watch, args=(seen,), daemon=True)
+    read(first)
+    watcher = threading.Thread(target=watch, daemon=True)
     watcher.start()
     try:
         yield
