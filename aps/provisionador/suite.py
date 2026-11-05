@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -55,6 +56,7 @@ NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores d
 NEXTCLOUD_DOWN = ("El contenedor de Nextcloud no responde. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
                   "Conecta.")
 OCC_FAILED = "Nextcloud no pudo completar «occ {}». Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta."
+DOWNLOAD_RETRIES = (5, 15, 30)  # seconds before each new try of a GitHub download GitHub itself failed
 GITHUB_FAILED = ("No se pudo descargar {} desde GitHub. Revise la conexión a internet del servidor y presione "
                  "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 GITHUB_LIMITED = ("GitHub limitó las consultas de este servidor al pedir {}. Presione «Reintentar» en una hora; si "
@@ -384,15 +386,20 @@ class Suite:
     @staticmethod
     def download(url, what, method="GET"):
         """What GitHub serves at the URL, or for HEAD the URL it redirects to; a failure is Unreachable, naming `what`:
-        GitHub's rate limit (403 or 429 without a token) asks to retry later."""
+        GitHub's rate limit (403 or 429 without a token) asks to retry later. GitHub's own failures now and then (an
+        answer of 500 or more, a dropped or timed-out connection) are tried again after each of DOWNLOAD_RETRIES first."""
         request = urllib.request.Request(url, method=method, headers={"User-Agent": "aps-conecta-gestion"})
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                return response.geturl() if method == "HEAD" else response.read()
-        except (OSError, http.client.HTTPException) as error:
-            print(f"GitHub {url}: {error}", file=sys.stderr)
-            limited = isinstance(error, urllib.error.HTTPError) and error.code in (403, 429)
-            raise Unreachable((GITHUB_LIMITED if limited else GITHUB_FAILED).format(what)) from error
+        for wait in (*DOWNLOAD_RETRIES, None):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return response.geturl() if method == "HEAD" else response.read()
+            except (OSError, http.client.HTTPException) as error:
+                print(f"GitHub {url}: {error}", file=sys.stderr)
+                answered = isinstance(error, urllib.error.HTTPError)
+                if wait is None or (answered and error.code < 500):
+                    limited = answered and error.code in (403, 429)
+                    raise Unreachable((GITHUB_LIMITED if limited else GITHUB_FAILED).format(what)) from error
+                time.sleep(wait)
 
     def latest(self, repo):
         """The tag of the repo's latest release, from where GitHub redirects /releases/latest, with no API call; None
