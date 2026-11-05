@@ -874,7 +874,8 @@ class Apps(InstallTest):
         self.assertEqual(self.install(optional=["farmacia"])[0], 202)
         self.until("done")
         self.assertIn("farmacia", self.enabled())
-        self.assertFalse({"estadistica", "totem"} & (self.enabled() | set(self.lock())))
+        unpacked = {app for app, _ in self.suite.unpacked}
+        self.assertFalse({"estadistica", "totem"} & (unpacked | self.enabled() | set(self.lock())))
         self.assertIn("farmacia", self.lock())
         chosen = {a["id"]: a["chosen"] for a in self.browser.get("/api/state")[1]["optional_apps"]}
         self.assertEqual(chosen, {"farmacia": True, "estadistica": False, "totem": False})
