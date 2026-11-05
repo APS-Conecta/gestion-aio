@@ -64,7 +64,11 @@ def problems(call, context):
 
 
 def record(state, name, status, reasons=()):
+    """A step's status. What its run or check found lands only while it runs: a step the wizard reopened meanwhile keeps
+    the wizard's reason."""
     with state.change() as s:
+        if status in ("green", "failed") and s["install"]["steps"][name]["status"] != "running":
+            return
         s["install"]["steps"][name] = {"status": status, **({"reason": " ".join(reasons)} if reasons else {})}
 
 
