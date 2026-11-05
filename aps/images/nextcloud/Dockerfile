@@ -27,8 +27,8 @@ RUN set -eux; \
     rm /tmp/aio-texts.sed /tmp/upstream-lines
 
 # The hour (UTC) Nextcloud's heavy daily jobs start, which upstream's entrypoint sets at every start; the jobs install
-# step (aps/provisionador/steps/jobs.py) declares the same one.
-ENV NEXTCLOUD_MAINTENANCE_WINDOW=5
+# step (aps/provisionador/steps/jobs.py) declares the same one, and aps/gates/maintenance_window.py holds them equal.
+ENV NEXTCLOUD_MAINTENANCE_WINDOW=1
 
 # The antivirus deletes what its background scan finds infected: upstream's start sets its infected-file action to
 # only_log, and here to delete, as the antivirus install step (aps/provisionador/steps/antivirus.py) declares it; the

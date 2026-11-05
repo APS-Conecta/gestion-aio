@@ -7,7 +7,7 @@
 # healthy where it has a health check. The machine's memory use is printed then.
 set -euo pipefail
 chosen=(nextcloud-aio-apache nextcloud-aio-caddy nextcloud-aio-clamav nextcloud-aio-database nextcloud-aio-eurooffice
-  nextcloud-aio-fulltextsearch nextcloud-aio-harp nextcloud-aio-imaginary nextcloud-aio-nextcloud
+  nextcloud-aio-fulltextsearch nextcloud-aio-imaginary nextcloud-aio-nextcloud
   nextcloud-aio-notify-push nextcloud-aio-redis nextcloud-aio-talk)
 aio='sudo docker exec nextcloud-aio-mastercontainer cat /mnt/docker-aio-config/data/configuration.json'
 [ "$("$MACHINE" "$aio" | jq -r '.isTalkRecordingEnabled // false')" != true ] || chosen+=(nextcloud-aio-talk-recording)

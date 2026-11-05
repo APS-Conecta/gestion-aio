@@ -9,9 +9,11 @@
 # refuses to run. Order: check the host without changing it; verify the bundle's checksum; install
 # Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
 # from the digest the bundle names; start the Provisionador and the inside-address timer and print the
-# one-time link. A rerun once the mastercontainer exists changes nothing else: it makes sure the
-# Provisionador and the timer run and prints a fresh link to the same wizard state; once the wizard
-# closed at «Listo», the Provisionador stays stopped and the rerun prints the suite's address instead.
+# one-time link. A rerun once this release's mastercontainer exists changes nothing else: it restores the
+# bundle when its folder is gone, makes sure the Provisionador and the timer run and prints a fresh link to
+# the same wizard state; once the wizard closed at «Listo», the Provisionador stays stopped and the rerun
+# prints the suite's address instead. Another release's mastercontainer, another AIO installation's, or the
+# configuration volume one left behind, is refused before anything changes.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.
@@ -55,7 +57,7 @@ apt_install() {
 }
 
 check_host() {
-  local gaps=() arch memory_gib cpus disk_dir disk_gb
+  local gaps=() arch memory_gib cpus disk_dir disk_gb system
   arch="$(uname -m)"
   [ "$arch" = x86_64 ] || gaps+=("la arquitectura del procesador es $arch; se requiere x86_64")
   memory_gib=$(( ($(awk '/^MemTotal:/ {print $2}' /proc/meminfo) + 1048575) / 1048576 ))
@@ -68,13 +70,14 @@ check_host() {
   disk_gb="$(df --output=avail -B 1 "$disk_dir" | awk 'NR == 2 {print int($1 / 1e9)}')"
   [ "${disk_gb:-0}" -ge "$MIN_DISK_GB" ] \
     || gaps+=("tiene ${disk_gb:-0} GB libres en $disk_dir; se requieren al menos $MIN_DISK_GB GB")
-  if ! command -v docker >/dev/null 2>&1; then
+  if ! command -v docker >/dev/null 2>&1 && [ -z "$(docker_repo)" ]; then
     # shellcheck source=/dev/null
-    . /etc/os-release
-    case "${ID:-}" in
-      ubuntu | debian) ;;
-      *) gaps+=("Docker no está instalado y el instalador solo lo instala en Ubuntu o Debian (este servidor tiene ${PRETTY_NAME:-otro sistema})") ;;
-    esac
+    system="$(. "${OS_RELEASE:-/etc/os-release}" && echo "${PRETTY_NAME:-otro sistema}")"
+    gaps+=("Docker no está instalado y el instalador solo lo instala en Ubuntu, Debian o un sistema basado en ellos (este servidor tiene $system)")
+  fi
+  # A new mastercontainer would take the configuration in that volume as its own.
+  if command -v docker >/dev/null 2>&1 && docker volume inspect nextcloud_aio_mastercontainer >/dev/null 2>&1; then
+    gaps+=("Docker conserva el volumen nextcloud_aio_mastercontainer de una instalación anterior de Nextcloud All-in-One, que el instalador no toca; elimínelo, o use otro servidor, antes de volver a ejecutar el instalador")
   fi
   [ "${#gaps[@]}" -eq 0 ] && return 0
   printf '\nEste servidor no cumple los requisitos de APS Conecta Gestión. No se modificó nada.\n' >&2
@@ -82,8 +85,25 @@ check_host() {
   exit 1
 }
 
+# A rerun goes on only with this release's own mastercontainer, which runs under the release's tag
+# (start_mastercontainer). Another release of ours is not upgraded, and another AIO installation is not touched.
+check_mastercontainer() {
+  local image=$1 installed
+  case "$image" in
+    "$MASTERCONTAINER:$RELEASE_TAG") ;;
+    "$MASTERCONTAINER":*)
+      installed="${image#"$MASTERCONTAINER":}"
+      die "este servidor ya tiene APS Conecta Gestión $installed. Para abrir su asistente, ejecute:
+  curl -fsSL $REPO_URL/releases/download/$installed/install.sh | sudo bash
+No se ofrece actualizar una instalación. No se modificó nada." ;;
+    *) die "este servidor ya tiene otra instalación de Nextcloud All-in-One (imagen $image), que el instalador no toca. Elimínela, o use otro servidor, antes de volver a ejecutar el instalador. No se modificó nada." ;;
+  esac
+}
+
 fetch_and_verify() {
   local url="${GESTION_DOWNLOAD_URL:-$REPO_URL/releases/download/$RELEASE_TAG}" bundle="gestion-aio-$RELEASE_TAG.tar.gz"
+  WORK_DIR="$(mktemp -d)"
+  trap 'rm -rf "$WORK_DIR"' EXIT
   say "Descargando y verificando APS Conecta Gestión $RELEASE_TAG..."
   curl -fsSL --retry 3 -o "$WORK_DIR/$bundle" "$url/$bundle" \
     || die "no se pudo descargar $url/$bundle. Revise la conexión a internet del servidor y vuelva a ejecutar el instalador."
@@ -91,16 +111,37 @@ fetch_and_verify() {
     || die "el paquete descargado no coincide con su suma de verificación. No se instaló nada; vuelva a ejecutar el instalador."
 }
 
-install_docker() {
-  say "Instalando Docker Engine desde los paquetes oficiales de Docker..."
+# Docker's packages for this system, as "<distribution> <suite>", or nothing when Docker publishes none for it: any
+# Ubuntu- or Debian-based system takes the Ubuntu or Debian release it is built on, as a derivative's own codename (Linux
+# Mint's, LMDE's…) has no packages. A derivative that names neither has its Debian release in /etc/debian_version.
+docker_repo() (
   # shellcheck source=/dev/null
-  . /etc/os-release
+  . "${OS_RELEASE:-/etc/os-release}"
+  if [ -n "${UBUNTU_CODENAME:-}" ]; then
+    echo "ubuntu $UBUNTU_CODENAME"
+  elif [ -n "${DEBIAN_CODENAME:-}" ]; then
+    echo "debian $DEBIAN_CODENAME"
+  elif [ "${ID:-}" = debian ] && [ -n "${VERSION_CODENAME:-}" ]; then
+    echo "debian $VERSION_CODENAME"
+  elif [ -r "${DEBIAN_VERSION:-/etc/debian_version}" ]; then
+    case "$(cut -d . -f 1 "${DEBIAN_VERSION:-/etc/debian_version}")" in
+      11) echo "debian bullseye" ;;
+      12) echo "debian bookworm" ;;
+      13) echo "debian trixie" ;;
+    esac
+  fi
+)
+
+install_docker() {
+  local distribution suite
+  read -r distribution suite <<< "$(docker_repo)"
+  say "Instalando Docker Engine desde los paquetes oficiales de Docker..."
   install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL --retry 3 -o /etc/apt/keyrings/docker.asc "https://download.docker.com/linux/$ID/gpg" \
+  curl -fsSL --retry 3 -o /etc/apt/keyrings/docker.asc "https://download.docker.com/linux/$distribution/gpg" \
     || die "no se pudo descargar la clave de los paquetes de Docker. Revise la conexión a internet del servidor."
   chmod a+r /etc/apt/keyrings/docker.asc
   printf 'Types: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
-    "$ID" "${UBUNTU_CODENAME:-$VERSION_CODENAME}" > /etc/apt/sources.list.d/docker.sources
+    "$distribution" "$suite" > /etc/apt/sources.list.d/docker.sources
   apt_install docker-ce docker-ce-cli containerd.io
 }
 
@@ -129,6 +170,8 @@ start_mastercontainer() {
     --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" \
     "$image" >/dev/null \
     || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
+         # the volume it made goes too, or the rerun would refuse it as another installation's
+         docker volume rm nextcloud_aio_mastercontainer >/dev/null 2>&1 || true
          die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }
   say "APS Conecta Gestión $RELEASE_TAG está en marcha."
 }
@@ -137,7 +180,11 @@ start_mastercontainer() {
 start_provisionador() {
   local missing=() c
   for c in python3 openssl qrencode; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
-  [ "${#missing[@]}" -eq 0 ] || apt_install "${missing[@]}"
+  if [ "${#missing[@]}" -gt 0 ]; then
+    command -v apt-get >/dev/null 2>&1 \
+      || die "instale ${missing[*]} con el gestor de paquetes de este sistema y vuelva a ejecutar el instalador."
+    apt_install "${missing[@]}"
+  fi
   cat > /etc/systemd/system/aps-provisionador.service <<EOF
 [Unit]
 Description=APS Conecta Gestión: Provisionador
@@ -193,24 +240,26 @@ print_link() {
 }
 
 main() {
+  local image
   [ "$(id -u)" -eq 0 ] \
     || die "ejecute el instalador como administrador: curl -fsSL $REPO_URL/releases/latest/download/install.sh | sudo bash"
   if [ -z "$RELEASE_TAG" ] || [ -z "$BUNDLE_SHA256" ]; then
     die "este archivo es la copia del repositorio y no trae la suma del paquete. Use el instalador publicado en $REPO_URL/releases"
   fi
-  if command -v docker >/dev/null 2>&1 && docker container inspect nextcloud-aio-mastercontainer >/dev/null 2>&1; then
-    start_provisionador
-    start_address_timer
-    print_link
-    return 0
+  if command -v docker >/dev/null 2>&1 \
+      && image="$(docker container inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer 2>/dev/null)"; then
+    check_mastercontainer "$image"
+    if [ ! -f "$INSTALL_DIR/provisionador/provisionador.py" ]; then
+      fetch_and_verify
+      unpack
+    fi
+  else
+    check_host
+    fetch_and_verify
+    command -v docker >/dev/null 2>&1 || install_docker
+    unpack
+    start_mastercontainer
   fi
-  check_host
-  WORK_DIR="$(mktemp -d)"
-  trap 'rm -rf "$WORK_DIR"' EXIT
-  fetch_and_verify
-  command -v docker >/dev/null 2>&1 || install_docker
-  unpack
-  start_mastercontainer
   start_provisionador
   start_address_timer
   print_link
