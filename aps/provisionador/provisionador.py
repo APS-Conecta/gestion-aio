@@ -58,7 +58,7 @@ CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org;
        "connect-src 'self' https://*.gestion.apsconecta.cl; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
 SERVICES = HERE.parent / "services.json"  # the release's name service and ACME directory
-PORT = 8081  # clear of AIO's 80, 443, 3478, 8080 and 8443
+PORT = 8081  # clear of AIO's 80, 8080 and 8443 and the suite's 443 (Talk's TURN included)
 COOKIE = "__Host-session"
 MAX_BODY = 1024 * 1024  # a people spreadsheet of about 8,000 people
 
@@ -104,10 +104,10 @@ def declared(state):
 
 
 def reopen(s, before):
-    """After «Instalar», a change to the people reopens their step if it is green, so that «Reintentar» applies the
-    change. A step that has yet to finish finds the change itself once it applied the people as they were."""
+    """After «Instalar», a change to the people reopens their step if it is green or running, so that «Reintentar»
+    applies the change. A step yet to run finds the change itself once it applied the people as they were."""
     step = s.get("install", {}).get("steps", {}).get("people", {})
-    if step.get("status") == "green" and declared(s) != before:
+    if step.get("status") in ("green", "running") and declared(s) != before:
         s["install"]["steps"]["people"] = {"status": "failed", "reason": people.CHANGED}
 
 
@@ -256,7 +256,7 @@ class Provisionador:
                                      if found["people"] and user not in listed]}
 
     def get_state(self, query, body):
-        state = self.state.read()
+        busy, state = self.snapshot()
         return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
                      "components": list(components.chosen(self.suite.hardware()).values()),
                      "backup_folder": backups.BACKUP_FOLDER,
@@ -264,7 +264,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
-                     **self.shown(state), "install": self.progress(state)}
+                     **self.shown(state), "install": self.progress(busy, state)}
 
     def get_register(self, query, body):
         return 200, self.register.facets()
@@ -364,17 +364,19 @@ class Provisionador:
             reopen(s, before)
             return 200, self.shown(s)
 
-    def busy(self):
-        return self.worker is not None and self.worker.is_alive()
+    def snapshot(self):
+        """Whether the install runs, then the state, in that order: an install that ends between the two readings
+        has recorded how it ended, so a poll never answers «failed» for an install reaching «Listo»."""
+        return self.worker is not None and self.worker.is_alive(), self.state.read()
 
-    def progress(self, state):
+    def progress(self, busy, state):
         """None before «Instalar»; otherwise each step, and, once AIO runs only our components, each container as AIO
         reports it, a component's under its «Revisar» name. «done» means «Listo». A reading of the containers that fails
         says why, and the next one asks again."""
         install = state.get("install")
         if not install:
             return None
-        running = self.busy() or runner.unfinished(install)
+        running = busy or runner.unfinished(install)
         answer = {"status": "done" if install.get("listo") else "installing" if running else "failed",
                   "steps": runner.progress(install)}
         if install["steps"].get("components", {}).get("status") == "green":
@@ -405,18 +407,18 @@ class Provisionador:
         if not (isinstance(optional, list) and all(isinstance(app, str) and app in apps.OPTIONAL for app in optional)):
             return 400, {"error": NOT_OFFERED}
         with self.install_lock:
-            state = self.state.read()
+            busy, state = self.snapshot()
             if not state.get("address"):
                 return 409, {"error": NO_ADDRESS}
             if not plan(state)["people"]:
                 return 409, {"error": PEOPLE_WRONG if plan(state)["errors"] else NO_PEOPLE}
-            if not (self.busy() or state.get("install", {}).get("listo")):
+            if not (busy or state.get("install", {}).get("listo")):
                 if not state.get("install"):
                     with self.state.change() as s:
                         s["optional"] = sorted(set(optional))
                 runner.begin(self.state)
                 self.run_install()
-        return 202, {"install": self.progress(self.state.read())}
+        return 202, {"install": self.progress(*self.snapshot())}
 
     def post_close(self, query, body):
         """POST /api/close, at «Listo»: the passwords file, whose copy stays on the server. The wizard then closes: the

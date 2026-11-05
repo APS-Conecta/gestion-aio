@@ -19,7 +19,7 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import NEXTCLOUD, chromium, machine, person, suite_name  # noqa: E402
+from browser import NEXTCLOUD, chromium, log_in, machine, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 
 USER, FILE = "prueba.oficina", "acta-de-prueba.docx"
@@ -149,11 +149,7 @@ with chromium() as browser:
     context.add_init_script(EDITOR_EVENTS)
     page = context.new_page()
     try:
-        page.goto(f"{suite}/login")
-        page.fill("#user", USER)
-        page.fill("#password", password)
-        page.click("[data-login-form-submit]")
-        page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
+        log_in(page, suite, USER, password)
         office(page)
         page.get_by_role("button", name="Vacío", exact=True).first.click()
         page.get_by_role("dialog").get_by_role("textbox").fill(FILE)
