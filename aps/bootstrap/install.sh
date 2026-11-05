@@ -55,7 +55,7 @@ apt_install() {
 }
 
 check_host() {
-  local gaps=() arch memory_gib cpus disk_dir disk_gb
+  local gaps=() arch memory_gib cpus disk_dir disk_gb system
   arch="$(uname -m)"
   [ "$arch" = x86_64 ] || gaps+=("la arquitectura del procesador es $arch; se requiere x86_64")
   memory_gib=$(( ($(awk '/^MemTotal:/ {print $2}' /proc/meminfo) + 1048575) / 1048576 ))
@@ -68,13 +68,10 @@ check_host() {
   disk_gb="$(df --output=avail -B 1 "$disk_dir" | awk 'NR == 2 {print int($1 / 1e9)}')"
   [ "${disk_gb:-0}" -ge "$MIN_DISK_GB" ] \
     || gaps+=("tiene ${disk_gb:-0} GB libres en $disk_dir; se requieren al menos $MIN_DISK_GB GB")
-  if ! command -v docker >/dev/null 2>&1; then
+  if ! command -v docker >/dev/null 2>&1 && [ -z "$(docker_repo)" ]; then
     # shellcheck source=/dev/null
-    . /etc/os-release
-    case "${ID:-}" in
-      ubuntu | debian) ;;
-      *) gaps+=("Docker no está instalado y el instalador solo lo instala en Ubuntu o Debian (este servidor tiene ${PRETTY_NAME:-otro sistema})") ;;
-    esac
+    system="$(. "${OS_RELEASE:-/etc/os-release}" && echo "${PRETTY_NAME:-otro sistema}")"
+    gaps+=("Docker no está instalado y el instalador solo lo instala en Ubuntu, Debian o un sistema basado en ellos (este servidor tiene $system)")
   fi
   [ "${#gaps[@]}" -eq 0 ] && return 0
   printf '\nEste servidor no cumple los requisitos de APS Conecta Gestión. No se modificó nada.\n' >&2
@@ -91,16 +88,37 @@ fetch_and_verify() {
     || die "el paquete descargado no coincide con su suma de verificación. No se instaló nada; vuelva a ejecutar el instalador."
 }
 
-install_docker() {
-  say "Instalando Docker Engine desde los paquetes oficiales de Docker..."
+# Docker's packages for this system, as "<distribution> <suite>", or nothing when Docker publishes none for it: any
+# Ubuntu- or Debian-based system takes the Ubuntu or Debian release it is built on, as a derivative's own codename (Linux
+# Mint's, LMDE's…) has no packages. A derivative that names neither has its Debian release in /etc/debian_version.
+docker_repo() (
   # shellcheck source=/dev/null
-  . /etc/os-release
+  . "${OS_RELEASE:-/etc/os-release}"
+  if [ -n "${UBUNTU_CODENAME:-}" ]; then
+    echo "ubuntu $UBUNTU_CODENAME"
+  elif [ -n "${DEBIAN_CODENAME:-}" ]; then
+    echo "debian $DEBIAN_CODENAME"
+  elif [ "${ID:-}" = debian ] && [ -n "${VERSION_CODENAME:-}" ]; then
+    echo "debian $VERSION_CODENAME"
+  elif [ -r "${DEBIAN_VERSION:-/etc/debian_version}" ]; then
+    case "$(cut -d . -f 1 "${DEBIAN_VERSION:-/etc/debian_version}")" in
+      11) echo "debian bullseye" ;;
+      12) echo "debian bookworm" ;;
+      13) echo "debian trixie" ;;
+    esac
+  fi
+)
+
+install_docker() {
+  local distribution suite
+  read -r distribution suite <<< "$(docker_repo)"
+  say "Instalando Docker Engine desde los paquetes oficiales de Docker..."
   install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL --retry 3 -o /etc/apt/keyrings/docker.asc "https://download.docker.com/linux/$ID/gpg" \
+  curl -fsSL --retry 3 -o /etc/apt/keyrings/docker.asc "https://download.docker.com/linux/$distribution/gpg" \
     || die "no se pudo descargar la clave de los paquetes de Docker. Revise la conexión a internet del servidor."
   chmod a+r /etc/apt/keyrings/docker.asc
   printf 'Types: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
-    "$ID" "${UBUNTU_CODENAME:-$VERSION_CODENAME}" > /etc/apt/sources.list.d/docker.sources
+    "$distribution" "$suite" > /etc/apt/sources.list.d/docker.sources
   apt_install docker-ce docker-ce-cli containerd.io
 }
 
@@ -137,7 +155,11 @@ start_mastercontainer() {
 start_provisionador() {
   local missing=() c
   for c in python3 openssl qrencode; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
-  [ "${#missing[@]}" -eq 0 ] || apt_install "${missing[@]}"
+  if [ "${#missing[@]}" -gt 0 ]; then
+    command -v apt-get >/dev/null 2>&1 \
+      || die "instale ${missing[*]} con el gestor de paquetes de este sistema y vuelva a ejecutar el instalador."
+    apt_install "${missing[@]}"
+  fi
   cat > /etc/systemd/system/aps-provisionador.service <<EOF
 [Unit]
 Description=APS Conecta Gestión: Provisionador
