@@ -8,8 +8,9 @@ fake camera and a microphone that plays a steady tone.
 
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
-It also gives what checks read on the machine (AIO's configuration, the suite's name), makes staff accounts and
-sends a staff member's own requests to Nextcloud, trusting the staging roots alone.
+It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
+files, and the first password the passwords file lists for an account), makes staff accounts and sends a staff
+member's own requests to Nextcloud, trusting the staging roots alone.
 """
 
 import base64
@@ -34,6 +35,8 @@ from playwright.sync_api import sync_playwright
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
 AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its configuration and its other files
 NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
+PROVISIONADOR_DATA = "/var/lib/aps-conecta/provisionador"  # on the machine: the Provisionador's state and its files
+STORED = "Antes de retirarse.txt"  # 17-install has the retired person store it first, the username as its text
 # Fake media devices, granted to every page (the headless browser refuses them otherwise), whose sound and video a
 # page plays without a click.
 FAKE_MEDIA = ("--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
@@ -100,6 +103,23 @@ def suite_name():
     if not name:
         sys.exit("the suite has no name: «Dirección» claimed none")
     return name
+
+
+def provisionador_file(name):
+    """One of the Provisionador's files on the machine, which root alone reads."""
+    return machine(f"sudo cat {PROVISIONADOR_DATA}/{name}")
+
+
+def provisionador_state():
+    """The Provisionador's state on the machine: what the operator chose in the wizard."""
+    return json.loads(provisionador_file("state.json"))
+
+
+def first_password(passwords, user):
+    """The first password the passwords file's text lists for `user`, or None; a check keeps it in memory, unprinted
+    (run.sh masks it)."""
+    listed = re.search(rf"\n  Usuario: {re.escape(user)}\n  Contraseña: (\S+)\n", passwords)
+    return listed[1] if listed else None
 
 
 def person(user, display_name):

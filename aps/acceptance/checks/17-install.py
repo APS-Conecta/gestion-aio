@@ -17,16 +17,11 @@ other optional one off (Talk recording follows the hardware: 70-talk checks it) 
 folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO
 keeps it in."""
 
-import base64
 import json
 import os
-import re
-import ssl
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -34,8 +29,8 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
 import teams  # noqa: E402
-from browser import STAGING_ROOTS, aio_config, aio_file, chromium, hardware, machine, suite_name, verified  # noqa: E402
-from browser import wizard_link  # noqa: E402
+from browser import aio_config, aio_file, as_person, chromium, hardware, machine, suite_name, verified  # noqa: E402
+from browser import STORED, first_password, provisionador_file, provisionador_state, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import chosen  # noqa: E402
@@ -50,14 +45,11 @@ PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
           "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur prog-cardiovascular role-medico;no\r\n"
           "luis.vera;Luis;Vera Soto;luis.vera@example.org;sector-norte role-tens-procedimientos;no\r\n")
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
-STORED = "Antes de retirarse.txt"  # what he stores in his own files first, his username as its text; 48-retire reads it
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": True,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
-FOLDER = "/var/lib/aps-conecta/provisionador"  # the Provisionador's state and the passwords file's root-only copy
-KEPT = f"{FOLDER}/{FILE}"
 
 
 def red(page):
@@ -70,24 +62,21 @@ def red(page):
 def store(user, deadline):
     """`user` stores STORED in their own files at the suite's name with the first password the passwords file lists,
     once the suite answers there with its certificate."""
-    listed = re.search(rf"\n  Usuario: {re.escape(user)}\n  Contraseña: (\S+)\n", machine(f"sudo cat {KEPT}"))
-    password = (listed or sys.exit(f"the passwords file does not list {user}"))[1]
-    basic = base64.b64encode(f"{user}:{password}".encode()).decode()
-    request = urllib.request.Request(f"{suite}/remote.php/dav/files/{user}/{quote(STORED)}", data=user.encode(),
-                                     method="PUT", headers={"Authorization": f"Basic {basic}"})
+    password = first_password(provisionador_file(FILE), user) or sys.exit(f"the passwords file does not list {user}")
     while True:
         try:
-            with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=STAGING_ROOTS), timeout=60):
-                return
-        except urllib.error.HTTPError as error:
-            sys.exit(f"{user} does not store {STORED} in their files at {suite}: HTTP {error.code}")
+            status, _ = as_person(user, password, "PUT", f"{suite}/remote.php/dav/files/{user}/{quote(STORED)}",
+                                  user.encode())
+            if status not in (201, 204):  # 204: a retry after a PUT that timed out but stored it
+                sys.exit(f"{user} does not store {STORED} in their files at {suite}: HTTP {status}")
+            return
         except OSError as error:
             if time.monotonic() > deadline:
                 sys.exit(f"{suite} does not answer with its certificate, so {user} stores no file: {error}")
             time.sleep(10)
 
 
-centre = json.loads(machine(f"sudo cat {FOLDER}/state.json"))["centre"]  # as 15-wizard chose it
+centre = provisionador_state()["centre"]  # as 15-wizard chose it
 people = spreadsheet.read(PEOPLE, DECLARED, centre["type"])[0] or sys.exit("PEOPLE loads nobody")
 passphrase, name = aio_config().get("password"), suite_name()
 if not passphrase:  # it stays in memory: run.sh masks it in the log
@@ -196,7 +185,7 @@ carried = [url for url, text in answers if not url.endswith("/api/close")
 if carried:
     sys.exit(f"these answers of the wizard carried AIO's passphrase, the administrator's password or the backup's "
              f"encryption password: {carried}")
-kept = machine(f"sudo cat {KEPT}")
+kept = provisionador_file(FILE)
 if not (handed == kept and passphrase in kept and administrator in kept
         and backup_password in kept):
     sys.exit("the passwords file «Listo» handed over is not the machine's copy with the administrator's first "

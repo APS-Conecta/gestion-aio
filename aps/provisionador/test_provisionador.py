@@ -24,6 +24,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from urllib.parse import urlencode, urlsplit
 
 import brand
@@ -652,6 +653,34 @@ class Instalar(InstallTest):
         commands = len(self.suite.commands)
         self.assertEqual(self.install()[1]["install"]["status"], "done")
         self.assertEqual((self.suite.starts, len(self.suite.commands)), (1, commands))
+
+    def test_a_poll_reads_whether_the_install_runs_together_with_its_steps(self):
+        """The poll's status matches the steps it read, even if «Reintentar» starts a run meanwhile. The fake suite port
+        cannot reach the moment between the install's last green step and «Listo», so snapshot() keeps the order that
+        covers it: whether the install runs, then the state."""
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        self.until("failed")
+        self.suite.down = set()
+        self.suite.release.clear()
+        held, go, answer = threading.Event(), threading.Event(), {}
+
+        def hardware():  # the poll's reading of the server, held until `go`; the install's own reading is not
+            del self.suite.hardware
+            held.set()
+            go.wait(10)
+            return self.suite.hardware()
+
+        self.suite.hardware = hardware
+        poll = threading.Thread(target=lambda: answer.update(self.progress()))
+        poll.start()
+        self.assertTrue(held.wait(10))
+        self.install()
+        go.set()
+        poll.join(10)
+        self.assertEqual((answer["status"], self.steps(answer)["Componentes"][0]), ("failed", "failed"))
+        self.assertEqual(self.progress()["status"], "installing")
 
 
 class StepRunner(InstallTest):
@@ -1369,6 +1398,29 @@ class PeopleChanges(PeopleTest):
                          (False, {"comite-calidad"}), "disabled and in no team, the account and its files kept")
         self.assertEqual(self.passwords(), first)
         self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
+
+    def test_a_change_while_the_people_check_runs_holds_listo_until_reintentar_applies_it(self):
+        """The change lands once the people step's check read «Equipos», before the runner records what it found."""
+        self.until_people()
+        read, posted = threading.Event(), threading.Event()
+        real = people.check
+
+        # No seam reaches the window inside the people check: wrap the real check.
+        def check(context):
+            found = real(context)
+            read.set()
+            posted.wait(10)
+            return found
+
+        with mock.patch.object(people, "check", check):
+            self.suite.answering = True
+            self.assertTrue(read.wait(10))
+            self.assertEqual(self.retire("pedro.munoz")[0], 200)
+            posted.set()
+            self.assertEqual(self.steps(self.until("failed"))[PEOPLE_STEP], ("failed", CHANGED))
+        self.install()
+        self.until("done")
+        self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")), (False, set()))
 
     def test_a_retired_person_stays_retired_when_the_people_step_runs_again(self):
         self.retire("pedro.munoz")
