@@ -17,6 +17,11 @@ docker buildx build --platform linux/amd64 --file "$dockerfile" \
   --output "type=image,name=$image,push-by-digest=true,name-canonical=true,push=true" \
   --metadata-file "$metadata" "$context" >&2
 digest="$(jq -r '."containerimage.digest"' "$metadata")"
+# ghcr.io can take a moment to serve a digest it just accepted: wait up to a minute before reading it back.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  docker buildx imagetools inspect "$image@$digest" > /dev/null 2>&1 && break
+  sleep 5
+done
 aps/release/revision.sh "$image@$digest" "$commit" >&2
 docker buildx imagetools create --tag "$image:$tag" "$image@$digest" >&2
 echo "$image@$digest"
