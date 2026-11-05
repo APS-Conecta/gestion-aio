@@ -19,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import NEXTCLOUD, chromium, machine, occ, person, suite_name  # noqa: E402
+from browser import NEXTCLOUD, chromium, log_in, machine, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 from steps.theme import PLACED, THEME  # noqa: E402
 
@@ -85,13 +85,6 @@ def login_page(page, label):
     return themed(page, label) + shows(page, label)
 
 
-def log_in(page):
-    page.fill("#user", PERSON)
-    page.fill("#password", password)
-    page.click("button[type=submit]")
-    page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
-
-
 def open_page(page, label):
     path, ready = PAGES[label]
     page.goto(f"{suite}{path}")
@@ -120,7 +113,7 @@ problems = []
 with chromium() as browser:
     page = browser.new_page(**WINDOW)
     problems += login_page(page, "login")
-    log_in(page)
+    log_in(page, suite, PERSON, password)
     for label in PAGES:
         open_page(page, label)
         problems += (themed(page, label) if label == "dashboard" else []) + shows(page, label)
@@ -148,7 +141,7 @@ with chromium() as browser:
         time.sleep(10)
     page = browser.new_page(**WINDOW)  # a new context: no cookie and no cached file
     problems += login_page(page, "login-after-restart")
-    log_in(page)
+    log_in(page, suite, PERSON, password)
     open_page(page, "talk")
     problems += shows(page, "talk-after-restart") + stale_talk_texts()
     support = occ("config:app:get support enabled")
