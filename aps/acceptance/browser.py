@@ -77,13 +77,12 @@ def verified(host, port, printed):
 
 
 def wizard_link(output):
-    """The one-time link and the fingerprint in what the one command (or the wizard's `link`) printed. The
-    link's secret is masked in the CI log first."""
+    """The one-time link and the fingerprint in what the one command (or the wizard's `link`) printed through
+    one-command.sh, which masked the link's secret in the CI log."""
     links = re.findall(r"https://\S+#[\w-]+", output)
     printed = re.findall(r"(?:[0-9A-F]{2}:){31}[0-9A-F]{2}", output)
     if not (links and printed):
         sys.exit("no one-time link and certificate fingerprint were printed")
-    print(f"::add-mask::{links[-1].rsplit('#', 1)[1]}", flush=True)
     return links[-1], printed[-1]
 
 
