@@ -9,8 +9,9 @@ devices: Chromium's fake camera and a microphone that plays a steady tone.
 
 Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
-It also gives what checks read on the machine (AIO's configuration, the suite's name), makes staff accounts and
-sends a staff member's own requests to Nextcloud, trusting the suite's roots alone.
+It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
+files, and the first password the passwords file lists for an account), makes staff accounts, signs a person in at the
+suite's login page and sends a staff member's own requests to Nextcloud, trusting the suite's roots alone.
 """
 
 import base64
@@ -39,6 +40,8 @@ TEST_BUILD = os.environ["TAG"].startswith("v0.0.0-ci.")
 ROOTS = STAGING_ROOTS if TEST_BUILD else None  # None: the system's roots
 AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its configuration and its other files
 NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
+PROVISIONADOR_DATA = "/var/lib/aps-conecta/provisionador"  # on the machine: the Provisionador's state and its files
+STORED = "Antes de retirarse.txt"  # 17-install has the retired person store it first, the username as its text
 # Fake media devices, granted to every page (the headless browser refuses them otherwise), whose sound and video a
 # page plays without a click.
 FAKE_MEDIA = ("--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
@@ -74,13 +77,12 @@ def verified(host, port, printed):
 
 
 def wizard_link(output):
-    """The one-time link and the fingerprint in what the one command (or the wizard's `link`) printed. The
-    link's secret is masked in the CI log first."""
+    """The one-time link and the fingerprint in what the one command (or the wizard's `link`) printed through
+    one-command.sh, which masked the link's secret in the CI log."""
     links = re.findall(r"https://\S+#[\w-]+", output)
     printed = re.findall(r"(?:[0-9A-F]{2}:){31}[0-9A-F]{2}", output)
     if not (links and printed):
         sys.exit("no one-time link and certificate fingerprint were printed")
-    print(f"::add-mask::{links[-1].rsplit('#', 1)[1]}", flush=True)
     return links[-1], printed[-1]
 
 
@@ -105,6 +107,23 @@ def suite_name():
     if not name:
         sys.exit("the suite has no name: «Dirección» claimed none")
     return name
+
+
+def provisionador_file(name):
+    """One of the Provisionador's files on the machine, which root alone reads."""
+    return machine(f"sudo cat {PROVISIONADOR_DATA}/{name}")
+
+
+def provisionador_state():
+    """The Provisionador's state on the machine: what the operator chose in the wizard."""
+    return json.loads(provisionador_file("state.json"))
+
+
+def first_password(passwords, user):
+    """The first password the passwords file's text lists for `user`, or None; a check keeps it in memory, unprinted
+    (run.sh masks it)."""
+    listed = re.search(rf"\n  Usuario: {re.escape(user)}\n  Contraseña: (\S+)\n", passwords)
+    return listed[1] if listed else None
 
 
 def person(user, display_name):
@@ -171,3 +190,12 @@ def chromium(pinned=(), args=(), media=False):
             yield browser
         finally:
             browser.close()
+
+
+def log_in(page, suite, user, password):
+    """Sign `user` in on the suite's login page, as staff do; it fails the check unless the page then leaves /login."""
+    page.goto(f"{suite}/login")
+    page.fill("#user", user)
+    page.fill("#password", password)
+    page.click("[data-login-form-submit]")
+    page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
