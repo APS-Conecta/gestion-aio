@@ -9,9 +9,11 @@
 # refuses to run. Order: check the host without changing it; verify the bundle's checksum; install
 # Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
 # from the digest the bundle names; start the Provisionador and the inside-address timer and print the
-# one-time link. A rerun once the mastercontainer exists changes nothing else: it makes sure the
-# Provisionador and the timer run and prints a fresh link to the same wizard state; once the wizard
-# closed at «Listo», the Provisionador stays stopped and the rerun prints the suite's address instead.
+# one-time link. A rerun once this release's mastercontainer exists changes nothing else: it restores the
+# bundle when its folder is gone, makes sure the Provisionador and the timer run and prints a fresh link to
+# the same wizard state; once the wizard closed at «Listo», the Provisionador stays stopped and the rerun
+# prints the suite's address instead. Another release's mastercontainer, another AIO installation's, or the
+# configuration volume one left behind, is refused before anything changes.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.
@@ -73,14 +75,35 @@ check_host() {
     system="$(. "${OS_RELEASE:-/etc/os-release}" && echo "${PRETTY_NAME:-otro sistema}")"
     gaps+=("Docker no está instalado y el instalador solo lo instala en Ubuntu, Debian o un sistema basado en ellos (este servidor tiene $system)")
   fi
+  # A new mastercontainer would take the configuration in that volume as its own.
+  if command -v docker >/dev/null 2>&1 && docker volume inspect nextcloud_aio_mastercontainer >/dev/null 2>&1; then
+    gaps+=("Docker conserva el volumen nextcloud_aio_mastercontainer de una instalación anterior de Nextcloud All-in-One, que el instalador no toca; elimínelo, o use otro servidor, antes de volver a ejecutar el instalador")
+  fi
   [ "${#gaps[@]}" -eq 0 ] && return 0
   printf '\nEste servidor no cumple los requisitos de APS Conecta Gestión. No se modificó nada.\n' >&2
   printf '  - %s\n' "${gaps[@]}" >&2
   exit 1
 }
 
+# A rerun goes on only with this release's own mastercontainer, which runs under the release's tag
+# (start_mastercontainer). Another release of ours is not upgraded, and another AIO installation is not touched.
+check_mastercontainer() {
+  local image=$1 installed
+  case "$image" in
+    "$MASTERCONTAINER:$RELEASE_TAG") ;;
+    "$MASTERCONTAINER":*)
+      installed="${image#"$MASTERCONTAINER":}"
+      die "este servidor ya tiene APS Conecta Gestión $installed. Para abrir su asistente, ejecute:
+  curl -fsSL $REPO_URL/releases/download/$installed/install.sh | sudo bash
+No se ofrece actualizar una instalación. No se modificó nada." ;;
+    *) die "este servidor ya tiene otra instalación de Nextcloud All-in-One (imagen $image), que el instalador no toca. Elimínela, o use otro servidor, antes de volver a ejecutar el instalador. No se modificó nada." ;;
+  esac
+}
+
 fetch_and_verify() {
   local url="${GESTION_DOWNLOAD_URL:-$REPO_URL/releases/download/$RELEASE_TAG}" bundle="gestion-aio-$RELEASE_TAG.tar.gz"
+  WORK_DIR="$(mktemp -d)"
+  trap 'rm -rf "$WORK_DIR"' EXIT
   say "Descargando y verificando APS Conecta Gestión $RELEASE_TAG..."
   curl -fsSL --retry 3 -o "$WORK_DIR/$bundle" "$url/$bundle" \
     || die "no se pudo descargar $url/$bundle. Revise la conexión a internet del servidor y vuelva a ejecutar el instalador."
@@ -147,6 +170,8 @@ start_mastercontainer() {
     --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" \
     "$image" >/dev/null \
     || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
+         # the volume it made goes too, or the rerun would refuse it as another installation's
+         docker volume rm nextcloud_aio_mastercontainer >/dev/null 2>&1 || true
          die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }
   say "APS Conecta Gestión $RELEASE_TAG está en marcha."
 }
@@ -215,24 +240,26 @@ print_link() {
 }
 
 main() {
+  local image
   [ "$(id -u)" -eq 0 ] \
     || die "ejecute el instalador como administrador: curl -fsSL $REPO_URL/releases/latest/download/install.sh | sudo bash"
   if [ -z "$RELEASE_TAG" ] || [ -z "$BUNDLE_SHA256" ]; then
     die "este archivo es la copia del repositorio y no trae la suma del paquete. Use el instalador publicado en $REPO_URL/releases"
   fi
-  if command -v docker >/dev/null 2>&1 && docker container inspect nextcloud-aio-mastercontainer >/dev/null 2>&1; then
-    start_provisionador
-    start_address_timer
-    print_link
-    return 0
+  if command -v docker >/dev/null 2>&1 \
+      && image="$(docker container inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer 2>/dev/null)"; then
+    check_mastercontainer "$image"
+    if [ ! -f "$INSTALL_DIR/provisionador/provisionador.py" ]; then
+      fetch_and_verify
+      unpack
+    fi
+  else
+    check_host
+    fetch_and_verify
+    command -v docker >/dev/null 2>&1 || install_docker
+    unpack
+    start_mastercontainer
   fi
-  check_host
-  WORK_DIR="$(mktemp -d)"
-  trap 'rm -rf "$WORK_DIR"' EXIT
-  fetch_and_verify
-  command -v docker >/dev/null 2>&1 || install_docker
-  unpack
-  start_mastercontainer
   start_provisionador
   start_address_timer
   print_link
