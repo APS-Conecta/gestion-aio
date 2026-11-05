@@ -370,15 +370,15 @@ class Provisionador:
         return self.worker is not None and self.worker.is_alive(), self.state.read()
 
     def progress(self, busy, state):
-        """None before «Instalar»; otherwise each step, and, once AIO runs only our components, each container as AIO
-        reports it, a component's under its «Revisar» name. «done» means «Listo». A reading of the containers that fails
-        says why, and the next one asks again."""
+        """None before «Instalar»; otherwise each step, the install's log, and, once AIO runs only our components, each
+        container as AIO reports it, a component's under its «Revisar» name. «done» means «Listo». A reading of the
+        containers that fails says why, and the next one asks again."""
         install = state.get("install")
         if not install:
             return None
         running = busy or runner.unfinished(install)
         answer = {"status": "done" if install.get("listo") else "installing" if running else "failed",
-                  "steps": runner.progress(install)}
+                  "steps": runner.progress(install), "log": install.get("log", [])}
         if install["steps"].get("components", {}).get("status") == "green":
             try:
                 answer["containers"] = [{"name": components.named(c), "state": c["state"]}
@@ -394,7 +394,8 @@ class Provisionador:
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
                                   optional=frozenset(state.get("optional", ())), teams=state.get("teams", []),
-                                  people=loaded, retired=retired, declared=lambda: declared(self.state.read()))
+                                  people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
+                                  log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
 

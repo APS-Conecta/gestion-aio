@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -29,6 +30,7 @@ from urllib.parse import urlencode, urlsplit
 
 import brand
 import provisionador
+import runner
 from steps import apps, people
 from suite import FakeSuite
 
@@ -532,6 +534,9 @@ class InstallTest(WizardTest):
 
     def setUp(self):
         super().setUp()
+        journal = mock.patch("sys.stdout", io.StringIO())  # the Provisionador's journal, out of the tests' output
+        self.journal = journal.start()
+        self.addCleanup(journal.stop)
         self.addCleanup(self.settle)
         self.browser = self.operator()
         publish(self.suite)
@@ -1704,6 +1709,108 @@ class InterruptedInstall(InstallTest):
         self.restart()
         self.assertEqual(self.steps(self.until("done"))["Inicio de la suite"], ("green", None))
         self.assertEqual(self.suite.starts, 1)
+
+
+class InstallLog(InstallTest):
+    """«Registro de la instalación»: a timestamped Spanish line for each «Instalar» and «Reintentar», each step that
+    starts, finishes or fails with its reason, and each change in AIO's reading of a container while the suite starts;
+    the latest of them, newest last, the same in the Provisionador's journal. No line carries a secret."""
+
+    START = "Inicio de la suite"
+
+    @staticmethod
+    def texts(install):
+        return [line["text"] for line in install["log"]]
+
+    def until_logged(self, text):
+        deadline = time.monotonic() + 10
+        while text not in self.texts(install := self.progress()):
+            self.assertLess(time.monotonic(), deadline, install["log"])
+            time.sleep(0.02)
+
+    def test_each_step_logs_when_it_starts_and_finishes_and_the_journal_has_the_same_lines(self):
+        self.claim()
+        self.install()
+        install = self.until("done")
+        for line in install["log"]:
+            self.assertEqual(set(line), {"time", "text"})
+            self.assertIsNotNone(datetime.fromisoformat(line["time"]).tzinfo)
+        texts = self.texts(install)
+        self.assertEqual(texts[0], "«Instalar»: comienza la instalación.")
+        self.assertEqual(texts[-2:], ["Comienza la comprobación final de la instalación.", "La instalación terminó."])
+        for name in self.steps(install):
+            started, green = f"Paso «{name}»: en curso.", f"Paso «{name}»: completado."
+            self.assertEqual((texts.count(started), texts.count(green)), (1, 1), name)
+            self.assertLess(texts.index(started), texts.index(green), name)
+        self.assertEqual(self.journal.getvalue().splitlines(), texts)
+
+    def test_a_failed_step_logs_its_reason_and_reintentar_adds_lines(self):
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        install = self.until("failed")
+        reason = self.steps(install)["Componentes"][1]
+        self.assertIn(f"Paso «Componentes»: no se completó. {reason}", self.texts(install))
+        before = len(install["log"])
+        self.suite.down = set()
+        self.install()
+        retried = self.texts(self.until("done"))[before:]
+        self.assertEqual(retried[0], "«Reintentar»: se repiten los pasos que no se completaron.")
+        self.assertIn("Paso «Componentes»: completado.", retried)
+        self.assertNotIn("Paso «Dirección de la suite»: en curso.", retried, "a green step does not run again")
+
+    def test_each_change_in_aios_reading_of_a_container_while_the_suite_starts_is_logged(self):
+        self.claim()
+        self.suite.release.clear()
+        self.suite.states = {"nextcloud-aio-database": ("PostgreSQL", "running"),
+                             "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
+                             "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
+        self.install()
+        deadline = time.monotonic() + 10  # the step reads the containers once, then presses AIO's start
+        while not self.suite.starts:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
+        self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
+        self.until_logged("Contenedor «Búsqueda de texto completo»: iniciando.")
+        self.suite.release.set()
+        texts = self.texts(self.until("done"))
+        start, end = texts.index(f"Paso «{self.START}»: en curso."), texts.index(f"Paso «{self.START}»: completado.")
+        self.assertEqual(texts[start + 1:end], ["Contenedor «Búsqueda de texto completo»: iniciando.",
+                                                "Contenedor «Servidor de aplicaciones»: en ejecución.",
+                                                "Contenedor «Búsqueda de texto completo»: en ejecución."])
+        self.assertEqual([t for t in texts if t.startswith("Contenedor")], texts[start + 1:end])
+
+    def test_the_log_keeps_its_latest_lines_newest_last(self):
+        self.claim()
+        self.suite.down = {"aio"}
+        self.install()
+        self.until("failed")
+        for _ in range(runner.LINES):
+            self.install()
+            log = self.until("failed")["log"]
+            if "«Instalar»: comienza la instalación." not in self.texts({"log": log}):
+                break
+        self.assertEqual(len(log), runner.LINES)
+        self.assertEqual([line["time"] for line in log], sorted(line["time"] for line in log))
+        self.assertIn("«Reintentar»: se repiten los pasos que no se completaron.", self.texts({"log": log}))
+
+    def test_no_line_carries_a_password_the_passphrase_or_the_links_secret(self):
+        link = self.link()
+        self.browser = Browser(link.url)
+        self.assertEqual(self.browser.open(link.url)[0], 200)
+        self.claim()
+        self.suite.down = {"nextcloud"}
+        self.install()
+        self.until("failed")
+        self.suite.down = set()
+        self.install()
+        logged = "\n".join(self.texts(self.until("done")))
+        passwords = [user["password"] for user in self.suite.users.values()]
+        self.assertGreater(len(passwords), 1, "the install made people's accounts")
+        for secret in (FakeSuite.PASSPHRASE, FakeSuite.ADMINISTRATOR, FakeSuite.BACKUP_PASSWORD,
+                       urlsplit(link.url).fragment, *passwords):
+            self.assertNotIn(secret, logged)
+            self.assertNotIn(secret, self.journal.getvalue())
 
 
 TOKENS = brand.tokens()
