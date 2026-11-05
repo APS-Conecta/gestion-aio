@@ -19,6 +19,7 @@ keeps it in."""
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -85,7 +86,10 @@ suite = f"https://{name}"
 router = f"En el router, permita esas respuestas para {name.split('.', 1)[1]}"
 dropped = f"{suite}/**"  # what the page fetches to tell whether this computer opens the suite
 evidence = Path(os.environ["EVIDENCE"])
-link, printed = wizard_link(machine("sudo python3 /opt/aps-conecta/gestion/provisionador/provisionador.py link"))
+with tempfile.NamedTemporaryFile() as console:  # one-command.sh masks the fresh link's secret before the check reads it
+    subprocess.run([REPO / "aps" / "acceptance" / "one-command.sh", console.name,
+                    "sudo python3 /opt/aps-conecta/gestion/provisionador/provisionador.py link"], check=True)
+    link, printed = wizard_link(Path(console.name).read_text(encoding="utf-8"))
 url = urlsplit(link)
 
 with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
