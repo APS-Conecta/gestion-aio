@@ -5,7 +5,8 @@
 to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the blank
 people spreadsheet, uploads it filled in as Excel saves it and sees the people the install will create, then to
 «Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the components and the
-backups; «Instalar» shows each step and, once AIO runs our components, each container's progress live. Meanwhile the
+backups; «Instalar» shows each step and, once AIO runs our components, each container's progress live, and below them
+«Registro de la instalación», which logs the suite's start as it runs. Meanwhile the
 operator goes back to «Equipos», ticks a person who left and presses «Retirar», then confirms: the install applies the
 people as they were at «Instalar», so that person can still store a file in their own files, and stops with the people
 step red until «Reintentar» applies «Retirar» (48-retire checks the person). Then «Listo» shows the suite's address.
@@ -37,6 +38,7 @@ from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import chosen  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 from steps.people import CHANGED, NAME as ACCOUNTS  # noqa: E402
+from steps.start import NAME as START  # noqa: E402
 
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
@@ -151,6 +153,8 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
             page.screenshot(path=evidence / "revisar-failed.png")
             sys.exit(f"no «Listo» within 12 minutes: {page.inner_text('#install-status')}\n{page.inner_text('#steps')}")
         if {"running", "stopped"} <= {s[-1] for s in seen.values()} and not (evidence / "progress.png").exists():
+            expect(page.locator("#log")).to_contain_text(f"Paso «{START}»: en curso.")
+            page.locator("#log").scroll_into_view_if_needed()
             page.screenshot(path=evidence / "progress.png")
         page.wait_for_timeout(2000)
     progress = "".join(f"{c}: {' → '.join(s)}\n" for c, s in seen.items())
