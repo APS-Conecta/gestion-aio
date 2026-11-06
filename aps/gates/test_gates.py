@@ -436,7 +436,7 @@ class ReleaseWorkflowGate(unittest.TestCase):
     only once every check of that candidate passed, and creates every release as a pre-release kept from «Latest»."""
 
     WORKFLOW = REPO / ".github" / "workflows" / "aps-release.yml"
-    PUBLISH = "needs: [images, release, bootstrap, host-checks, acceptance]\n    if: inputs.version != ''\n"
+    PUBLISH = "needs: [images, release, bootstrap, host-checks, acceptance, acceptance-upgrade]\n    if: inputs.version != ''\n"
 
     def gate(self, old="", new=""):
         """The gate's exit code and output on the committed workflow with `old` replaced by `new`."""
@@ -456,9 +456,9 @@ class ReleaseWorkflowGate(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_latest_before_the_acceptance_run_passed_fails_naming_it(self):
-        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace(", acceptance]", "]"))
+        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace(", acceptance-upgrade]", "]"))
         self.assertEqual(code, 1, out)
-        self.assertIn("publish makes a release «Latest» without waiting for acceptance", out)
+        self.assertIn("publish makes a release «Latest» without waiting for acceptance-upgrade", out)
 
     def test_latest_whatever_the_checks_did_fails(self):
         code, out = self.gate(self.PUBLISH, self.PUBLISH.replace("if: ", "if: always() && "))
@@ -525,16 +525,26 @@ class DockerPackages(unittest.TestCase):
 
 class BootstrapRefusals(unittest.TestCase):
     """aps/bootstrap/install.sh, as a release fills it in, as root on a server with Docker: another installation, or
-    the configuration one left, is refused before anything changes. `docker`, `id` and `curl` are fakes first on PATH;
-    each answers only the calls the case names and fails loudly on any other, and every call is recorded."""
+    the configuration one left, is refused before anything changes; an older release of ours is upgraded, and an
+    upgrade the bootstrap cut short is retaken. `docker`, `id`, `curl`, `python3`, `systemctl` and `qrencode` are fakes
+    first on PATH; each answers only the calls the case names and fails loudly on any other, and every call is
+    recorded. A `@DIR@` in a call's name stands for the test's own directory."""
 
     TAG = "v1.0.1"
+    IMAGE = "ghcr.io/aps-conecta/gestion-mastercontainer"
+    DIGEST = f"{IMAGE}@sha256:{'a' * 64}"
     INSPECT = "docker container inspect -f {{.Config.Image}} nextcloud-aio-mastercontainer"
     VOLUME = "docker volume inspect nextcloud_aio_mastercontainer"
+    RUN = ("docker run --init --sig-proxy=false --name nextcloud-aio-mastercontainer --restart always --detach "
+           "--publish 80:80 --publish 8080:8080 --publish 8443:8443 "
+           "--volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config "
+           f"--volume /var/run/docker.sock:/var/run/docker.sock:ro {IMAGE}:{TAG}")
 
-    def bootstrap(self, answers):
+    def bootstrap(self, answers, holds=()):
         """The exit code, the output and the calls made of the release's install.sh, with `answers` as
-        {call: (exit code, output)}; and what its folder's parent holds afterwards besides the test's own files."""
+        {call: (exit code, output)} (nothing answers a call that fails loudly); `holds` names files the server already
+        holds, with their text, under the install folder; and what that folder's parent holds afterwards besides the
+        test's own files."""
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         text = (REPO / "aps" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
         for old, new in (('\nRELEASE_TAG=""\n', f'\nRELEASE_TAG="{self.TAG}"\n'),
@@ -543,18 +553,23 @@ class BootstrapRefusals(unittest.TestCase):
             self.assertEqual(text.count(old), 1, old)
             text = text.replace(old, new)
         (tmp / "install.sh").write_text(text, encoding="utf-8")
+        for name, content in holds:
+            path = tmp / "gestion" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        answers = {call.replace("@DIR@", str(tmp)): value for call, value in answers.items()}
         fake = ["#!/bin/sh", 'printf "%s\\n" "${0##*/} $*" >> "$CALLS"', 'case "${0##*/} $*" in']
         fake += [f"  {shlex.quote(call)}) printf %s {shlex.quote(out)}; exit {code} ;;"
                  for call, (code, out) in {"id -u": (0, "0"), **answers}.items()]
         fake += ['  *) echo "fake: unexpected call: ${0##*/} $*" >&2; exit 99 ;;', "esac", ""]
         (tmp / "bin").mkdir()
-        for name in ("docker", "id", "curl"):
+        for name in ("docker", "id", "curl", "python3", "systemctl", "qrencode"):
             (tmp / "bin" / name).write_text("\n".join(fake), encoding="utf-8")
             (tmp / "bin" / name).chmod(0o755)
         (tmp / "calls").touch()
         r = subprocess.run([shutil.which("bash"), str(tmp / "install.sh")], capture_output=True, encoding="utf-8",
                            env={"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "CALLS": str(tmp / "calls")})
-        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls"})
+        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls", "gestion"})
         return r.returncode, r.stdout + r.stderr, (tmp / "calls").read_text().splitlines(), made
 
     def test_another_aio_installation_is_refused_naming_its_image(self):
@@ -564,13 +579,41 @@ class BootstrapRefusals(unittest.TestCase):
         self.assertIn("Elimínela, o use otro servidor, antes de volver a ejecutar el instalador. No se modificó nada.",
                       out)
 
-    def test_another_release_of_ours_is_refused_naming_the_command_that_opens_its_wizard(self):
-        ours = "ghcr.io/aps-conecta/gestion-mastercontainer"
-        code, out, calls, made = self.bootstrap({self.INSPECT: (0, f"{ours}:v1.0.0")})
+    def test_a_newer_release_of_ours_is_refused_naming_the_latest_installer(self):
+        code, out, calls, made = self.bootstrap({self.INSPECT: (0, f"{self.IMAGE}:v1.0.2")})
         self.assertEqual((code, calls, made), (1, ["id -u", self.INSPECT], []), out)
-        self.assertIn("ya tiene APS Conecta Gestión v1.0.0. Para abrir su asistente, ejecute:\n"
-                      "  curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/download/v1.0.0/install.sh"
-                      " | sudo bash\nNo se ofrece actualizar una instalación. No se modificó nada.", out)
+        self.assertIn("ya tiene APS Conecta Gestión v1.0.2, una versión más nueva que v1.0.1. Use el instalador de la "
+                      "versión vigente:\n  curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/latest/"
+                      "download/install.sh | sudo bash\nNo se modificó nada.", out)
+
+    def test_an_older_release_of_ours_is_upgraded_not_refused(self):
+        code, out, calls, made = self.bootstrap({self.INSPECT: (0, f"{self.IMAGE}:v1.0.0")})
+        self.assertNotEqual(code, 0, out)
+        self.assertIn("Actualizando APS Conecta Gestión de v1.0.0 a v1.0.1...", out)
+        self.assertIn("Descargando y verificando APS Conecta Gestión v1.0.1...", out)
+        self.assertEqual(made, [], "something was unpacked before the bundle's checksum verified")
+        self.assertTrue(any(call.startswith("curl -fsSL --retry 3 -o ") for call in calls), calls)
+
+    def test_an_upgrade_the_bootstrap_cut_short_is_retaken(self):
+        # the server holds this release's bundle, its volume and the wizard's state, but no mastercontainer; the
+        # wizard's own marking refuses (an install that never finished), and nothing else is touched
+        answers = {self.INSPECT: (1, ""), self.VOLUME: (0, "[]"),
+                   f"docker pull --quiet {self.DIGEST}": (0, ""),
+                   f"docker tag {self.DIGEST} {self.IMAGE}:{self.TAG}": (0, ""),
+                   "docker rm -f nextcloud-aio-mastercontainer": (0, ""), self.RUN: (0, ""),
+                   "systemctl stop aps-provisionador.service": (0, ""),
+                   "python3 @DIR@/gestion/provisionador/provisionador.py upgrade":
+                       (1, "La instalación de este servidor no terminó...")}
+        code, out, calls, made = self.bootstrap(answers, holds=(("VERSION", f"{self.TAG}\n"),
+                                                                ("images.lock", f"{self.DIGEST}\n")))
+        self.assertEqual(code, 1, out)
+        for call in (f"docker pull --quiet {self.DIGEST}", f"docker tag {self.DIGEST} {self.IMAGE}:{self.TAG}",
+                     "docker rm -f nextcloud-aio-mastercontainer", self.RUN,
+                     "systemctl stop aps-provisionador.service"):
+            self.assertIn(call, calls)
+        self.assertTrue(calls[-1].startswith("python3 ") and calls[-1].endswith(" upgrade"), calls)
+        self.assertIn("no se pudo preparar la actualización", out)
+        self.assertEqual(made, [])
 
     def test_a_volume_another_installation_left_is_refused_on_a_fresh_install(self):
         code, out, calls, made = self.bootstrap({self.INSPECT: (1, ""), self.VOLUME: (0, "[]")})
