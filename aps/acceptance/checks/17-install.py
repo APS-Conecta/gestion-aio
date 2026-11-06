@@ -202,8 +202,9 @@ if not (handed == kept and passphrase in kept and administrator in kept
 reported = {key: config.get(key) for key in SWITCHES}
 backup = aio_file("daily_backup_time").splitlines()
 print(f"AIO reports {reported}; daily backup {backup}")
-if reported != SWITCHES or backup[:2] != [BACKUP_TIME, "automaticUpdatesAreNotEnabled"]:
-    sys.exit(f"AIO does not report our components, every other one off, and nightly backups to {BACKUP_FOLDER}")
+if reported != SWITCHES or backup[:2] != [BACKUP_TIME, ""]:  # line 2 names automatic updates off when AIO writes it
+    sys.exit(f"AIO does not report our components, every other one off, nightly backups to {BACKUP_FOLDER} "
+             "and its nightly update job on")
 
 store = machine("sudo docker volume inspect --format '{{.Mountpoint}}' nextcloud_aio_mastercontainer").strip()
 machine(f"sudo test -s {store}/data/configuration.json && ! test -r {store}/data/configuration.json")

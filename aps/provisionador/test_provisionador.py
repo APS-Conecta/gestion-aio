@@ -637,6 +637,7 @@ class Instalar(InstallTest):
         self.assertEqual(self.named(install, "green"), set(self.steps(install)), "every step the API lists is green")
         self.assertEqual(self.suite.switched, COMPONENTS)
         self.assertEqual(self.suite.backup, ("/var/backups/aps-conecta", "06:00"))
+        self.assertIs(self.suite.automatic_updates, True)  # AIO's nightly job updates the store's apps
         self.assertEqual(self.suite.starts, 1)
         self.assertLessEqual({
             "default_language": "es", "force_language": "es", "default_locale": "es_CL", "default_phone_region": "CL",
@@ -838,6 +839,84 @@ class StepRunner(InstallTest):
         self.install()
         self.until("done")
         self.assertEqual(self.suite.apps["theming"]["url"], "https://apsconecta.cl")
+
+
+class Upgrade(InstallTest):
+    """The one command's upgrade of an installed server: `provisionador.py upgrade` (install.sh runs it once the new
+    release's bundle and mastercontainer are in place) stops the suite, so AIO's forms can be posted again, and sets
+    every step but the people's to run again; the restarted Provisionador resumes the install by itself and «Listo»
+    follows, as at the first install. The people stay with their Users page."""
+
+    def upgrade(self, version="v1.1.0"):
+        return provisionador.upgrade(self.suite, provisionador.State(self.state), version)
+
+    def installed(self):
+        """A finished, closed install, as the server holds it once the wizard ended: the Provisionador is stopped."""
+        self.claim()
+        self.assertEqual(self.install()[0], 202)
+        self.until("done")
+        self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
+        self.stop()
+
+    def test_an_install_still_under_way_is_left_to_resume_not_reconciled(self):
+        self.claim()
+        self.suite.release.clear()  # the install never reaches «Listo»
+        self.install()
+        self.until_step(start.NAME, "running")
+        self.suite.release.set()
+        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(self.suite.stops, 0)  # nothing stops: the Provisionador carries the install on
+        install = provisionador.State(self.state).read()["install"]
+        self.assertNotIn("upgrade", install)  # and no reconcile was marked
+
+    def test_the_upgrade_stops_the_suite_and_sets_every_step_but_the_people_to_run_again(self):
+        self.installed()
+        before = len(self.suite.commands)
+        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(self.suite.stops, 1)
+        state = provisionador.State(self.state).read()
+        owned = {name for name, module in runner.STEPS.items() if getattr(module, "OWNED", False)}
+        self.assertEqual(owned, {"people"})
+        self.assertEqual({name: step["status"] for name, step in state["install"]["steps"].items()},
+                         {name: "green" if name in owned else "pending" for name in runner.STEPS})
+        self.assertEqual((state["install"].get("listo"), state.get("closed")), (False, None))
+        self.start()  # the bootstrap restarts the Provisionador; it resumes the install by itself
+        self.browser = self.operator()
+        install = self.until("done")
+        self.assertIn("Comienza la actualización a v1.1.0.", self.texts(install))
+        self.assertEqual(self.steps(install)[people.NAME], ("green", None))
+        self.assertEqual(self.suite.starts, 2)
+        self.assertIs(self.suite.automatic_updates, True)  # the release's backups step ran again
+        self.assertFalse([c for c in self.suite.commands[before:] if c[0].startswith("user:")],
+                         "the upgrade touched the people's accounts")
+        self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)  # the wizard closes again
+
+    def test_an_upgrade_keeps_the_people_with_their_users_page(self):
+        self.installed()
+        self.suite.users["ana"]["enabled"] = False  # an administrator disabled a person after the install
+        self.assertEqual(self.upgrade(), None)
+        self.start()
+        self.browser = self.operator()
+        self.assertEqual(self.until("done")["status"], "done")
+        self.assertFalse(self.suite.users["ana"]["enabled"], "the upgrade re-enabled a person the Users page disabled")
+
+
+class StoreApps(unittest.TestCase):
+    """The nightly update of the store's apps (the host's timer runs `provisionador.py update-apps` after AIO's backup
+    window): it waits out the suite being down, as it is while AIO's nightly job restarts its containers, and runs
+    Nextcloud's own update of the store's apps. Own and fork apps stay on the release's manifest."""
+
+    def test_the_stores_apps_update_runs_nextclouds_own(self):
+        suite = FakeSuite()
+        self.assertEqual(provisionador.update_apps(suite, wait=0), 0)
+        self.assertEqual(suite.app_updates, 1)
+
+    def test_it_waits_out_the_backup_window_and_leaves_a_note_when_the_suite_never_answers(self):
+        suite = FakeSuite()
+        suite.down = {"nextcloud"}
+        with mock.patch("provisionador.time.sleep") as sleep:
+            self.assertEqual(provisionador.update_apps(suite, wait=0.2, retry=5), 1)
+        self.assertGreaterEqual(sleep.call_count, 2, "it did not wait for the suite to answer")
 
 
 class Apps(InstallTest):

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The release workflow publishes only what passed. It creates every release as a pre-release kept from «Latest», and
-a job makes a release «Latest» only once every check of that candidate passed: the clean-machine acceptance run, the
-one command on a fresh runner and the host checks. So a red run leaves nothing that the one command
-(releases/latest/download/install.sh) installs.
+a job makes a release «Latest» only once every check of that candidate passed: the clean-machine acceptance run, its
+upgrade from the previous release, the one command on a fresh runner and the host checks. So a red run leaves nothing
+that the one command (releases/latest/download/install.sh) installs.
 
 It reads the workflow's jobs as written: each job's `needs`, its `if` and its lines.
 """
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 WORKFLOW = ".github/workflows/aps-release.yml"
-CHECKS = ("acceptance", "bootstrap", "host-checks")  # the jobs that check the candidate
+CHECKS = ("acceptance", "acceptance-upgrade", "bootstrap", "host-checks")  # the jobs that check the candidate
 STATUS = re.compile(r"\b(always|failure|cancelled)\s*\(")  # each lets a job run after a needed job failed
 PUBLISHES = {"--latest", "--latest=true", "--prerelease=false"}  # `gh release edit` flags that can make it «Latest»
 
