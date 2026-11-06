@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""AIO's own nightly backup, to the backup folder on this server."""
+"""AIO's own nightly backup, to the backup folder on this server, with its automatic updates on: AIO's nightly job
+(Containers/mastercontainer/daily-backup.sh) then keeps the containers on the release's pins and updates the store's
+apps, which our host timer (install.sh) also does every night."""
 
 NAME = "Copias de seguridad"
 NEEDS = ()
