@@ -5,6 +5,12 @@
 # Debian 12 VM on a network it shares with the runner, as a laptop shares the clinic's; run the one
 # command in it as an operator would; then run every check in aps/acceptance/checks/ in name order.
 #
+# With a <previous-release> argument, the run is the one command's upgrade path (#58): the previous release
+# is installed first, driven by its own wizard-driving checks (15-wizard and 17-install) from a worktree at
+# its tag — they were green when it shipped, and what this tree's copy of them expects belongs to the release
+# under test —; the one command of the release under test then upgrades the machine, check 18-upgrade drives
+# the reopened wizard to «Listo», and every check but those three runs. Either way the machine starts clean.
+#
 # A check is an executable file aps/acceptance/checks/<NN>-<name>.<sh|py>; NN orders it. It runs on the
 # runner, from the repo root, with:
 #   TAG       the pre-release under test: a test build (v0.0.0-ci.*) or a release's candidate
@@ -27,15 +33,23 @@
 # candidate gets a real one, which the system's real roots alone verify.
 # The VM has the bootstrap's memory floor (aps/bootstrap/install.sh), so a green run proves it. hardware.sh samples its
 # hardware use from the one command to the last check; the workflow attaches the peaks, whatever the outcome.
-# Usage: run.sh <tag>
+# Usage: run.sh <tag> [<previous-release>]
 set -euo pipefail
-[[ "$#" -eq 1 && "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "usage: $0 <tag>" >&2; exit 2; }
+usage="usage: $0 <tag> [<previous-release>]"
+[[ "${1:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "$usage" >&2; exit 2; }
+[[ -z "${2:-}" || "${2:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "$usage" >&2; exit 2; }
+previous="${2:-}"
 [[ "${GITHUB_ACTIONS:-}" = true && -c /dev/kvm ]] || { echo "$0 runs on a disposable GitHub runner with KVM only" >&2; exit 2; }
 cd "$(git rev-parse --show-toplevel)"
 work="$RUNNER_TEMP/acceptance"
 mkdir -p "$work/evidence"
 export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt"
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
+one_command() { # <tag>: the one command of that release, as the manual prints it
+  export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$1/install.sh | sudo bash"
+  echo "$COMMAND"
+  aps/acceptance/one-command.sh "$CONSOLE"
+}
 TEST_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr '+/' '-_')"
 printf '::add-mask::%s\n' "$TEST_PASSWORD"
 export TEST_PASSWORD
@@ -84,6 +98,27 @@ blanked() { # <command>: what it printed on the machine, without the secrets mas
   [ -z "$passphrase" ] || log="${log//"$passphrase"/[passphrase]}"
   for found in "${masked[@]}"; do log="${log//"$found"/[secret]}"; done
   printf '%s\n' "$log"
+}
+check() { # <check file> [<tag>]: one check, named for its evidence, with the release it tests (a check of the
+          # previous release runs under that release's tag); a failure is collected and remembered. 17-install
+          # and 18-upgrade wait up to 20 minutes for «Listo».
+  local name rc=0
+  name="$(basename "${1%.*}")"
+  export EVIDENCE="$work/evidence/$name"
+  echo "$(date +%s) $name" >> "$work/hardware/stages.txt"
+  mkdir -p "$EVIDENCE"
+  echo "::group::$name"
+  TAG="${2:-$TAG}" timeout 25m "$1" < /dev/null || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    mask_secrets
+    echo "::endgroup::"
+    echo "passed: $name"
+  else
+    echo "::endgroup::"
+    echo "::error title=Acceptance check failed::$name"
+    collect "$EVIDENCE"
+    failed+=("$name")
+  fi
 }
 on_exit() { # a failure outside the checks names its stage and collects the same evidence
   local rc=$?
@@ -150,27 +185,39 @@ stage="sample the VM's hardware use"
 aps/acceptance/hardware.sh start "$work/hardware"
 stage="the one command"
 echo "$(date +%s) one-command" > "$work/hardware/stages.txt"
-echo "$COMMAND"
-aps/acceptance/one-command.sh "$CONSOLE"
+if [ -n "$previous" ]; then
+  # The previous release's own install on the fresh machine, driven to «Listo» by its own wizard checks: its
+  # tag is fetched into a worktree, whose checks test what that release shipped.
+  stage="install the previous release"
+  echo "$(date +%s) install-previous" > "$work/hardware/stages.txt"
+  git fetch --quiet --depth 1 origin "refs/tags/$previous:refs/tags/$previous"
+  git worktree add --quiet --detach "$work/previous" "$previous"
+  one_command "$previous"
+  failed=()
+  for check in "$work/previous"/aps/acceptance/checks/15-wizard.py "$work/previous"/aps/acceptance/checks/17-install.py; do
+    check "$check" "$previous"
+  done
+  [ "${#failed[@]}" -eq 0 ] || { echo "failed: ${failed[*]}"; exit 1; }
+
+  stage="the upgrade"
+  echo "$(date +%s) upgrade" >> "$work/hardware/stages.txt"
+  one_command "$TAG"
+  failed=()
+  check aps/acceptance/checks/18-upgrade.py
+  [ "${#failed[@]}" -eq 0 ] || { echo "failed: ${failed[*]}"; exit 1; }
+else
+  one_command "$TAG"
+fi
 
 stage=""
 failed=()
 for check in aps/acceptance/checks/*; do
   name="$(basename "${check%.*}")"
-  export EVIDENCE="$work/evidence/$name"
-  echo "$(date +%s) $name" >> "$work/hardware/stages.txt"
-  mkdir -p "$EVIDENCE"
-  echo "::group::$name"
-  if timeout 25m "$check" < /dev/null; then  # 17-install waits up to 20 minutes for «Listo»
-    mask_secrets
-    echo "::endgroup::"
-    echo "passed: $name"
-  else
-    echo "::endgroup::"
-    echo "::error title=Acceptance check failed::$name"
-    collect "$EVIDENCE"
-    failed+=("$name")
-  fi
+  case "$name" in
+    15-wizard | 17-install) [ -z "$previous" ] || continue ;;  # their release's own checks ran at its install
+    18-upgrade) [ -n "$previous" ] || continue ;;               # no upgrade happens on a clean machine
+  esac
+  check "$check"
 done
 [ "${#failed[@]}" -eq 0 ] || { echo "failed: ${failed[*]}"; exit 1; }
 echo "acceptance: every check passed"

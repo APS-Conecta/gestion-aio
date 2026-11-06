@@ -32,6 +32,7 @@ LINES = 200  # the install's log keeps its latest lines
 INSTALAR = "«Instalar»: comienza la instalación."
 REINTENTAR = "«Reintentar»: se repiten los pasos que no se completaron."
 RESUMED = "El Provisionador se reinició y continúa la instalación."
+UPGRADE = "Comienza la actualización a {}."
 # A step's line in the log for each status it is set to, its reason after it.
 STEP_LINE = {"running": "Paso «{}»: en curso.", "green": "Paso «{}»: completado.",
              "failed": "Paso «{}»: no se completó.", "waiting": "Paso «{}»: aún no comienza."}
@@ -76,6 +77,17 @@ def begin(state):
             if install["steps"].get(name, {}).get("status") != "green":
                 install["steps"][name] = {"status": "pending"}
         add_line(install, REINTENTAR if again else INSTALAR)
+
+
+def set_upgrade(install, version):
+    """The one command's upgrade of an installed server (provisionador.py upgrade): every step that is not owned runs
+    again, as at the install; an owned one keeps its green, for its state is the suite's own pages' now."""
+    install["upgrade"] = version
+    install["listo"] = False
+    for name, step in STEPS.items():
+        if not getattr(step, "OWNED", False):
+            install["steps"][name] = {"status": "pending"}
+    add_line(install, UPGRADE.format(version))
 
 
 def unfinished(install):
@@ -127,8 +139,9 @@ def run(state, context):
     if any(r["status"] != "green" for r in state.read()["install"]["steps"].values()):
         return
     log(state, CHECK)
+    upgrade = getattr(context, "upgrade", False)
     for name, step in STEPS.items():
-        if hasattr(step, "check"):
+        if hasattr(step, "check") and not (upgrade and getattr(step, "OWNED", False)):
             record(state, name, "running", logged=False)
             found = problems(step.check, context)
             record(state, name, "failed" if found else "green", found, logged=bool(found))
