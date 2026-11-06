@@ -28,9 +28,10 @@ tag = os.environ["TAG"]
 version = machine("cat /opt/aps-conecta/gestion/VERSION").strip()
 if version != tag:
     sys.exit(f"the machine holds the bundle of {version}, not {tag}'s upgrade")
-name, before = suite_name(), provisionador_state()
-if not before.get("install", {}).get("listo"):
-    sys.exit("the previous release's install never finished, so there is nothing to upgrade")
+name, state = suite_name(), provisionador_state()
+# the marking the one command's upgrade leaves, which it sets only over a finished, closed install
+if state.get("install", {}).get("upgrade") != tag:
+    sys.exit(f"the wizard's state records no upgrade to {tag}: did the previous release's install ever finish?")
 
 with tempfile.NamedTemporaryFile() as console:  # one-command.sh masks the fresh link's secret before the check reads it
     subprocess.run([REPO / "aps" / "acceptance" / "one-command.sh", console.name,
@@ -66,7 +67,7 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
 if handed != provisionador_file(FILE):
     sys.exit("the passwords file the upgrade handed over is not the machine's copy")
 after = provisionador_state()
-if after["address"]["name"] != before["address"]["name"]:
-    sys.exit(f"the upgrade changed the suite's name: {before['address']['name']} → {after['address']['name']}")
+if after["address"]["name"] != state["address"]["name"]:
+    sys.exit(f"the upgrade changed the suite's name: {state['address']['name']} → {after['address']['name']}")
 print(f"the upgrade to {version} reopened the wizard, kept https://{name} and its people, "
       "and closed at «Listo» with the passwords file")
