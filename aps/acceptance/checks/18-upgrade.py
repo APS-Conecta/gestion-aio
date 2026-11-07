@@ -24,6 +24,13 @@ from steps.people import NAME as ACCOUNTS  # noqa: E402
 
 LISTO_WITHIN = 20  # minutes: the release's images alone can take several to download
 
+
+def step_states(page):
+    """Each step on «Revisar», by its Spanish name, with its state."""
+    return dict(page.eval_on_selector_all("#steps li",
+                                           "items => items.map(i => [i.querySelector('strong').textContent, i.dataset.state])"))
+
+
 tag = os.environ["TAG"]
 version = machine("cat /opt/aps-conecta/gestion/VERSION").strip()
 if version != tag:
@@ -47,8 +54,7 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     page.screenshot(path=evidence / "actualizacion.png")
     deadline = time.monotonic() + LISTO_WITHIN * 60
     while not page.locator("#listo").is_visible():
-        people = page.locator("#steps li", has=page.get_by_role("strong", name=ACCOUNTS))
-        if people.first.get_attribute("data-state") not in (None, "green"):
+        if step_states(page).get(ACCOUNTS) not in (None, "green"):
             page.screenshot(path=evidence / "personal.png")
             sys.exit(f"the upgrade re-ran the people's step: {page.inner_text('#steps')}")
         if time.monotonic() > deadline:
@@ -62,7 +68,7 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
         page.click("#passwords")
     handed = Path(download.value.path()).read_text(encoding="utf-8")
     if page.evaluate("fetch('/api/state').then(r => r.status, () => 'closed')") not in ("closed", 401):
-        sys.exit("the wizard's session still works after the upgrade's «Listo'")
+        sys.exit("the wizard's session still works after the upgrade's «Listo»")
 
 if handed != provisionador_file(FILE):
     sys.exit("the passwords file the upgrade handed over is not the machine's copy")
