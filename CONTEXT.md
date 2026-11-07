@@ -31,6 +31,13 @@ It contains no apps.
 A Suite release before its clean-machine acceptance run: a pre-release under its version, never «Latest». It becomes the
 release «Latest» once every check passes, and is withdrawn otherwise.
 
+**Upgrade** (actualización):
+Rerunning the one command on an installed server moves it to the latest release: the bundle and the mastercontainer move to
+it, the suite stops, every install step but the people's runs again (their Users page owns them), and the reopened wizard
+shows the reconcile to «Listo». Between releases, AIO's nightly job — on, after the 06:00 UTC backup — keeps the containers on
+the release's pins, and the store's apps update nightly (own and fork apps move only with a release, their releases above
+the store's versions).
+
 **Test establishment** (establecimiento de prueba):
 APS Conecta's own entry beside the DEIS register, under a code outside DEIS's. «Centro» never lists it, and only APS's
 token claims its name: a release's acceptance run claims it in production.

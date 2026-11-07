@@ -10,10 +10,14 @@
 # Docker Engine when missing; unpack the bundle; start the mastercontainer as upstream's readme does,
 # from the digest the bundle names; start the Provisionador and the inside-address timer and print the
 # one-time link. A rerun once this release's mastercontainer exists changes nothing else: it restores the
-# bundle when its folder is gone, makes sure the Provisionador and the timer run and prints a fresh link to
+# bundle when its folder is gone, makes sure the Provisionador and the timers run and prints a fresh link to
 # the same wizard state; once the wizard closed at «Listo», the Provisionador stays stopped and the rerun
-# prints the suite's address instead. Another release's mastercontainer, another AIO installation's, or the
-# configuration volume one left behind, is refused before anything changes.
+# prints the suite's address instead. A server that holds an older release of ours is upgraded to this
+# release: the bundle and the mastercontainer move to it, the suite stops and every install step but the
+# people's runs again, and the reopened wizard shows its progress as at the install. A newer release of
+# ours, another AIO installation's mastercontainer, or the configuration volume one left behind without a
+# bundle of ours, is refused before anything changes. An upgrade the bootstrap cut short, with its bundle
+# unpacked but no mastercontainer running, is retaken where it stood.
 # Everything runs inside main, so a truncated download never runs half a script.
 # GESTION_DOWNLOAD_URL is the tamper test's seam: it serves the release assets from elsewhere, under the
 # same verification.
@@ -85,17 +89,22 @@ check_host() {
   exit 1
 }
 
-# A rerun goes on only with this release's own mastercontainer, which runs under the release's tag
-# (start_mastercontainer). Another release of ours is not upgraded, and another AIO installation is not touched.
-check_mastercontainer() {
+# A rerun goes on only with this release's own mastercontainer, which runs under the release's tag. A server that
+# holds an older release of ours is upgraded to this one (upgrade_server); one that holds a newer release, or
+# another AIO installation, is not touched.
+handle_mastercontainer() {
   local image=$1 installed
   case "$image" in
     "$MASTERCONTAINER:$RELEASE_TAG") ;;
     "$MASTERCONTAINER":*)
       installed="${image#"$MASTERCONTAINER":}"
-      die "este servidor ya tiene APS Conecta Gestión $installed. Para abrir su asistente, ejecute:
-  curl -fsSL $REPO_URL/releases/download/$installed/install.sh | sudo bash
-No se ofrece actualizar una instalación. No se modificó nada." ;;
+      if [ "$installed" != "$(printf '%s\n' "$installed" "$RELEASE_TAG" | sort -V | tail -n 1)" ]; then
+        upgrade_server "$installed"
+      else
+        die "este servidor ya tiene APS Conecta Gestión $installed, una versión más nueva que $RELEASE_TAG. Use el instalador de la versión vigente:
+  curl -fsSL $REPO_URL/releases/latest/download/install.sh | sudo bash
+No se modificó nada."
+      fi ;;
     *) die "este servidor ya tiene otra instalación de Nextcloud All-in-One (imagen $image), que el instalador no toca. Elimínela, o use otro servidor, antes de volver a ejecutar el instalador. No se modificó nada." ;;
   esac
 }
@@ -154,9 +163,12 @@ unpack() {
 }
 
 # The pinned digest runs under the release tag: upstream takes its channel from the image's tag. A test build's bundle
-# carries Let's Encrypt's staging roots, which AIO's own folder of trusted CAs gives Nextcloud and Talk.
+# carries Let's Encrypt's staging roots, which AIO's own folder of trusted CAs gives Nextcloud and Talk. The
+# mastercontainer this release replaces is removed first; its configuration volume stays, so an upgrade of an
+# installed server keeps everything AIO configured (a clean machine has none to keep, and one this run made and
+# failed to start goes too, or the rerun would refuse it as another installation's).
 start_mastercontainer() {
-  local pinned image="$MASTERCONTAINER:$RELEASE_TAG" trusted=()
+  local keep="$1" pinned image="$MASTERCONTAINER:$RELEASE_TAG" trusted=()
   [ ! -d "$INSTALL_DIR/trusted-cacerts" ] || trusted=(--env "NEXTCLOUD_TRUSTED_CACERTS_DIR=$INSTALL_DIR/trusted-cacerts")
   pinned="$(grep -m 1 "^$MASTERCONTAINER@sha256:" "$INSTALL_DIR/images.lock")" \
     || die "el paquete no indica la imagen del contenedor maestro. Infórmelo a APS Conecta."
@@ -164,20 +176,44 @@ start_mastercontainer() {
   docker pull --quiet "$pinned" >/dev/null \
     || die "no se pudo descargar el contenedor maestro. Revise la conexión a internet y vuelva a ejecutar el instalador."
   docker tag "$pinned" "$image"
+  docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1 || true
   docker run --init --sig-proxy=false --name nextcloud-aio-mastercontainer --restart always --detach \
     --publish 80:80 --publish 8080:8080 --publish 8443:8443 \
     --volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config \
     --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" \
     "$image" >/dev/null \
     || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
-         # the volume it made goes too, or the rerun would refuse it as another installation's
-         docker volume rm nextcloud_aio_mastercontainer >/dev/null 2>&1 || true
+         [ "$keep" = keep ] || docker volume rm nextcloud_aio_mastercontainer >/dev/null 2>&1 || true
          die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }
   say "APS Conecta Gestión $RELEASE_TAG está en marcha."
 }
 
+# The one command's upgrade of an installed server to this release: the bundle and the mastercontainer move to it,
+# the suite stops and every install step but the people's is set to run again, and the restarted Provisionador
+# resumes the wizard by itself (provisionador.py upgrade). With no tag, an upgrade or install the bootstrap cut
+# short — its bundle unpacked, its mastercontainer gone — is retaken where it stood.
+upgrade_server() {
+  local installed="${1:-}"
+  if [ -n "$installed" ]; then
+    say "Actualizando APS Conecta Gestión de $installed a $RELEASE_TAG..."
+  else
+    say "Retomando la instalación de APS Conecta Gestión $RELEASE_TAG donde quedó..."
+  fi
+  if [ "$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || true)" != "$RELEASE_TAG" ]; then
+    fetch_and_verify
+    unpack
+  fi
+  start_mastercontainer keep
+  need_provisionador_tools
+  systemctl stop aps-provisionador.service >/dev/null 2>&1 || true  # this release's code must be the one that resumes
+  python3 "$INSTALL_DIR/provisionador/provisionador.py" upgrade \
+    || die "no se pudo preparar la actualización de la suite. Revise el mensaje anterior y vuelva a ejecutar el instalador."
+  say "La suite se actualiza a $RELEASE_TAG. Abra el enlace para ver su progreso; las personas quedan como están."
+}
+
 # The Provisionador is a systemd service on the host, with the host's Python: no third image of ours.
-start_provisionador() {
+# What the Provisionador needs on the host, installed when missing (the one command's install and its upgrade).
+need_provisionador_tools() {
   local missing=() c
   for c in python3 openssl qrencode; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
   if [ "${#missing[@]}" -gt 0 ]; then
@@ -185,6 +221,10 @@ start_provisionador() {
       || die "instale ${missing[*]} con el gestor de paquetes de este sistema y vuelva a ejecutar el instalador."
     apt_install "${missing[@]}"
   fi
+}
+
+start_provisionador() {
+  need_provisionador_tools
   cat > /etc/systemd/system/aps-provisionador.service <<EOF
 [Unit]
 Description=APS Conecta Gestión: Provisionador
@@ -233,6 +273,35 @@ EOF
     || die "no se pudo activar la publicación de la dirección interna. Revise: systemctl status aps-address.timer"
 }
 
+# The store's apps update nightly after AIO's backup window: Nextcloud's own update command runs once the suite
+# answers again, for AIO's nightly job (which the install left on) stops its containers while it backs them up.
+start_apps_timer() {
+  cat > /etc/systemd/system/aps-apps.service <<EOF
+[Unit]
+Description=APS Conecta Gestión: actualiza de noche las aplicaciones de la tienda
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 $INSTALL_DIR/provisionador/provisionador.py update-apps
+EOF
+  cat > /etc/systemd/system/aps-apps.timer <<EOF
+[Unit]
+Description=APS Conecta Gestión: actualiza de noche las aplicaciones de la tienda
+
+[Timer]
+OnCalendar=*-*-* 06:15:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now aps-apps.timer >/dev/null 2>&1 \
+    || die "no se pudo activar la actualización nocturna de las aplicaciones. Revise: systemctl status aps-apps.timer"
+}
+
 # The link carries the wizard's secret: it goes to this console only.
 print_link() {
   say ""
@@ -240,28 +309,38 @@ print_link() {
 }
 
 main() {
-  local image
+  local image="" volume=no
   [ "$(id -u)" -eq 0 ] \
     || die "ejecute el instalador como administrador: curl -fsSL $REPO_URL/releases/latest/download/install.sh | sudo bash"
   if [ -z "$RELEASE_TAG" ] || [ -z "$BUNDLE_SHA256" ]; then
     die "este archivo es la copia del repositorio y no trae la suma del paquete. Use el instalador publicado en $REPO_URL/releases"
   fi
-  if command -v docker >/dev/null 2>&1 \
-      && image="$(docker container inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer 2>/dev/null)"; then
-    check_mastercontainer "$image"
+  if command -v docker >/dev/null 2>&1; then
+    image="$(docker container inspect -f '{{.Config.Image}}' nextcloud-aio-mastercontainer 2>/dev/null || true)"
+    if [ -z "$image" ] && { [ -f "$INSTALL_DIR/VERSION" ] || [ -f /var/lib/aps-conecta/provisionador/state.json ]; } \
+        && docker volume inspect nextcloud_aio_mastercontainer >/dev/null 2>&1; then volume=yes; fi
+  fi
+  if [ -n "$image" ]; then
+    handle_mastercontainer "$image"
     if [ ! -f "$INSTALL_DIR/provisionador/provisionador.py" ]; then
       fetch_and_verify
       unpack
     fi
+  elif [ "$volume" = yes ]; then
+    # this release's bundle is here, or its wizard's state is (the bundle may have been lost mid-upgrade), but its
+    # mastercontainer is gone: an upgrade or install the bootstrap cut short, whose configuration volume stays.
+    # It is retaken, not refused as another installation's.
+    upgrade_server ""
   else
     check_host
     fetch_and_verify
     command -v docker >/dev/null 2>&1 || install_docker
     unpack
-    start_mastercontainer
+    start_mastercontainer fresh
   fi
   start_provisionador
   start_address_timer
+  start_apps_timer
   print_link
 }
 

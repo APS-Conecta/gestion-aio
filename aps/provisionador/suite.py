@@ -504,9 +504,12 @@ class Suite:
 
     def back_up(self, folder, time):
         """AIO's own backup to the folder on this server, daily at the time (UTC), with its success notification and
-        without its automatic updates: what the suite runs changes only with a suite release."""
+        its automatic updates on: AIO's nightly job then restarts the containers on the pins the release holds and
+        updates the store's apps (own and fork apps stay above the store's versions, and our timer runs them nightly
+        anyway), so security fixes reach the suite between releases."""
         self._signed_in().post("/api/configuration", {"borg_backup_host_location": folder, "borg_remote_repo": "",
-                                                      "daily_backup_time": time, "success_notification": "on"})
+                                                      "daily_backup_time": time, "success_notification": "on",
+                                                      "automatic_updates": "on"})
 
     def start(self, downloading):
         """AIO's start button: it pulls, creates and starts every container in order, and answers once it is done. As
@@ -517,6 +520,16 @@ class Suite:
         if not text.rstrip().endswith(STARTED):
             print(f"AIO did not start the suite: {text[-2000:]}", file=sys.stderr)
             raise Unreachable(NOT_STARTED)
+
+    def update_apps(self):
+        """Nextcloud's own update of the store's apps (occ app:update --all): what it printed, naming each app it
+        updated. Own and fork apps stay on the release's manifest, their releases above the store's versions."""
+        return self.occ("app:update", "--all").strip()
+
+    def stop(self):
+        """AIO's stop button, pressed through its own cron script, for its page's login closes while the suite runs:
+        every container stops, so the release's start can update them."""
+        self.mastercontainer("php", "/var/www/docker-aio/php/src/Cron/StopContainers.php")
 
     def containers(self):
         """Each container AIO's page lists, by its id and AIO's name, with its state: stopped, starting or running."""
@@ -585,8 +598,11 @@ class FakeSuite:
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
+        self.automatic_updates = None  # whether AIO's nightly update job is on, as the backups step sets it
         self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
         self.starts = 0  # how often AIO's start button was pressed
+        self.stops = 0  # how often the suite's containers were stopped, as the upgrade stops them
+        self.app_updates = 0  # how often the store's apps were updated, as the nightly timer does it
         self.states = {}  # what AIO reports per container id: (AIO's name, state: stopped, starting or running)
         self.release = threading.Event()  # AIO's start answers once it is set: tests clear it to watch a start
         self.release.set()
@@ -664,7 +680,7 @@ class FakeSuite:
 
     def back_up(self, folder, time):
         self._signed_in()
-        self.backup = (folder, time)
+        self.backup, self.automatic_updates = (folder, time), True
 
     def start(self, downloading):
         """AIO's start answers once every container it started runs. Its answer streams as AIO's does: each container
@@ -684,6 +700,19 @@ class FakeSuite:
         if self.dies:
             raise SystemExit  # the thread ends without a word, as the process would
         self.states = {id_: (name, "running") for id_, (name, _) in self.states.items()}
+
+    def stop(self):
+        """The suite's containers stop, as the upgrade's cron script stops them; AIO's page lets its forms be posted
+        again once they do not run."""
+        self._outage_guard()
+        self.stops += 1
+        self.states = {id_: (name, "stopped") for id_, (name, _) in self.states.items()}
+
+    def update_apps(self):
+        """Nextcloud's update of the store's apps, as occ runs it."""
+        self._outage_guard("nextcloud")
+        self.app_updates += 1
+        return ""
 
     def containers(self):
         self._outage_guard()

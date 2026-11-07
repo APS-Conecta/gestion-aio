@@ -5,7 +5,9 @@
 # it for every test build and release candidate; a maintainer can dispatch it for any of them. A test build's
 # wizard claims a CI name. For a release's, the run first claims the production name of the register's hidden test
 # establishment with APS's token, which only that name needs, and the wizard takes that claim; the suite then gets a
-# real certificate. Either way the run releases the name at its end with APS's token.
+# real certificate. Either way the run releases the name at its end with APS's token. With a `previous` release, the
+# run is the upgrade path (#58): the previous release is installed first and then upgraded to the one under test
+# (aps/acceptance/run.sh documents it).
 name: APS acceptance
 
 on:
@@ -15,11 +17,20 @@ on:
         description: Pre-release to install, such as v0.0.0-ci.6 or a release's candidate
         required: true
         type: string
+      previous:
+        description: Release already installed to upgrade from, such as v1.0.2 (empty installs the tag on a clean machine)
+        required: false
+        type: string
+        default: ''
   workflow_call:
     inputs:
       tag:
         required: true
         type: string
+      previous:
+        required: false
+        type: string
+        default: ''
     secrets:
       CLOUDFLARE_API_TOKEN:
         required: true
@@ -34,7 +45,7 @@ jobs:
   clean-machine:
     name: The one command on a fresh Debian 12 VM
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     # Every test build shares the name service's one CI deployment, and every release the test establishment's
     # production name: one deploy-and-claim, or claim, at a time.
     concurrency:
@@ -87,7 +98,8 @@ jobs:
         id: run
         env:
           TAG: ${{ inputs.tag }}
-        run: aps/acceptance/run.sh "$TAG"
+          PREVIOUS: ${{ inputs.previous }}
+        run: aps/acceptance/run.sh "$TAG" "$PREVIOUS"
       - name: Release the name the run claimed
         if: always() && (steps.claim.outputs.code != '' || steps.run.outputs.code != '')
         env:
