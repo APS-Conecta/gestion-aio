@@ -215,7 +215,7 @@ for check in aps/acceptance/checks/*; do
   name="$(basename "${check%.*}")"
   case "$name" in
     15-wizard | 17-install) [ -z "$previous" ] || continue ;;  # their release's own checks ran at its install
-    18-upgrade) [ -n "$previous" ] || continue ;;               # no upgrade happens on a clean machine
+    18-upgrade) continue ;;  # the upgrade phase runs it; a clean machine has no upgrade
   esac
   check "$check"
 done
