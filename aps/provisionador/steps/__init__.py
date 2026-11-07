@@ -5,6 +5,8 @@
 A step module, whose name is its id, declares:
   NAME            its Spanish name, as the progress and the red list show it
   NEEDS           the ids of the steps that must be green before it runs
+  OWNED           optional, True when the suite's own pages own what the step made once «Listo» is reached: an upgrade
+                  of the server keeps such a step green, never re-running it nor re-checking it
   run(context)    its work, idempotent; it returns what went wrong as Spanish reasons, which the red list shows, and
                   None or [] once the work is done: no step reports success without doing its work
   check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
