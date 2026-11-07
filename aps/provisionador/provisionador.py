@@ -9,6 +9,11 @@
                            wizard closed at «Listo», the suite's address instead
   provisionador.py publish publish the server's inside address at its claimed name (the host's timer,
                            every 10 minutes)
+  provisionador.py upgrade stop the suite and set every install step but an owned one to run again
+                           (the bootstrap's upgrade of an installed server to this release; the
+                           restarted Provisionador then resumes the install by itself)
+  provisionador.py update-apps update the store's apps through Nextcloud's own command, waiting out
+                           AIO's backup window (the host's timer, nightly after it)
 
 Its one public surface is the HTTP API under /api, which the page in www/ uses and the wizard-API tests
 drive. The state lives in one JSON file on the server, so a reload, a restart or a rerun resumes it.
@@ -397,6 +402,7 @@ class Provisionador:
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
                                   optional=frozenset(state.get("optional", ())), teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
+                                  upgrade=bool(state.get("install", {}).get("upgrade")),
                                   log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
@@ -612,9 +618,49 @@ def publish(suite):
     return 0
 
 
+def update_apps(suite, wait, retry=30):
+    """The nightly update of the store's apps, as the host's timer runs it after AIO's backup window: while the suite
+    is down, as it is while AIO's nightly job backs it up and restarts its containers, it waits `wait` seconds,
+    asking again every `retry` seconds. Returns the exit code; what Nextcloud printed, naming each app it updated,
+    goes to the journal."""
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            if printed := suite.update_apps():
+                print(printed)
+            return 0
+        except Unreachable as outage:
+            if time.monotonic() > deadline:
+                print(outage, file=sys.stderr)
+                return 1
+            time.sleep(retry)
+
+
+def upgrade(suite, state, version):
+    """The one command's upgrade of an installed server (install.sh calls it once the new release's bundle and
+    mastercontainer are in place): the suite's containers stop, for AIO's page lets its forms be posted again only
+    while they do not run, and every install step but an owned one is set to run again, so the Provisionador the
+    bootstrap restarts resumes the install by itself and «Listo» follows as at the first install. An install still
+    under way — one the bootstrap cut short, or a wizard not yet closed — needs no reconcile: the resumed
+    Provisionador carries it on as it is. Returns None; a failure of the suite's services raises."""
+    data = state.read()
+    install = data.get("install")
+    if install and install.get("upgrade") and not install.get("listo"):
+        suite.stop()  # a cut-short upgrade: stop the suite again, in case it came back up
+        return None
+    if not install or not install.get("listo") or not data.get("closed"):
+        return None  # an install still under way: the resumed Provisionador carries it on
+    suite.stop()
+    with state.change() as s:
+        runner.set_upgrade(s["install"], version)
+        s.pop("closed", None)
+        s.pop("link", None)
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=("serve", "link", "publish"))
+    parser.add_argument("command", choices=("serve", "link", "publish", "upgrade", "update-apps"))
     parser.add_argument("--state", type=Path, default=STATE_DIR, help="state directory (default: %(default)s)")
     args = parser.parse_args(argv)
     if args.command == "link":
@@ -622,6 +668,12 @@ def main(argv=None):
         return 0
     if args.command == "publish":
         return publish(Suite(SERVICES))
+    if args.command == "update-apps":
+        return update_apps(Suite(SERVICES), 60 * 60)
+    if args.command == "upgrade":
+        version = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
+        upgrade(Suite(SERVICES), State(args.state), version)
+        return 0
     if done := closed(State(args.state)):
         print(done)
         return 0

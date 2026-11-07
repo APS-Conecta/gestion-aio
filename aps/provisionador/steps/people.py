@@ -27,6 +27,7 @@ MISSING = ("Las cuentas de estas personas no quedaron como las declara «Equipos
            "vuelve a ocurrir, contacte a APS Conecta.")
 WRONG = "La planilla del personal tiene errores. Corríjalos en «Equipos» y presione «Reintentar»."
 CHANGED = "El personal cambió en «Equipos» después de aplicarse. Presione «Reintentar» para aplicar los cambios."
+OWNED = True  # after «Listo» the Users page owns the people: an upgrade keeps this step green, never re-running it
 
 
 def groups(person):
