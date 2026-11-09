@@ -12,8 +12,9 @@ NAME = "Cuentas de cargo"
 NEEDS = ("groups",)
 MISSING = ("Estas cuentas de cargo no existen o no están en sus grupos: {}. Presione «Reintentar»; si vuelve a "
            "ocurrir, contacte a APS Conecta.")
-GROUP_ADMINS = ("Estas cuentas no son administradoras de grupo de «Todo el personal» o lo son de otros grupos: {}. "
-                "Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+GROUP_ADMINS = ("Los administradores de grupo de estas cuentas no quedaron como los declara «Equipos» (solo las cuentas "
+                "de cargo, y solo de «Todo el personal»): {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a "
+                "APS Conecta.")
 
 
 def group_admin_changes(context):
