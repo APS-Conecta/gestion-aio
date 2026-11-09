@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The brand token file, aps/brand/tokens.css: the palette and the font pairing as CSS custom properties. A page loads
 it as a stylesheet; SVG art, which a browser draws without the page's stylesheets (a favicon, Nextcloud's logo), names
-a token as var(--aps-…) and is rendered with the token's value.
+a token as var(--aps-…) and is rendered with the token's value. The suite's motto is here too: the theme sets it as
+Nextcloud's slogan, and the Provisionador's page shows it.
 
 Run as `brand.py <file>...`, it renders each file in place, as the release does for AIO's page.
 """
@@ -14,6 +15,7 @@ from pathlib import Path
 FOLDER = Path(__file__).resolve().parents[1] / "brand"  # aps/brand, or brand/ in the bundle
 DECLARATION = re.compile(r"(--aps-[a-z0-9-]+)\s*:\s*([^;]+?)\s*;")
 TOKEN = re.compile(r"var\((--aps-[a-z0-9-]+)\)")
+MOTTO = "La salud que compartimos es la que mejora"
 
 
 def tokens():

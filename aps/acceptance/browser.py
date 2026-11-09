@@ -11,7 +11,8 @@ Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 
 It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
 files, and the first password the passwords file lists for an account), makes staff accounts, signs a person in at the
-suite's login page and sends a staff member's own requests to Nextcloud, trusting the suite's roots alone.
+suite's login page and sends a staff member's own requests to Nextcloud, trusting the suite's roots alone. It hears a
+page's console errors, uncaught exceptions and content-security-policy violations.
 """
 
 import base64
@@ -46,6 +47,10 @@ STORED = "Antes de retirarse.txt"  # 17-install has the retired person store it 
 # page plays without a click.
 FAKE_MEDIA = ("--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
               "--autoplay-policy=no-user-gesture-required")
+
+# Reports each content-security-policy violation on the console, where `faults` hears it.
+VIOLATIONS = """document.addEventListener('securitypolicyviolation',
+  e => console.error(`securitypolicyviolation: ${e.violatedDirective} blocked ${e.blockedURI}`))"""
 
 
 def machine(command, stdin=""):
@@ -190,6 +195,16 @@ def chromium(pinned=(), args=(), media=False):
             yield browser
         finally:
             browser.close()
+
+
+def faults(page):
+    """The page's console errors, uncaught exceptions and content-security-policy violations from its next load on: a
+    list that fills in as they happen, which a check expects to stay empty."""
+    found = []
+    page.add_init_script(VIOLATIONS)
+    page.on("console", lambda message: message.type == "error" and found.append(message.text))
+    page.on("pageerror", lambda error: found.append(str(error)))
+    return found
 
 
 def log_in(page, suite, user, password):
