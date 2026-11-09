@@ -39,15 +39,16 @@ password = first_password(provisionador_file(FILE), jefe) or sys.exit(f"the pass
 temporary, replaced = secrets.token_urlsafe(18), secrets.token_urlsafe(18)  # never printed
 
 
-def set_password(user, value):
-    """The status and OCS answer of the jefatura setting `user`'s password with the provisioning API."""
+def reset(user, value):
+    """What Nextcloud answers the jefatura setting `user`'s password to `value` through the provisioning API: the HTTP
+    status and the OCS status."""
     status, body = as_person(jefe, password, "PUT", f"{suite}/ocs/v2.php/cloud/users/{quote(user)}?format=json",
                              urlencode({"key": "password", "value": value}).encode(),
                              {"Content-Type": "application/x-www-form-urlencoded"})
     return status, json.loads(body or "{}").get("ocs", {}).get("meta", {})
 
 
-status, meta = set_password(person, temporary)
+status, meta = reset(person, temporary)
 print(f"{jefe} sets a temporary password for {person}: HTTP {status}, {meta}")
 if status != 200:
     sys.exit(f"{jefe} cannot set {person}'s password")
@@ -75,7 +76,7 @@ if as_person(person, replaced, "GET", f"{suite}/ocs/v2.php/cloud/user?format=jso
 
 wrong = []
 for administrator in administrators:
-    status, meta = set_password(administrator, secrets.token_urlsafe(18))
+    status, meta = reset(administrator, secrets.token_urlsafe(18))
     print(f"{jefe} sets {administrator}'s password: HTTP {status}, {meta}")
     if status == 200:
         wrong.append(f"{jefe} sets the password of {administrator}, an administrator")
