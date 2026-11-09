@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page and the dashboard
 load the theme's stylesheet, theming's colours are the brand token file's, Nunito Sans is the font Nextcloud serves,
-and the login page names the establishment. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
+and the login page names the establishment and shows the suite's motto after its name, with no console error and no
+content-security-policy violation. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
 the login page, the dashboard, Files, Talk or the personal settings, which link the suite's source code and its
 licence. The custom menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of
 Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme
@@ -19,9 +20,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import NEXTCLOUD, chromium, log_in, machine, occ, person, suite_name  # noqa: E402
+from browser import NEXTCLOUD, chromium, faults, log_in, machine, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
-from steps.theme import PLACED, THEME  # noqa: E402
+from steps.theme import PLACED, SUITE, THEME  # noqa: E402
 
 PERSON = "tema-prueba"
 WINDOW = {"viewport": {"width": 1280, "height": 900}, "locale": "es-CL"}
@@ -79,10 +80,21 @@ def themed(page, label):
     return wrong
 
 
+def says_the_motto(page, label):
+    """The page shows the motto after the suite's name, as Nextcloud's footer shows theming's slogan."""
+    texts = [shown.inner_text() for shown in page.get_by_text(brand.MOTTO).all() if shown.is_visible()]
+    print(f"{label}: the motto shows in {texts}")
+    if any(brand.MOTTO in text.partition(SUITE)[2] for text in texts):
+        return []
+    return [f"{label} does not show the motto after «{SUITE}»"]
+
+
 def login_page(page, label):
+    found = faults(page)
     page.goto(f"{suite}/login")
     page.wait_for_selector("#user")
-    return themed(page, label) + shows(page, label)
+    wrong = themed(page, label) + says_the_motto(page, label) + shows(page, label)
+    return wrong + ([f"{label} logged errors or content-security-policy violations: {found}"] if found else [])
 
 
 def open_page(page, label):

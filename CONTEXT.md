@@ -13,6 +13,10 @@ install steps, Suite manifest).
 **Suite**:
 «APS Conecta Gestión», everything one establishment installs.
 
+**Motto** (lema):
+«La salud que compartimos es la que mejora», the suite's slogan. It follows the suite's name on the login and share
+pages, in the suite's emails and in the Provisionador.
+
 **Establishment** (establecimiento):
 One CESFAM, CECOSF or SAPU, with one installation of the suite.
 
@@ -86,19 +90,29 @@ stays off.
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
 
 **Team** (equipo):
-A sector or program of the establishment. It becomes a group with its folders.
+A sector or program of the establishment: a shared folder with no member list, where every staff member works.
 
 **Person** (persona):
 A staff member loaded from the people spreadsheet.
 
 **People spreadsheet** (planilla):
-The CSV the operator uploads: `usuario;nombre;apellidos;correo;grupos;primer_admin`.
+The workbook the operator downloads on «Equipos», fills in and uploads, saved as Excel or CSV: one person per row with
+usuario, nombre, apellidos, correo, cargo and primer administrador, the cargo chosen from the establishment's list.
+
+**Cargo**:
+A person's job, chosen from the establishment's list. It places the person in one category: Jefaturas, Clínicos,
+Técnicos or Administrativos.
 
 **Cargo account** (cuenta de cargo):
-A standing account for a position: director, subdirector, the jefaturas.
+A standing account for a position: director, subdirector, the jefaturas. Each one can set a temporary password for any
+staff member and create, disable or delete staff accounts, never an administrator's.
 
 **Retire** (retirar):
-Disable a person's account and remove it from every team, keeping their files and shares.
+Disable a person's account and remove it from every group the install manages, keeping their files and shares.
+
+**Temporary password** (contraseña temporal):
+The password a jefatura or an administrator sets, in person, for someone who lost theirs. The person replaces it at
+once with one only they know.
 
 **Own app**:
 An app whose code lives in an APS-Conecta repo.
