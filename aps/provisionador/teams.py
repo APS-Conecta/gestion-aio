@@ -20,11 +20,17 @@ STAFF = "all-staff"
 JEFATURAS = "cat-jefaturas"
 CATEGORIES = {JEFATURAS: "Jefaturas", "cat-clinicos": "Clínicos", "cat-tecnicos": "Técnicos",
               "cat-administrativos": "Administrativos"}
-# The roles every establishment shares, each with the category its holders also join; {type} is the centre's DEIS type.
+# The cargos every establishment shares, in category order, each with the category its holders also join; {type} is the
+# centre's DEIS type.
 ROLES = {
     "role-director-cesfam": ("Director/a de {type}", JEFATURAS),
     "role-subdirector-jefe-tecnico": ("Subdirector/a Médico o Jefe Técnico", JEFATURAS),
     "role-jefe-sector-mais": ("Jefe/a de Sector (Gestión MAIS)", JEFATURAS),
+    "role-jefe-some": ("Jefe/a de SOME", JEFATURAS),
+    "role-jefe-programa": ("Jefe/a de Programa", JEFATURAS),
+    "role-medico-gestor": ("Médico/a Gestor/a", JEFATURAS),
+    "role-jefe-apoyo-clinico": ("Jefe/a de Apoyo Clínico", JEFATURAS),
+    "role-jefe-servicios-generales": ("Jefe/a de Servicios Generales", JEFATURAS),
     "role-medico": ("Médico General / de Familia", "cat-clinicos"),
     "role-dentista": ("Cirujano Dentista", "cat-clinicos"),
     "role-quimico-farmaceutico": ("Químico Farmacéutico (Dir. Técnico Farmacia)", "cat-clinicos"),
@@ -34,17 +40,30 @@ ROLES = {
     "role-psicologo": ("Psicólogo/a", "cat-clinicos"),
     "role-trabajador-social": ("Trabajador/a Social", "cat-clinicos"),
     "role-nutricionista": ("Nutricionista", "cat-clinicos"),
-    "role-terapeuta-fono": ("Terapeuta Ocupacional / Fonoaudiólogo/a", "cat-clinicos"),
+    "role-terapeuta-ocupacional": ("Terapeuta Ocupacional", "cat-clinicos"),
+    "role-fonoaudiologo": ("Fonoaudiólogo/a", "cat-clinicos"),
+    "role-tecnologo-medico": ("Tecnólogo/a Médico/a", "cat-clinicos"),
+    "role-educador-parvulos": ("Educador/a de Párvulos", "cat-clinicos"),
+    "role-profesor-educacion-fisica": ("Profesor/a de Educación Física", "cat-clinicos"),
+    "role-gestor-comunitario": ("Gestor/a Comunitario/a", "cat-clinicos"),
+    "role-medico-oftalmologo": ("Médico/a Oftalmólogo/a", "cat-clinicos"),
     "role-tens-procedimientos": ("TENS – Procedimientos / Vacunatorio", "cat-tecnicos"),
     "role-tens-farmacia": ("TENS – Farmacia / PNAC", "cat-tecnicos"),
     "role-tons": ("TONS (Técnico en Odontología)", "cat-tecnicos"),
+    "role-podologo": ("Podólogo/a", "cat-tecnicos"),
+    "role-tecnico-rehabilitacion": ("Técnico/a en Rehabilitación", "cat-tecnicos"),
+    "role-facilitador-intercultural": ("Facilitador/a Intercultural", "cat-tecnicos"),
+    "role-tecnico-salud": ("Técnico/a de Salud", "cat-tecnicos"),
     "role-administrativo-some": ("Administrativo SOME", "cat-administrativos"),
-    "role-jefe-some": ("Jefe/a de SOME", JEFATURAS),
     "role-oirs": ("Encargado/a OIRS", "cat-administrativos"),
     "role-estadistica-rem": ("Encargado/a de Estadística (REM)", "cat-administrativos"),
     "role-conductor": ("Conductor (Ambulancia / Traslado)", "cat-administrativos"),
     "role-auxiliar-servicio": ("Auxiliar de Servicio", "cat-administrativos"),
-    "role-emergencia-breakglass": ("Acceso de Emergencia (Break-Glass)", "cat-clinicos"),
+    "role-informatico": ("Informático/a (Soporte TI)", "cat-administrativos"),
+    "role-recursos-humanos": ("Recursos Humanos", "cat-administrativos"),
+    "role-abastecimiento-finanzas": ("Abastecimiento y Finanzas", "cat-administrativos"),
+    "role-secretario-direccion": ("Secretario/a de Dirección", "cat-administrativos"),
+    "role-guardia-seguridad": ("Guardia de Seguridad", "cat-administrativos"),
 }
 # By kind: the group id's prefix, the word the team's name starts with and the folder its folders sit in.
 KINDS = {"sector": ("sector-", "Sector", "Sectores"), "program": ("prog-", "Programa", "Programas")}
