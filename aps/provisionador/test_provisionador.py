@@ -1297,7 +1297,7 @@ class Equipos(InstallTest):
                               "role-director-cesfam": "Director/a de CESFAM", "role-oirs": "Encargado/a OIRS",
                               "sector-norte": "Sector Norte", "prog-salud-mental-adulto": "Programa Salud Mental-Adulto"
                               }.items(), groups.items())
-        folders ={mount: folder["groups"] for mount, folder in self.folders().items()}
+        folders = {mount: folder["groups"] for mount, folder in self.folders().items()}
         self.assertLessEqual({
             "Transversal": {"all-staff": READ, "cat-jefaturas": MANAGE},
             "Sectores/Sector Norte": {"sector-norte": MANAGE, "cat-jefaturas": MANAGE},
