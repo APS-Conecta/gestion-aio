@@ -12,9 +12,10 @@ code { font-size: .8rem; overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 
 /* Header and the app layout: navigation on the left, content on the right, as in Nextcloud. */
-.header { display: flex; align-items: baseline; gap: .75rem; padding: .75rem 1.25rem; background: var(--aps-violet); color: var(--aps-paper); }
+.header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; padding: .75rem 1.25rem; background: var(--aps-violet); color: var(--aps-paper); }
 .brand { font: 600 1.2rem var(--aps-font-display); }
 .header-subtitle { opacity: .85; }
+.header-motto { margin-left: auto; font-style: italic; opacity: .85; }
 .content { display: flex; flex: 1; min-height: 0; }
 .navigation { width: 260px; flex: none; display: flex; flex-direction: column; padding: .75rem; border-right: 1px solid var(--aps-border); background: var(--aps-violet-wash); }
 .navigation ol { list-style: none; margin: 0; padding: 0; }
@@ -87,6 +88,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 
 @media (max-width: 800px) {
   .content { flex-direction: column; }
+  .header-motto { margin-left: 0; }
   .navigation { width: auto; border-right: 0; border-bottom: 1px solid var(--aps-border); }
   .navigation ol { display: flex; overflow-x: auto; gap: .25rem; }
   .navigation li { white-space: nowrap; }

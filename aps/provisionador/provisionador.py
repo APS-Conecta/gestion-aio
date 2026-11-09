@@ -264,7 +264,8 @@ class Provisionador:
 
     def get_state(self, query, body):
         busy, state = self.snapshot()
-        return 200, {"fingerprint": self.fingerprint, "centre": state.get("centre"), "address": self.address(state),
+        return 200, {"fingerprint": self.fingerprint, "motto": brand.MOTTO,
+                     "centre": state.get("centre"), "address": self.address(state),
                      "components": list(components.chosen(self.suite.hardware()).values()),
                      "backup_folder": backups.BACKUP_FOLDER,
                      "apps": [app["name"] for app in apps.MANIFEST if app["id"] not in apps.OPTIONAL],

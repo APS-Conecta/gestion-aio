@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
 import brand  # noqa: E402
-from browser import aio_config, chromium, machine  # noqa: E402
+from browser import aio_config, chromium, fonts, machine  # noqa: E402
 from steps.backups import BACKUP_FOLDER  # noqa: E402
 
 aio = f"https://{os.environ['ADDRESS']}:8080"
@@ -22,12 +22,9 @@ config = aio_config()
 # AIO's own :8080 certificate, as the machine serves it to itself.
 certificate = machine("openssl s_client -connect 127.0.0.1:8080 -noservername < /dev/null 2> /dev/null | openssl x509")
 violet = brand.tokens()["--aps-violet"]
-# The page's primary colour and the fonts it loaded.
-BRANDED = """async () => {
-  await document.fonts.ready;
-  return [getComputedStyle(document.documentElement).getPropertyValue('--color-primary-element').trim().toLowerCase(),
-          [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family.replaceAll('"', ''))];
-}"""
+# The page's primary colour.
+BRANDED = """() => getComputedStyle(document.documentElement)
+                     .getPropertyValue('--color-primary-element').trim().toLowerCase()"""
 
 
 def check_page(page, name, texts):
@@ -35,14 +32,14 @@ def check_page(page, name, texts):
     shown = page.inner_text("body") + "\n" + "\n".join(
         page.eval_on_selector_all("input[type=submit]", "inputs => inputs.filter(i => i.offsetParent).map(i => i.value)"))
     title, lang = page.title(), page.get_attribute("html", "lang")
-    primary, fonts = page.evaluate(BRANDED)
+    primary, loaded = page.evaluate(BRANDED), fonts(page)
     missing = [text for text in ["Código fuente (AGPL-3.0)", *texts] if text not in shown]
     page.screenshot(path=evidence / f"{name}.png", mask=[page.locator("#initial-nextcloud-password, #borg-backup-password")])
     print(f"{name}: title {title!r}, lang {lang!r}, missing {missing}, shows Nextcloud: {'Nextcloud' in shown}, "
-          f"primary {primary}, fonts {fonts}")
+          f"primary {primary}, fonts {loaded}")
     if title != "APS Conecta Gestión AIO" or lang != "es-CL" or missing or "Nextcloud" in shown:
         sys.exit(f"AIO's {name} page is not the Spanish «APS Conecta Gestión» one")
-    if primary != violet or "Nunito Sans" not in fonts:
+    if primary != violet or "Nunito Sans" not in loaded:
         sys.exit(f"AIO's {name} page does not take the brand token file's palette and serve Nunito Sans")
 
 
