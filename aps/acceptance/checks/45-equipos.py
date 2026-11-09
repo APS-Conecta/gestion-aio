@@ -2,9 +2,10 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Equipos» in the installed suite, from the sectors and programs typed on «Equipos» (17-install): Nextcloud holds
-every group the wizard declared and each group folder with exactly the declared groups' permissions; each cargo account
-is enabled and in its groups, and the passwords file lists it. A sector's jefatura, as a staff member who never logged
-in, sees Transversal's subfolders and the welcome page, where every login lands."""
+every group the wizard declared with its name, one per cargo among them, and each group folder with exactly the declared
+groups' permissions; each cargo account is enabled and in its groups, and the passwords file lists it. A sector's
+jefatura, as a staff member who never logged in, sees Transversal's subfolders and the welcome page, where every login
+lands."""
 
 import json
 import sys
@@ -21,8 +22,10 @@ declared, centre_type = state.get("teams", []), state["centre"]["type"]
 print("teams: " + ", ".join(team["name"] for team in declared))
 if {team["kind"] for team in declared} != {"sector", "program"}:
     sys.exit("«Equipos» did not declare both a sector and a program")
-wrong = [f"group {group} is missing" for group in teams.groups(declared, centre_type)
-         if group not in json.loads(occ("group:list --output=json"))]
+groups = {group: info["displayName"] for group, info in json.loads(occ("group:list --info --output=json")).items()}
+print(f"{len(teams.ROLES)} cargo groups: " + ", ".join(groups.get(role, f"{role} missing") for role in teams.ROLES))
+wrong = [f"group {group} is {groups.get(group, 'missing')}, not «{name}»"
+         for group, name in teams.groups(declared, centre_type).items() if groups.get(group) != name]
 
 held = {f["mountPoint"]: f.get("groups_list") or {} for f in json.loads(occ("groupfolders:list --output=json"))}
 for mount, grants in teams.folders(declared).items():
@@ -49,5 +52,6 @@ if occ("config:system:get defaultapp").strip() != APP:
     wrong.append(f"logins do not land on {APP}")
 if wrong:
     sys.exit("\n".join(wrong))
-print(f"the groups, the group folders with their permissions and the {len(accounts)} cargo accounts are what "
-      f"«Equipos» declared; {jefe} sees {teams.TRANSVERSAL}'s subfolders and the welcome page")
+print(f"the groups with their names, the {len(teams.ROLES)} cargos' among them, the group folders with their "
+      f"permissions and the {len(accounts)} cargo accounts are what «Equipos» declared; {jefe} sees "
+      f"{teams.TRANSVERSAL}'s subfolders and the welcome page")
