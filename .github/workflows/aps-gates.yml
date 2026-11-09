@@ -40,11 +40,11 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: List active workflows other than aps-* and the org's CodeQL default setup
+      - name: List active workflows other than aps-*, Copilot cloud agent, and the org's CodeQL default setup
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           active=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate \
             --jq '.workflows[] | select(.state == "active") | .path' \
-            | grep -vE '^(\.github/workflows/aps-[^/]+\.ya?ml|dynamic/github-code-scanning/codeql)$' || true)
+            | grep -vE '^(\.github/workflows/aps-[^/]+\.ya?ml|dynamic/copilot-swe-agent/copilot|dynamic/github-code-scanning/codeql)$' || true)
           [ -z "$active" ] || { printf '::error::upstream workflows are active on the fork:\n%s\n' "$active"; exit 1; }
