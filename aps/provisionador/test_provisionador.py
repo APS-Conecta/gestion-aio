@@ -236,6 +236,10 @@ class Page(WizardTest):
         for font in fonts:
             self.assertEqual(browser.get(f"/{font}")[0], 200, font)
 
+    def test_the_wizard_serves_the_motto_its_header_shows(self):
+        status, state = self.operator().get("/api/state")
+        self.assertEqual((status, state["motto"]), (200, MOTTO))
+
 
 class CentroSearch(WizardTest):
     def codes(self, browser, **query):
@@ -842,6 +846,21 @@ class StepRunner(InstallTest):
         self.install()
         self.until("done")
         self.assertEqual(self.suite.apps["theming"]["url"], "https://apsconecta.cl")
+
+    def test_the_end_of_install_check_flags_a_slogan_that_is_not_the_motto_and_reintentar_sets_it_again(self):
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[THEME], ("green", None))
+        self.suite.apps["theming"]["slogan"] = "un hogar seguro para todos tus datos"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[THEME]
+        self.assertEqual(status, "failed")
+        self.assertIn("theming.slogan", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
 
 class Upgrade(InstallTest):
@@ -2116,6 +2135,7 @@ class InstallLog(InstallTest):
 
 TOKENS = brand.tokens()
 SUITE = "APS Conecta Gestión"
+MOTTO = "La salud que compartimos es la que mejora"
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
 
 
@@ -2153,6 +2173,9 @@ class Branding(InstallTest):
         self.assertEqual([theming.get(f"{image}Mime") for image in ("logo", "logoheader", "favicon", "background")],
                          ["image/svg+xml"] * 3 + ["backgroundColor"])
         self.assertEqual((self.suite.system["enforce_theme"], theming["disable-user-theming"]), ("light", True))
+
+    def test_theming_takes_the_motto_as_its_slogan(self):
+        self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
     def test_nextclouds_announcements_slides_survey_support_help_signup_and_update_banners_are_off(self):
         self.assertEqual({app: self.suite.apps[app]["enabled"] for app in OFF}, dict.fromkeys(OFF, "no"))
