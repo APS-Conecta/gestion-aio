@@ -20,7 +20,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import NEXTCLOUD, chromium, faults, log_in, machine, occ, person, suite_name  # noqa: E402
+from browser import NEXTCLOUD, chromium, faults, fonts, log_in, machine, occ, person, suite_name  # noqa: E402
 from playwright.sync_api import Error  # noqa: E402
 from steps.theme import PLACED, SUITE, THEME  # noqa: E402
 
@@ -29,15 +29,13 @@ WINDOW = {"viewport": {"width": 1280, "height": 900}, "locale": "es-CL"}
 SOURCE = "https://github.com/APS-Conecta/gestion-aio"
 PAGES = {"dashboard": ("/apps/dashboard/", "#app-dashboard"), "files": ("/apps/files/", "#app-navigation-vue"),
          "talk": ("/apps/spreed/", "#app-navigation-vue"), "settings": ("/settings/user", f'a[href="{SOURCE}"]')}
-# What the page shows of the theme: its stylesheet, theming's colours, the fonts it loaded and the establishment's name.
-THEMED = """async () => {
-  await document.fonts.ready;
+# What the page shows of the theme: its stylesheet, theming's colours and the establishment's name.
+THEMED = """() => {
   const style = getComputedStyle(document.body), headline = document.querySelector('.login-form__headline');
   return {
     stylesheet: [...document.styleSheets].some(s => (s.href || '').includes('/themes/%s/core/css/server.css')),
     primary: style.getPropertyValue('--color-primary').trim().toLowerCase(),
     backdrop: style.getPropertyValue('--color-background-plain').trim().toLowerCase(),
-    fonts: [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family.replaceAll('"', '')),
     establishment: headline ? getComputedStyle(headline, '::before').content : null,
   };
 }""" % THEME
@@ -73,7 +71,7 @@ def themed(page, label):
     wrong = [] if found["stylesheet"] else [f"{label} does not load the theme's stylesheet"]
     if (found["primary"], found["backdrop"]) != (tokens["--aps-violet"], tokens["--aps-violet-dark"]):
         wrong.append(f"{label}'s colours are not the brand token file's")
-    if "Nunito Sans" not in found["fonts"]:
+    if "Nunito Sans" not in fonts(page):
         wrong.append(f"{label} did not load Nunito Sans")
     if label.startswith("login") and found["establishment"] in (None, "none", "normal", '""'):
         wrong.append(f"{label} does not name the establishment")

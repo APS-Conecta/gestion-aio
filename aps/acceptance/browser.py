@@ -12,7 +12,7 @@ Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
 files, and the first password the passwords file lists for an account), makes staff accounts, signs a person in at the
 suite's login page and sends a staff member's own requests to Nextcloud, trusting the suite's roots alone. It hears a
-page's console errors, uncaught exceptions and content-security-policy violations.
+page's console errors, uncaught exceptions and content-security-policy violations, and reads the fonts a page loaded.
 """
 
 import base64
@@ -51,6 +51,9 @@ FAKE_MEDIA = ("--use-fake-device-for-media-stream", "--use-fake-ui-for-media-str
 # Reports each content-security-policy violation on the console, where `faults` hears it.
 VIOLATIONS = """document.addEventListener('securitypolicyviolation',
   e => console.error(`securitypolicyviolation: ${e.violatedDirective} blocked ${e.blockedURI}`))"""
+# The font families a page loaded once its fonts are ready, quotes stripped.
+FONTS = """() => document.fonts.ready.then(fonts => [...fonts].filter(f => f.status === 'loaded')
+                                                        .map(f => f.family.replaceAll('"', '')))"""
 
 
 def machine(command, stdin=""):
@@ -205,6 +208,11 @@ def faults(page):
     page.on("console", lambda message: message.type == "error" and found.append(message.text))
     page.on("pageerror", lambda error: found.append(str(error)))
     return found
+
+
+def fonts(page):
+    """The font families the page loaded, once its fonts are ready."""
+    return page.evaluate(FONTS)
 
 
 def log_in(page, suite, user, password):

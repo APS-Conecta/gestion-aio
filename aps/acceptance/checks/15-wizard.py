@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
 import deis  # noqa: E402
-from browser import TEST_BUILD, chromium, faults, machine, verified, wizard_link  # noqa: E402
+from browser import TEST_BUILD, chromium, faults, fonts, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 
 NAME_SERVICE = ("https://gestion-nombres-ci.apsconecta.workers.dev" if TEST_BUILD
@@ -49,9 +49,6 @@ evidence = Path(os.environ["EVIDENCE"])
 # The wizard's own request for a centre, from the page and its session.
 CENTRE = """code => fetch('/api/centre', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                       body: JSON.stringify({code})}).then(r => r.status)"""
-# The font families the page loaded once its fonts are ready.
-FONTS = """() => document.fonts.ready.then(fonts => [...fonts].filter(f => f.status === 'loaded')
-                                                        .map(f => f.family.replaceAll('"', '')))"""
 
 
 with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
@@ -79,13 +76,13 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     expect(page.locator("#direccion input")).to_have_count(0)
     expect(page.locator("#address-status")).to_have_text(f"Dirección asignada: https://{name}", timeout=180_000)
     page.screenshot(path=evidence / "direccion.png")
-    fonts = page.evaluate(FONTS)
+    loaded = fonts(page)
 
-print(f"the wizard loaded the fonts {fonts}; its console errors and policy violations: {found}")
+print(f"the wizard loaded the fonts {loaded}; its console errors and policy violations: {found}")
 if found:
     sys.exit(f"the wizard logged errors or content-security-policy violations: {found}")
-if not {"Fraunces", "Nunito Sans"} <= set(fonts):
-    sys.exit(f"the wizard did not load the brand fonts, only {fonts}")
+if not {"Fraunces", "Nunito Sans"} <= set(loaded):
+    sys.exit(f"the wizard did not load the brand fonts, only {loaded}")
 
 mode = machine("sudo stat -c '%U %a' /var/lib/aps-conecta/name-service.json").strip()
 if mode != "root 600":
