@@ -14,6 +14,7 @@ CONTEXT.md APS domain glossary
 .github/workflows/aps-release.yml APS release pipeline: our three images, the bundle, test pre-releases, the bootstrap and staging-certificate proofs, and releases made «Latest» once their candidate passed
 .github/workflows/aps-name-service.yml APS name service: the production deployment, from main only
 .github/workflows/aps-name-release.yml APS name release: frees a DEIS code's name and its records
+.github/workflows/watchtower-update.yml adds explicit least-privilege workflow permissions to satisfy code-scanning policy
 community-containers/caddy/caddy.json the reverse proxy is our thin Caddy image, pinned per release, with the name service's acme-dns credential and the ACME directory; Spanish display name
 Containers/mastercontainer/headers.Caddyfile AIO's page serves its own fonts: its CSP allows fonts from itself
 php/containers.json official images pinned by digest to upstream v14.4.3's set; Nextcloud is our thin image; Spanish display names
