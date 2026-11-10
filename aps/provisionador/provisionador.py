@@ -100,7 +100,7 @@ def plan(state):
     loaded, errors = spreadsheet.read(state.get("spreadsheet"), declared, centre["type"], retired)
     return {"teams": declared, "cargo_accounts": [{"user": account["user"], "name": account["name"]}
                                                   for account in teams.cargo_accounts(declared, centre["type"])],
-            "groups": teams.groups(declared, centre["type"]), "people": loaded, "errors": errors, "retired": retired}
+            "groups": teams.groups(centre["type"]), "people": loaded, "errors": errors, "retired": retired}
 
 
 def declared(state):
@@ -320,9 +320,9 @@ class Provisionador:
         return 200, {"address": self.address(self.state.read())}
 
     def post_teams(self, query, body):
-        """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its group and its
-        folder, and the cargo accounts they bring once the centre is chosen. «Revisar» and «Instalar» follow the last
-        ones posted; once «Instalar» was pressed they stay."""
+        """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
+        the cargo accounts they bring once the centre is chosen. «Revisar» and «Instalar» follow the last ones posted;
+        once «Instalar» was pressed they stay."""
         try:
             declared = teams.declare(body.get("sectors", []), body.get("programs", []))
         except ValueError as refusal:
