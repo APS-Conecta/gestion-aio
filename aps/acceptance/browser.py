@@ -12,15 +12,18 @@ Checks import it after `sys.path.insert(0, <aps/acceptance>)`.
 It also gives what checks read on the machine (AIO's configuration, the suite's name, the Provisionador's state and
 files, and the first password the passwords file lists for an account), makes staff accounts, signs a person in at the
 suite's login page and sends a staff member's own requests to Nextcloud, trusting the suite's roots alone. It hears a
-page's console errors, uncaught exceptions and content-security-policy violations, and reads the fonts a page loaded.
+page's console errors, uncaught exceptions and content-security-policy violations, and reads the fonts a page loaded. On
+«Equipos» it fills the people workbook the wizard offers and uploads a people spreadsheet, as the operator does.
 """
 
 import base64
 import contextlib
 import hashlib
+import io
 import json
 import math
 import os
+import posixpath
 import re
 import ssl
 import struct
@@ -30,9 +33,11 @@ import tempfile
 import urllib.error
 import urllib.request
 import wave
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 STAGING_ROOTS = Path(__file__).with_name("letsencrypt-staging-roots.pem")
 # A test build (v0.0.0-ci.*, aps/release/package.sh) uses the name service's CI deployment and Let's Encrypt's staging
@@ -43,6 +48,13 @@ AIO_DATA = "/mnt/docker-aio-config/data"  # in AIO's mastercontainer: its config
 NEXTCLOUD = "sudo docker exec --interactive --user www-data nextcloud-aio-nextcloud"  # runs in Nextcloud's container
 PROVISIONADOR_DATA = "/var/lib/aps-conecta/provisionador"  # on the machine: the Provisionador's state and its files
 STORED = "Antes de retirarse.txt"  # 17-install has the retired person store it first, the username as its text
+# The people 17-install uploads on «Equipos», each with a cargo, and 18-upgrade uploads again where the upgraded wizard
+# rejects the spreadsheet the previous release kept; 47-people checks them but the one retired.
+PEOPLE = (("ana.rojas", "Ana María", "Rojas Núñez", "ana.rojas@example.org", "Enfermera/o", "sí"),
+          ("pedro.munoz", "Pedro", "Muñoz Tapia", "pedro.munoz@example.org", "medico general / de familia", "no"),
+          ("luis.vera", "Luis", "Vera Soto", "luis.vera@example.org", "TENS – Procedimientos / Vacunatorio", "no"),
+          ("rosa.diaz", "Rosa", "Díaz Fuentes", "rosa.diaz@example.org", "Secretario/a de Dirección", "no"))
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # Fake media devices, granted to every page (the headless browser refuses them otherwise), whose sound and video a
 # page plays without a click.
 FAKE_MEDIA = ("--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
@@ -222,3 +234,46 @@ def log_in(page, suite, user, password):
     page.fill("#password", password)
     page.click("[data-login-form-submit]")
     page.wait_for_url(lambda url: "/login" not in url, timeout=60_000)
+
+
+def people_workbook(page):
+    """On «Equipos», the workbook «Descargar la planilla» gives, with PEOPLE typed into «Personal» below its headers,
+    as a spreadsheet program saves them: inline strings, a blank cell left out."""
+    import spreadsheet  # aps/provisionador's, on the path of every check that loads people
+    with page.expect_download() as download:
+        page.click("#people-template")
+    if download.value.suggested_filename != spreadsheet.FILE:
+        sys.exit(f"«Descargar la planilla» gave {download.value.suggested_filename}, not {spreadsheet.FILE}")
+    with zipfile.ZipFile(download.value.path()) as package:
+        parts = {item.filename: package.read(item) for item in package.infolist()}
+    sheet = next(sheet for sheet in ElementTree.fromstring(parts["xl/workbook.xml"]).iterfind("{*}sheets/{*}sheet")
+                 if sheet.get("name") == spreadsheet.PERSONAL)
+    link = next(value for key, value in sheet.attrib.items() if key.endswith("}id"))
+    links = ElementTree.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    part = posixpath.join("xl", next(r.get("Target") for r in links if r.get("Id") == link))
+    root = ElementTree.fromstring(parts[part])
+    table = root.find("{*}sheetData")
+    namespace = table.tag.removesuffix("sheetData")
+    for number, values in enumerate(PEOPLE, 2):
+        row = ElementTree.SubElement(table, f"{namespace}row", r=str(number))
+        for column, value in zip("ABCDEF", values):
+            if value:
+                cell = ElementTree.SubElement(row, f"{namespace}c", r=f"{column}{number}", t="inlineStr")
+                ElementTree.SubElement(ElementTree.SubElement(cell, f"{namespace}is"), f"{namespace}t").text = value
+    parts[part] = ElementTree.tostring(root, encoding="utf-8")
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as package:
+        for name, content in parts.items():
+            package.writestr(name, content)
+    return out.getvalue()
+
+
+def upload_people(page, file, kind, data, people):
+    """`data`, a people spreadsheet named `file` of media type `kind`, uploaded on «Equipos» with «Subir la planilla
+    completa»; it fails the check unless «Equipos» then loads `people`, as spreadsheet.py reads them, and lists them."""
+    with page.expect_response("**/api/people") as answer:
+        page.set_input_files("#people-file", files=[{"name": file, "mimeType": kind, "buffer": data}])
+    loaded = answer.value.json()
+    if answer.value.status != 200 or loaded["errors"] or loaded["people"] != people:
+        sys.exit(f"«Equipos» did not load the people of {file}: {loaded.get('errors') or loaded.get('error')}")
+    expect(page.locator("#people li strong")).to_have_text([person["name"] for person in people])
