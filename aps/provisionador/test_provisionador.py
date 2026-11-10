@@ -1667,7 +1667,8 @@ class PeopleChanges(PeopleTest):
         self.install()
         self.until("done")
         self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")),
-                         (False, {"comite-calidad"}), "disabled and in no team, the account and its files kept")
+                         (False, {"comite-calidad"}),
+                         "disabled and in no managed group, the account and its files kept")
         self.assertEqual(self.passwords(), first)
         self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
 

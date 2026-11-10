@@ -355,8 +355,8 @@ class Provisionador:
 
     def post_retire(self, query, body):
         """POST /api/retire {"users": [usernames]}, «Retirar» once confirmed: each of these people the list shows keeps
-        their account, files and shares, disabled and in no team, whatever spreadsheet follows; from «Instalar» on,
-        «Reintentar» applies it. The first administrator is not retired; at «Listo» nobody is."""
+        their account, files and shares, disabled and in no managed group, whatever spreadsheet follows; from
+        «Instalar» on, «Reintentar» applies it. The first administrator is not retired; at «Listo» nobody is."""
         users = body.get("users")
         with self.install_lock, self.state.change() as s:
             if s.get("install", {}).get("listo"):
