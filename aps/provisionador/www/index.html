@@ -93,15 +93,13 @@
       <ul class="progress" id="teams" aria-label="Equipos del establecimiento" aria-live="polite"></ul>
       <p class="message" id="teams-status" role="status"></p>
       <h2>Personal</h2>
-      <p class="lead">Descargue la planilla del personal y complete una persona por línea, con su usuario, nombre,
-        apellidos, correo y cargo, que puede dejar vacío. Escriba «sí» en «Primer administrador» para una sola persona:
-        la que administrará la suite. Guárdela como CSV y súbala: la instalación creará la cuenta de cada persona de la
-        lista. Para corregir la lista, suba la planilla corregida. Si alguien dejó el establecimiento, márquelo y
-        presione «Retirar»: su cuenta se desactiva y sale de todos los grupos que asigna la instalación, y sus archivos
-        y lo que compartió se conservan.</p>
+      <p class="lead">Descargue la planilla del personal: su hoja «Instrucciones» explica cómo completarla y subirla,
+        como Excel o CSV. La instalación creará la cuenta de cada persona de la lista; para corregirla, suba la planilla
+        corregida. Si alguien dejó el establecimiento, márquelo y presione «Retirar»: su cuenta se desactiva y sale de
+        todos los grupos que asigna la instalación, y sus archivos y lo que compartió se conservan.</p>
       <div class="actions">
         <button type="button" id="people-template">Descargar la planilla</button>
-        <label>Subir la planilla completa<input type="file" id="people-file" accept=".csv,text/csv"></label>
+        <label>Subir la planilla completa<input type="file" id="people-file" accept=".xlsx,.csv"></label>
       </div>
       <ul class="message error" id="people-errors" aria-label="Errores de la planilla"></ul>
       <ul class="progress" id="people" aria-label="Personas que creará la instalación" aria-live="polite"></ul>
@@ -131,6 +129,7 @@
         <dt>Aplicaciones</dt><dd><ul id="summary-apps"></ul></dd>
         <dt>Aplicaciones opcionales</dt><dd><ul class="choices" id="optional-apps"
           aria-label="Marque las que usará el establecimiento"></ul></dd>
+        <dt>IA local</dt><dd><ul class="choices" id="ai" aria-label="Marque si el establecimiento la usará"></ul></dd>
         <dt>Copias de seguridad</dt><dd id="summary-backups"></dd>
       </dl>
       <div class="actions"><button type="button" class="primary" id="install" hidden>Instalar</button></div>

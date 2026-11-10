@@ -13,6 +13,8 @@ const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completa
 const ADMINISTRATOR = "primer/a administrador/a de la suite";
 const APPLY = " Los cambios se aplican al presionar «Reintentar» en «Revisar».";
 const DROPPED = "Retirado/a: ya no está en la planilla";
+const AI = "Un modelo de lenguaje en este servidor redacta textos para las aplicaciones, como la nota de Estadística, "
+  + "sin enviar datos fuera de él. Puede activarla o desactivarla aquí más adelante.";
 let register = null;
 let selected = null;
 let map = null;
@@ -276,11 +278,13 @@ async function retire() {
   }
 }
 
+// The people workbook, built for the centre: the Provisionador sends its bytes in base64.
 async function template() {
   try {
-    const {file, text} = await api("GET", "/api/spreadsheet");
-    const link = Object.assign(document.createElement("a"), {download: file,
-      href: URL.createObjectURL(new Blob([text], {type: "text/csv;charset=utf-8"}))});
+    const {file, content} = await api("GET", "/api/spreadsheet");
+    const bytes = Uint8Array.from(atob(content), (char) => char.charCodeAt(0));
+    const link = Object.assign(document.createElement("a"), {download: file, href: URL.createObjectURL(
+      new Blob([bytes], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}))});
     link.click();
   } catch (e) {
     status("people-status", e.message, true);
@@ -353,6 +357,8 @@ async function revisar() {
     $("summary-components").replaceChildren(...state.components.map((name) => element("li", name)));
     $("summary-apps").replaceChildren(...state.apps.map((name) => element("li", name)));
     $("optional-apps").replaceChildren(...state.optional_apps.map(choice));
+    $("ai").replaceChildren(choice({id: "ai", name: "IA local", summary: `${AI} ${state.ai.gpu}`,
+      chosen: state.ai.chosen}));
     $("summary-backups").textContent = `Cada noche, en la carpeta ${state.backup_folder} del servidor.`;
     follow(state, false);
   } catch (e) {
@@ -398,6 +404,7 @@ function follow(state, jump = true) {
   $("install").hidden = Boolean(install) && install.status !== "failed";
   $("install").textContent = install?.status === "failed" ? "Reintentar" : "Instalar";
   for (const box of $("optional-apps").querySelectorAll("input")) box.disabled = Boolean(install);
+  for (const box of $("ai").querySelectorAll("input")) box.disabled = install?.status === "installing";
   $("steps").replaceChildren(...(install?.steps || []).map(
     (step) => item(step.name, step.status, STEP_STATES[step.status], step.reason)));
   $("progress").replaceChildren(...(install?.containers || []).map((c) => item(c.name, c.state, STATES[c.state])));
@@ -413,6 +420,18 @@ function follow(state, jump = true) {
       || "Instalando: cada paso sigue por sí solo; descargar e iniciar los contenedores puede tardar varios minutos.",
     Boolean(install.error));
     polling = setTimeout(() => api("GET", "/api/state").then(follow, () => follow(state)), 3000);
+  }
+}
+
+// «IA local», off by default: the choice is kept, and once «Instalar» was pressed its step runs again.
+async function chooseAi(event) {
+  const box = event.target;
+  try {
+    await api("POST", "/api/ai", {on: box.checked});
+    follow(await api("GET", "/api/state"));
+  } catch (e) {
+    box.checked = !box.checked;
+    status("install-status", e.message, true);
   }
 }
 
@@ -517,6 +536,7 @@ async function start() {
   });
   $("teams-continue").addEventListener("click", async () => (await keepTeams()) && revisar());
   $("install").addEventListener("click", install);
+  $("ai").addEventListener("change", chooseAi);
   $("log").addEventListener("scroll", () => {
     const log = $("log");
     following = log.scrollTop + log.clientHeight >= log.scrollHeight - 1;

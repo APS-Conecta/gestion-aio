@@ -2,9 +2,10 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Equipos», «Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on
-to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the blank
-people spreadsheet, uploads it filled in as Excel saves it and sees the people the install will create with their
-cargos, on a page in the brand fonts with no console error and no content-security-policy violation, then to
+to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the people
+workbook, uploads the people as Excel saves a CSV, then in a workbook made from the downloaded one, and each time sees
+the people the install will create with their cargos, on a page in the brand fonts with no console error and no
+content-security-policy violation, then to
 «Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the components and the
 backups; «Instalar» shows each step and, once AIO runs our components, each container's progress live, and below them
 «Registro de la instalación», which logs the suite's start as it runs. Meanwhile the
@@ -19,14 +20,18 @@ other optional one off (Talk recording follows the hardware: 70-talk checks it) 
 folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO
 keeps it in."""
 
+import io
 import json
 import os
+import posixpath
 import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, urlsplit
+from xml.etree import ElementTree
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
@@ -45,18 +50,47 @@ from steps.start import NAME as START  # noqa: E402
 LISTO_WITHIN = 20  # minutes: the install's GitHub downloads alone can take several on a slow day
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
-# As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people but the one retired.
-PEOPLE = ("Usuario;Nombre;Apellidos;Correo;Cargo;Primer administrador\r\n"
-          "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;Enfermera/o;sí\r\n"
-          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;medico general / de familia;no\r\n"
-          "luis.vera;Luis;Vera Soto;luis.vera@example.org;TENS – Procedimientos / Vacunatorio;no\r\n"
-          "rosa.diaz;Rosa;Díaz Fuentes;rosa.diaz@example.org;Secretario/a de Dirección;no\r\n")
+# 47-people checks these people but the one retired.
+PEOPLE = (("ana.rojas", "Ana María", "Rojas Núñez", "ana.rojas@example.org", "Enfermera/o", "sí"),
+          ("pedro.munoz", "Pedro", "Muñoz Tapia", "pedro.munoz@example.org", "medico general / de familia", "no"),
+          ("luis.vera", "Luis", "Vera Soto", "luis.vera@example.org", "TENS – Procedimientos / Vacunatorio", "no"),
+          ("rosa.diaz", "Rosa", "Díaz Fuentes", "rosa.diaz@example.org", "Secretario/a de Dirección", "no"))
+# As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252.
+CSV = "".join(";".join(row) + "\r\n" for row in (spreadsheet.COLUMNS, *PEOPLE)).encode("cp1252")
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": False,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
+
+
+def filled(data, rows):
+    """The downloaded workbook with these rows typed into «Personal» below its headers, as a spreadsheet program saves
+    them: inline strings, a blank cell left out."""
+    with zipfile.ZipFile(io.BytesIO(data)) as package:
+        parts = {item.filename: package.read(item) for item in package.infolist()}
+    sheet = next(sheet for sheet in ElementTree.fromstring(parts["xl/workbook.xml"]).iterfind("{*}sheets/{*}sheet")
+                 if sheet.get("name") == spreadsheet.PERSONAL)
+    link = next(value for key, value in sheet.attrib.items() if key.endswith("}id"))
+    links = ElementTree.fromstring(parts["xl/_rels/workbook.xml.rels"])
+    part = posixpath.join("xl", next(r.get("Target") for r in links if r.get("Id") == link))
+    root = ElementTree.fromstring(parts[part])
+    table = root.find("{*}sheetData")
+    namespace = table.tag.removesuffix("sheetData")
+    for number, values in enumerate(rows, 2):
+        row = ElementTree.SubElement(table, f"{namespace}row", r=str(number))
+        for column, value in zip("ABCDEF", values):
+            if value:
+                cell = ElementTree.SubElement(row, f"{namespace}c", r=f"{column}{number}", t="inlineStr")
+                ElementTree.SubElement(ElementTree.SubElement(cell, f"{namespace}is"), f"{namespace}t").text = value
+    parts[part] = ElementTree.tostring(root, encoding="utf-8")
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as package:
+        for name, content in parts.items():
+            package.writestr(name, content)
+    return out.getvalue()
 
 
 def red(page):
@@ -84,7 +118,7 @@ def store(user, deadline):
 
 
 centre = provisionador_state()["centre"]  # as 15-wizard chose it
-people = spreadsheet.read(PEOPLE, DECLARED, centre["type"])[0] or sys.exit("PEOPLE loads nobody")
+people = spreadsheet.read(spreadsheet.rows(CSV), DECLARED, centre["type"])[0] or sys.exit("PEOPLE loads nobody")
 passphrase, name = aio_config().get("password"), suite_name()
 if not passphrase:  # it stays in memory: run.sh masks it in the log
     sys.exit("AIO stored no passphrase")
@@ -112,11 +146,16 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     expect(page.locator("#teams li strong")).to_have_text([team["name"] for team in DECLARED])
     with page.expect_download() as download:
         page.click("#people-template")
-    if Path(download.value.path()).read_text(encoding="utf-8-sig").splitlines() != [";".join(spreadsheet.COLUMNS)]:
-        sys.exit("the blank people spreadsheet does not name the columns alone")
-    page.set_input_files("#people-file", files=[{"name": spreadsheet.FILE, "mimeType": "text/csv",
-                                                 "buffer": PEOPLE.encode("cp1252")}])
-    expect(page.locator("#people li strong")).to_have_text([person["name"] for person in people])
+    if download.value.suggested_filename != spreadsheet.FILE:
+        sys.exit(f"«Descargar la planilla» gave {download.value.suggested_filename}, not {spreadsheet.FILE}")
+    workbook = filled(Path(download.value.path()).read_bytes(), PEOPLE)
+    for file, kind, data in (("planilla-personal.csv", "text/csv", CSV), (spreadsheet.FILE, XLSX, workbook)):
+        with page.expect_response("**/api/people") as answer:
+            page.set_input_files("#people-file", files=[{"name": file, "mimeType": kind, "buffer": data}])
+        loaded = answer.value.json()
+        if answer.value.status != 200 or loaded["errors"] or loaded["people"] != people:
+            sys.exit(f"«Equipos» did not load the people of {file}: {loaded.get('errors') or loaded.get('error')}")
+        expect(page.locator("#people li strong")).to_have_text([person["name"] for person in people])
     expect(page.locator("#people li span")).to_contain_text(
         [teams.ROLES[person["cargo"]][0].format(type=centre["type"]) for person in people])
     page.screenshot(path=evidence / "equipos.png")

@@ -48,7 +48,7 @@ import deis
 import runner
 import spreadsheet
 import teams
-from steps import apps, backups, components, passwords, people
+from steps import apps, backups, components, local_ai, passwords, people
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -71,13 +71,14 @@ NOT_JSON = "La solicitud no es JSON válido."
 NO_SESSION = "Abra el enlace que mostró el comando de instalación."
 LINK_REFUSED = ("Este enlace ya se usó o fue reemplazado. Para obtener uno nuevo, vuelva a ejecutar el "
                 "comando de instalación en el servidor.")
-NO_CENTRE = "Elija primero el centro: la dirección es la de su nombre."
+NO_CENTRE = "Elija primero el centro en «Centro»."
 IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este establecimiento ya tenía una instalación, "
           "APS Conecta puede liberarla; después presione «Reintentar».")
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
 TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
-NOT_SPREADSHEET = "Suba la planilla del personal como texto CSV."
+NOT_SPREADSHEET = ("Suba la planilla del personal como libro de Excel (.xlsx), con su hoja «Personal», o como CSV "
+                   "delimitado por «;».")
 PEOPLE_KEPT = "La instalación terminó: el personal se administra ahora en «Cuentas», en APS Conecta Gestión."
 NOT_LISTED = "Marque en la lista del personal a las personas que retirará."
 FIRST_ADMIN = ("{} es el primer administrador y no puede retirarse. Marque a otra persona como primer administrador "
@@ -85,6 +86,9 @@ FIRST_ADMIN = ("{} es el primer administrador y no puede retirarse. Marque a otr
 PEOPLE_WRONG = "La planilla del personal tiene errores. Corríjalos en «Equipos» y súbala de nuevo."
 NO_PEOPLE = "Suba en «Equipos» la planilla del personal, con su primer administrador."
 NOT_OFFERED = "Elija solo entre las aplicaciones opcionales que ofrece «Revisar»."
+NOT_AI = "Indique si la IA local queda activada o desactivada."
+AI_BUSY = "Espere a que termine la instalación en curso para activar o desactivar la IA local."
+AI_LINE = {True: "«IA local»: se activa.", False: "«IA local»: se desactiva."}
 NOT_LISTO = "El archivo de contraseñas se entrega en «Listo», cuando la instalación terminó."
 CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gestión está instalada en https://{}.\n"
           "El archivo de contraseñas quedó en este servidor, legible solo por root: {}")
@@ -272,6 +276,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
+                     "ai": {"chosen": bool(state.get("ai")), "gpu": local_ai.FOUND[self.suite.gpu()]},
                      **self.shown(state), "install": self.progress(busy, state)}
 
     def get_register(self, query, body):
@@ -334,16 +339,22 @@ class Provisionador:
             return 200, self.shown(s)
 
     def get_spreadsheet(self, query, body):
-        """GET /api/spreadsheet: the blank people spreadsheet, for the operator to fill in."""
-        return 200, {"file": spreadsheet.FILE, "text": spreadsheet.TEMPLATE}
+        """GET /api/spreadsheet: the blank people workbook, built for the centre's type once it is chosen, for the
+        operator to fill in: its file name and its bytes, base64."""
+        centre = self.state.read().get("centre")
+        if centre is None:
+            return 409, {"error": NO_CENTRE}
+        return 200, {"file": spreadsheet.FILE,
+                     "content": base64.b64encode(spreadsheet.template(centre["type"])).decode()}
 
     def post_people(self, query, body):
-        """POST /api/people {"file": its name, "content": its bytes, base64}: the people spreadsheet, kept as its text.
+        """POST /api/people {"file": its name, "content": its bytes, base64}: the people spreadsheet, as Excel or CSV,
+        kept as its rows.
         The plan then lists the people it loads or each of its errors, and reads it again whenever the teams change;
         «Instalar» and «Reintentar» wait for one that loads people. From «Instalar» on, a corrected one updates the
         people already loaded once «Reintentar» applies it; at «Listo» it stays."""
         try:
-            uploaded = spreadsheet.decoded(base64.b64decode(body.get("content"), validate=True))
+            uploaded = spreadsheet.rows(base64.b64decode(body.get("content"), validate=True))
         except (TypeError, ValueError):
             return 400, {"error": NOT_SPREADSHEET}
         with self.install_lock, self.state.change() as s:
@@ -402,7 +413,8 @@ class Provisionador:
         loaded, retired = declared(state)
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
-                                  optional=frozenset(state.get("optional", ())), teams=state.get("teams", []),
+                                  optional=frozenset(state.get("optional", ())), ai=bool(state.get("ai")),
+                                  teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
                                   upgrade=bool(state.get("install", {}).get("upgrade")),
                                   log=lambda text: runner.log(self.state, text))
@@ -431,6 +443,30 @@ class Provisionador:
                 self.run_install()
         return 202, {"install": self.progress(*self.snapshot())}
 
+    def post_ai(self, query, body):
+        """POST /api/ai {"on": true|false}, «IA local» on «Revisar», off by default: the choice is kept. Once «Instalar»
+        was pressed, a change runs the step again, then the end-of-install check, and «Listo» follows once it is clean.
+        While the install runs, nothing changes."""
+        on = body.get("on")
+        if not isinstance(on, bool):
+            return 400, {"error": NOT_AI}
+        with self.install_lock:
+            busy, state = self.snapshot()
+            if busy:
+                return 409, {"error": AI_BUSY}
+            changed = bool(state.get("ai")) != on and "install" in state
+            with self.state.change() as s:
+                s["ai"] = on
+                if changed:
+                    s["install"]["steps"]["local_ai"] = {"status": "pending"}
+                    s["install"]["listo"] = False
+                    runner.add_line(s["install"], AI_LINE[on])
+            if changed:
+                self.run_install()
+        busy, state = self.snapshot()
+        return 200, {"ai": {"chosen": on, "gpu": local_ai.FOUND[self.suite.gpu()]},
+                     "install": self.progress(busy, state)}
+
     def post_close(self, query, body):
         """POST /api/close, at «Listo»: the passwords file, whose copy stays on the server. The wizard then closes: the
         link and every session stop working and the Provisionador stops."""
@@ -453,6 +489,7 @@ class Provisionador:
         ("POST", "/api/people"): post_people,
         ("POST", "/api/retire"): post_retire,
         ("POST", "/api/install"): post_install,
+        ("POST", "/api/ai"): post_ai,
         ("POST", "/api/close"): post_close,
     }
 
@@ -644,7 +681,14 @@ def upgrade(suite, state, version):
     while they do not run, and every install step but an owned one is set to run again, so the Provisionador the
     bootstrap restarts resumes the install by itself and «Listo» follows as at the first install. An install still
     under way — one the bootstrap cut short, or a wizard not yet closed — needs no reconcile: the resumed
-    Provisionador carries it on as it is. Returns None; a failure of the suite's services raises."""
+    Provisionador carries it on as it is. Either way, a people spreadsheet kept as its text, as earlier releases kept
+    it, is kept as its rows, an empty one as none. Returns None; a failure of the suite's services raises."""
+    with state.change() as s:
+        if isinstance(text := s.get("spreadsheet"), str):
+            if text:
+                s["spreadsheet"] = spreadsheet.rows(text.encode())
+            else:
+                s.pop("spreadsheet")
     data = state.read()
     install = data.get("install")
     if install and install.get("upgrade") and not install.get("listo"):
