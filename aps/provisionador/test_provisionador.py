@@ -556,7 +556,7 @@ class InstallTest(WizardTest):
         """The centre and its address, with the people spreadsheet «Instalar» needs."""
         self.browser.request("POST", "/api/centre", {"code": code})
         self.assertEqual(self.browser.request("POST", "/api/address", {})[0], 200)
-        self.browser.request("POST", "/api/people", {"spreadsheet": spreadsheet("ana;Ana;Rojas;;;sí")})
+        self.browser.request("POST", "/api/people", csv_file(spreadsheet("ana;Ana;Rojas;;;sí")))
 
     def install(self, **body):
         return self.browser.request("POST", "/api/install", body)
@@ -1333,8 +1333,8 @@ class Equipos(InstallTest):
         cargos = {role: name for roles in CARGOS.values() for role, name in roles.items()}
         listed = self.browser.get("/api/state")[1]["groups"]
         self.assertEqual([(gid, name) for gid, name in listed.items() if gid.startswith("role-")], list(cargos.items()))
-        status, body = self.browser.request("POST", "/api/people", {"spreadsheet": spreadsheet(
-            *(f"p{n};Persona;{n};;{role};{'sí' if n == 0 else ''}" for n, role in enumerate(cargos)))})
+        status, body = self.browser.request("POST", "/api/people", csv_file(spreadsheet(
+            *(f"p{n};Persona;{n};;{name};{'sí' if n == 0 else ''}" for n, name in enumerate(cargos.values())))))
         self.assertEqual((status, body["errors"], len(body["people"])), (200, [], 41))
         self.install()
         self.until("done")
@@ -1463,26 +1463,31 @@ class Equipos(InstallTest):
 
 
 # As Excel saves it: a byte order mark, CRLF, the empty columns and rows a sheet may carry, an email in capitals.
-SPREADSHEET = ("\ufeffusuario;nombre;apellidos;correo;grupos;primer_admin;;\r\n"
-               "ana.rojas;Ana María;Rojas Núñez;Ana.Rojas@Example.org;cat-tecnicos role-enfermeria;sí;;\r\n"
+# The header as a spreadsheet program may write it, and a cargo typed without accents or capitals.
+SPREADSHEET = ("\ufeff Usuario ;NOMBRE;apellidos;Correo;Cargo;primer Administrador;;\r\n"
+               "ana.rojas;Ana María;Rojas Núñez;Ana.Rojas@Example.org;Enfermera/o;sí;;\r\n"
                ";;;;;;;\r\n"
-               "pedro.munoz;Pedro;Muñoz  Tapia;pedro.munoz@example.org;cat-administrativos, cat-jefaturas "
-               "role-medico;;;\r\n")
+               "pedro.munoz;Pedro;Muñoz  Tapia;pedro.munoz@example.org;medico general / de familia;;;\r\n")
 PEOPLE = [{"user": "ana.rojas", "name": "Ana María Rojas Núñez", "email": "ana.rojas@example.org",
-           "groups": ["cat-tecnicos", "role-enfermeria"], "admin": True},
+           "cargo": "role-enfermeria", "admin": True},
           {"user": "pedro.munoz", "name": "Pedro Muñoz Tapia", "email": "pedro.munoz@example.org",
-           "groups": ["cat-administrativos", "cat-jefaturas", "role-medico"], "admin": False}]
+           "cargo": "role-medico", "admin": False}]
 PEOPLE_STEP = "Cuentas del personal"
 CHANGED = people.CHANGED
 
 
 def spreadsheet(*lines):
-    return "usuario;nombre;apellidos;correo;grupos;primer_admin\n" + "".join(f"{line}\n" for line in lines)
+    return "Usuario;Nombre;Apellidos;Correo;Cargo;Primer administrador\n" + "".join(f"{line}\n" for line in lines)
 
 
-# Ana's surname and email corrected; Pedro moved from Administrativos and Jefaturas to Técnicos.
-CORRECTED = spreadsheet("ana.rojas;Ana María;Rojas Muñoz;ana.rojas@salud.example.org;cat-tecnicos role-enfermeria;sí",
-                        "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;cat-tecnicos role-medico;")
+def csv_file(text, encoding="utf-8"):
+    """The upload of a spreadsheet saved as CSV in that encoding."""
+    return {"file": "planilla-personal.csv", "content": base64.b64encode(text.encode(encoding)).decode()}
+
+
+# Ana's surname and email corrected; Pedro's cargo moved from Médico General, a Clínico, to Jefe/a de Programa.
+CORRECTED = spreadsheet("ana.rojas;Ana María;Rojas Muñoz;ana.rojas@salud.example.org;Enfermera/o;sí",
+                        "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;Jefe/a de Programa;")
 
 
 class PeopleTest(InstallTest):
@@ -1493,8 +1498,8 @@ class PeopleTest(InstallTest):
         self.claim()
         self.browser.request("POST", "/api/teams", TEAMS)
 
-    def upload(self, text):
-        return self.browser.request("POST", "/api/people", {"spreadsheet": text})
+    def upload(self, text, encoding="utf-8"):
+        return self.browser.request("POST", "/api/people", csv_file(text, encoding))
 
     def errors(self, text):
         """The errors an upload of `text` shows, once it loads nobody."""
@@ -1514,17 +1519,22 @@ class People(PeopleTest):
         self.assertEqual(status, 200)
         self.assertTrue(body["file"].endswith(".csv"))
         self.assertEqual(body["text"].lstrip("\ufeff").splitlines(),
-                         ["usuario;nombre;apellidos;correo;grupos;primer_admin"])
+                         ["Usuario;Nombre;Apellidos;Correo;Cargo;Primer administrador"])
         self.assertEqual(len(self.errors(body["text"])), 1)
 
-    def test_the_people_list_shows_everyone_the_install_will_create_with_the_groups_the_spreadsheet_may_name(self):
+    def test_the_people_list_shows_everyone_the_install_will_create_with_their_cargo_matched_without_accents(self):
         status, body = self.upload(SPREADSHEET)
         self.assertEqual((status, body["people"], body["errors"]), (200, PEOPLE, []))
         state = self.browser.get("/api/state")[1]
         self.assertEqual((state["people"], state["errors"]), (PEOPLE, []))
-        self.assertLessEqual({"all-staff": "Todo el personal", "role-medico": "Médico General / de Familia",
-                              "cat-clinicos": "Clínicos"}.items(), state["groups"].items())
-        self.assertNotIn("admin", state["groups"])
+        self.assertEqual(state["groups"]["role-medico"], "Médico General / de Familia")
+
+    def test_a_csv_saved_as_windows_1252_loads_exactly_like_the_same_file_in_utf_8(self):
+        text = SPREADSHEET.removeprefix("\ufeff") + "luis.vera;Luis;Vera;;Kinesiólogo/a;no\r\n"
+        loaded = self.upload(text, "cp1252")[1]
+        self.assertEqual(loaded, self.upload(text)[1])
+        self.assertEqual(len(loaded["people"]), 3)
+        self.assertEqual(self.upload(SPREADSHEET.removeprefix("\ufeff"), "cp1252")[1]["people"], PEOPLE)
 
     def test_every_error_is_named_by_its_line_in_spanish_and_the_spreadsheet_loads_nobody(self):
         errors = self.errors(spreadsheet(
@@ -1532,33 +1542,38 @@ class People(PeopleTest):
             "luis;Luis;;;;",  # 3
             "marta;Marta;Díaz;marta@ejemplo;;",  # 4
             "marta;Marta;Díaz;;;",  # 5
-            "jose;José;Pérez;;sector-oriente admin;",  # 6
+            "jose;José;Pérez;;Cardiólogo/a;",  # 6
             "rosa;Rosa;Soto;;;quizás",  # 7
             "carla;Carla;Vera;;;;extra",  # 8
             "juan;Juan Pablo de la Santísima Trinidad;González Hernández de los Ríos y Valdivieso;;;",  # 9
             '"ema";"Ema\nLuz";Mora;;;',  # 10 and 11
             "tomas;Tomás;Ruiz;;;si"))  # 12
         self.assertEqual([error.split(":")[0] for error in errors], [
-            "Línea 2", "Línea 3", "Línea 4", "Línea 5", "Línea 6", "Línea 6", "Línea 7", "Línea 8", "Línea 9",
-            "Línea 10", "Línea 12"])
-        for line, value in ((2, "«ana rojas»"), (4, "«marta@ejemplo»"), (5, "línea 4"), (6, "«sector-oriente»"),
+            "Línea 2", "Línea 3", "Línea 4", "Línea 5", "Línea 6", "Línea 7", "Línea 8", "Línea 9", "Línea 10",
+            "Línea 12"])
+        for line, value in ((2, "«ana rojas»"), (4, "«marta@ejemplo»"), (5, "línea 4"), (6, "«Cardiólogo/a»"),
                             (7, "«quizás»"), (12, "línea 2")):
             self.assertIn(value, next(e for e in errors if e.startswith(f"Línea {line}:")), line)
-        self.assertIn("«admin»", errors[5])
         self.assertEqual(self.browser.get("/api/state")[1]["people"], [])
         status, body = self.install()
         self.assertEqual(status, 409)
         self.assertIn("«Equipos»", body["error"])
 
+    def test_a_spreadsheet_of_about_8000_people_uploads_in_base64(self):
+        status, body = self.upload(spreadsheet(*(
+            f"persona.{n:04d};Nombre Segundo Nombre;Apellido Paterno Apellido Materno;persona.{n:04d}@example.org;"
+            f"Técnico/a en Rehabilitación;{'sí' if n == 0 else 'no'}" for n in range(8000))))
+        self.assertEqual((status, len(body["people"])), (200, 8000))
+
     def test_the_first_line_must_name_the_columns(self):
-        errors = self.errors("usuario,nombre,apellidos,correo,grupos,primer_admin\nana,Ana,Rojas,,,sí\n")
+        errors = self.errors("Usuario,Nombre,Apellidos,Correo,Cargo,Primer administrador\nana,Ana,Rojas,,,sí\n")
         self.assertEqual(len(errors), 1)
         self.assertTrue(errors[0].startswith("Línea 1:"), errors)
 
     def test_exactly_one_first_administrator_is_required(self):
         none = self.errors(spreadsheet("ana;Ana;Rojas;;;no", "pedro;Pedro;Muñoz;;;"))
         self.assertEqual(len(none), 1)
-        self.assertIn("primer_admin", none[0])
+        self.assertIn("«Primer administrador»", none[0])
         two = self.errors(spreadsheet("ana;Ana;Rojas;;;sí", "pedro;Pedro;Muñoz;;;Sí"))
         self.assertEqual([error.split(":")[0] for error in two], ["Línea 3"])
 
@@ -1592,12 +1607,12 @@ class People(PeopleTest):
 
     def test_a_spreadsheet_that_is_not_text_is_refused_and_changes_nothing(self):
         self.upload(SPREADSHEET)
-        status, body = self.browser.request("POST", "/api/people", {"spreadsheet": ["ana.rojas"]})
-        self.assertEqual(status, 400)
-        self.assertTrue(body["error"])
+        for content in (["ana.rojas"], None, "no es base64", base64.b64encode(b"\x81\x8d").decode()):
+            status, body = self.browser.request("POST", "/api/people", {"file": "planilla.csv", "content": content})
+            self.assertEqual((status, bool(body["error"])), (400, True), content)
         self.assertEqual(self.browser.get("/api/state")[1]["people"], PEOPLE)
 
-    def test_instalar_creates_each_account_with_its_display_name_email_and_groups_and_the_first_administrator_is_admin(
+    def test_instalar_puts_each_person_in_all_staff_their_cargo_and_its_category_and_the_first_administrator_in_admin(
             self):
         self.upload(SPREADSHEET)
         self.install()
@@ -1606,10 +1621,15 @@ class People(PeopleTest):
                           for user in ("ana.rojas", "pedro.munoz")},
                          {"ana.rojas": ("Ana María Rojas Núñez", "ana.rojas@example.org"),
                           "pedro.munoz": ("Pedro Muñoz Tapia", "pedro.munoz@example.org")})
-        self.assertEqual(self.member_of("ana.rojas"),
-                         {"admin", "all-staff", "cat-clinicos", "role-enfermeria", "cat-tecnicos"})
-        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico",
-                                                         "cat-administrativos", "cat-jefaturas"})
+        self.assertEqual(self.member_of("ana.rojas"), {"admin", "all-staff", "cat-clinicos", "role-enfermeria"})
+        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico"})
+
+    def test_a_person_with_a_blank_cargo_is_in_all_staff_alone_and_in_admin_as_the_first_administrator(self):
+        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;;sí", "luis.vera;Luis;Vera;;  ;no"))
+        self.install()
+        self.until("done")
+        self.assertEqual((self.member_of("ana.rojas"), self.member_of("luis.vera")), ({"admin", "all-staff"},
+                                                                                     {"all-staff"}))
 
     def test_the_passwords_file_lists_each_persons_first_password(self):
         self.upload(SPREADSHEET)
@@ -1624,11 +1644,11 @@ class People(PeopleTest):
 
 class PeopleChanges(PeopleTest):
     """From «Instalar» until «Listo», «Equipos» takes a corrected spreadsheet and «Retirar», and «Reintentar» applies
-    them: names, emails and groups follow the spreadsheet, a moved person leaves the old groups, and a retired person's
-    account is disabled and in no managed group, kept with its files and shares; a dropped person listed again is
-    enabled. Only the groups the install manages change, and no password does. Of what an administrator changes in
-    Nextcloud, the end-of-install check flags only a listed person's disabled account the install made; at «Listo»,
-    Nextcloud's Users page owns the people."""
+    them: names, emails and cargos follow the spreadsheet, a moved person leaves the old cargo's and category's groups,
+    and a retired person's account is disabled and in no managed group, kept with its files and shares; a dropped person
+    listed again is enabled. Only the groups the install manages change, and no password does. Of what an administrator
+    changes in Nextcloud, the end-of-install check flags only a listed person's disabled account the install made; at
+    «Listo», Nextcloud's Users page owns the people."""
 
     def setUp(self):
         super().setUp()
@@ -1654,7 +1674,7 @@ class PeopleChanges(PeopleTest):
     def passwords(self):
         return {user: self.suite.users[user]["password"] for user in ("ana.rojas", "pedro.munoz")}
 
-    def test_a_corrected_spreadsheet_updates_names_emails_and_groups_and_a_moved_person_leaves_the_old_ones(self):
+    def test_a_corrected_spreadsheet_updates_names_emails_and_cargos_and_a_moved_person_leaves_the_old_cargo(self):
         self.until_people()
         first = self.passwords()
         self.suite.groups["comite-calidad"] = {"name": "Comité de Calidad", "members": {"pedro.munoz"}}  # an admin's
@@ -1664,7 +1684,7 @@ class PeopleChanges(PeopleTest):
         ana = self.suite.users["ana.rojas"]
         self.assertEqual((ana["name"], ana["email"]), ("Ana María Rojas Muñoz", "ana.rojas@salud.example.org"))
         self.assertEqual(self.member_of("pedro.munoz"),
-                         {"all-staff", "cat-clinicos", "role-medico", "cat-tecnicos", "comite-calidad"})
+                         {"all-staff", "cat-jefaturas", "role-jefe-programa", "comite-calidad"})
         self.assertEqual(self.passwords(), first)
         passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
         self.assertIn(f"\nAna María Rojas Muñoz\n  Usuario: ana.rojas\n  Contraseña: {first['ana.rojas']}\n", passwords)
@@ -1754,14 +1774,13 @@ class PeopleChanges(PeopleTest):
         self.assertEqual(self.suite.users["ana.rojas"]["email"], "ana.rojas@salud.example.org")
         self.assertEqual(self.browser.get("/api/state")[1]["retired"], ["pedro.munoz"])
 
-    def test_moving_primer_admin_takes_the_old_first_administrator_out_of_admin_and_retiring_them_out_of_every_group(
+    def test_moving_the_first_administrator_takes_the_old_one_out_of_admin_and_retiring_them_out_of_every_group(
             self):
         self.suite.down = {"issuer"}
         self.install()
         self.until("failed")
-        self.upload(spreadsheet("ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;cat-tecnicos role-enfermeria;",
-                                "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;cat-administrativos role-medico;"
-                                "sí"))
+        self.upload(spreadsheet("ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;Enfermera/o;",
+                                "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;Médico General / de Familia;sí"))
         self.install()
         self.until("failed")
         self.assertNotIn("admin", self.member_of("ana.rojas"))
@@ -1775,19 +1794,19 @@ class PeopleChanges(PeopleTest):
     def test_a_corrected_spreadsheet_that_drops_a_person_whose_account_the_install_made_retires_them(self):
         self.until_people()
         self.suite.groups["comite-calidad"] = {"name": "Comité de Calidad", "members": {"pedro.munoz"}}  # an admin's
-        status, body = self.upload(spreadsheet("ana.rojas;Ana;Rojas;;cat-tecnicos;sí"))
+        status, body = self.upload(spreadsheet("ana.rojas;Ana;Rojas;;Enfermera/o;sí"))
         self.assertEqual((status, body["dropped"]), (200, [{"user": "pedro.munoz", "name": "Pedro Muñoz Tapia"}]))
         self.reintentar()
         self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")),
                          (False, {"comite-calidad"}))
 
-    def test_a_dropped_person_listed_again_is_enabled_in_their_groups_unless_retirar_retired_them(self):
-        listed = SPREADSHEET + "luis.vera;Luis;Vera Soto;;cat-tecnicos;\r\n"
+    def test_a_dropped_person_listed_again_is_enabled_in_their_teams_unless_retirar_retired_them(self):
+        listed = SPREADSHEET + "luis.vera;Luis;Vera Soto;;Kinesiólogo/a;\r\n"
         self.upload(listed)
         self.retire("luis.vera")
         self.until_people()
         teams = self.member_of("pedro.munoz")
-        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;cat-tecnicos;sí"))
+        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;Enfermera/o;sí"))
         self.suite.answering = True
         self.until("failed")
         self.suite.answering = False
@@ -1800,7 +1819,7 @@ class PeopleChanges(PeopleTest):
         self.assertEqual((self.suite.users["luis.vera"]["enabled"], self.member_of("luis.vera")), (False, set()))
 
     def test_a_dropped_person_who_never_got_an_account_is_forgotten(self):
-        self.upload(SPREADSHEET + "luis.vera;Luis;Vera;;cat-tecnicos;\r\n")
+        self.upload(SPREADSHEET + "luis.vera;Luis;Vera;;Kinesiólogo/a;\r\n")
         self.upload(SPREADSHEET)
         self.install()
         self.until("done")
@@ -1839,7 +1858,7 @@ class PeopleChanges(PeopleTest):
         self.suite.down = {"issuer"}
         self.install()
         self.assertEqual(self.steps(self.until("failed"))[PEOPLE_STEP], ("green", None))
-        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;sector-oriente;sí"))
+        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;Cardiólogo/a;sí"))
         self.assertEqual(self.steps(self.progress())[PEOPLE_STEP], ("failed", CHANGED))
         status, body = self.install()
         self.assertEqual(status, 409)
@@ -1854,19 +1873,18 @@ class PeopleChanges(PeopleTest):
         self.until_people()
         ana = self.suite.users["ana.rojas"]
         ana.update(name="Ana Rojas", email="ana@example.org")
-        self.suite.groups["cat-administrativos"]["members"].discard("pedro.munoz")
-        self.suite.groups["cat-tecnicos"]["members"].add("pedro.munoz")
+        self.suite.groups["role-medico"]["members"].discard("pedro.munoz")
+        self.suite.groups["role-medico-oftalmologo"]["members"].add("pedro.munoz")
         self.suite.add_user("rosa.soto", "Rosa Soto", "contraseña de Rosa")
         self.suite.groups["all-staff"]["members"].add("rosa.soto")
         self.suite.answering = True
         self.until("done")
         self.assertEqual((ana["name"], ana["email"]), ("Ana Rojas", "ana@example.org"))
-        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico", "cat-tecnicos",
-                                                         "cat-jefaturas"})
+        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico-oftalmologo"})
 
     def test_the_end_of_install_check_flags_a_listed_persons_disabled_account_and_reintentar_enables_it(self):
         self.retire("pedro.munoz")
-        self.upload(SPREADSHEET + "luis.vera;Luis;Vera Soto;;cat-tecnicos;\r\n")
+        self.upload(SPREADSHEET + "luis.vera;Luis;Vera Soto;;Kinesiólogo/a;\r\n")
         self.until_people()
         self.suite.users["luis.vera"]["enabled"] = False
         self.suite.answering = True
