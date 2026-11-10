@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Suite AI's model benchmark (spec #75): it measures each candidate model on an Ollama server, before the Suite
-ships one, against the bar of at least 95 % right tool calls and a p95 answer time within 15 s on the 6 GB machine.
+"""The Suite AI's model benchmark (spec #75): it measures the Model, the release's pin in aps/provisionador/model.json,
+on an Ollama server, and reports it against the bar of at least 95 % right tool calls and a p95 answer time within 15 s
+on the 6 GB machine. The bar chooses no model (docs/adr/0002-the-suite-ai-s-model-is-gemma4-e2b.md).
 
-Each model is pulled by its tag and measured only when the digest Ollama reports is its pin (Ollama refuses a pull by
+The Model is pulled by its tag and measured only when the digest Ollama reports is its pin (Ollama refuses a pull by
 digest). One unscored request loads it and reads the tools. Then each question of questions.json goes alone through
 Ollama's OpenAI-compatible chat endpoint with the first slice's tools: tools.json, the connector main's own tools/list
 (name, description, inputSchema), which aps/benchmark/refresh-tools.sh takes again. No tool runs, writes included. A question is right when the reply's first
 tool call names its tool and every argument it expects holds the expected value once the tool's defaults are filled
 in; a reply without a tool call, or an error, is wrong. The time is the whole request.
 
-It writes one result file per model and machine, benchmark-<model>-<machine>.json: the model and its digest,
+It writes one result file per machine, benchmark-<model>-<machine>.json: the model and its digest,
 Ollama's version and context length, the hardware, each question's result, the right-call rate, p50 and p95 answer
 time and the verdict against the bar.
 
@@ -33,14 +34,11 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-MODELS = {
-    "gemma4:e2b": "sha256:b37049369adfe3d2b653af0ab301a062ca5cbe96ace6aa0d3f2559ee9b563fc2",
-    "qwen3.5:2b": "sha256:0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a",
-}
+HERE = Path(__file__).resolve().parent
+MODEL = json.loads((HERE.parent / "provisionador" / "model.json").read_text(encoding="utf-8"))  # the Model: tag, digest
 GPU_VENDORS = {"0x1002": "AMD", "0x8086": "Intel"}  # PCI vendor ids in /sys/class/drm/card*/device/vendor
 BAR = {"right_call_rate": 0.95, "p95_seconds": 15}
 TIMEOUT = 900  # seconds a request may take, the cold first one on a CPU included
-HERE = Path(__file__).resolve().parent
 
 
 def api(base, path, body=None, timeout=TIMEOUT):
@@ -204,20 +202,18 @@ def main():
         print(f"benchmark: questions.json expects tools tools.json lacks: {sorted(unknown)}")
         return 2
     machine, machine_hardware = socket.gethostname(), hardware()
-    failed = 0
-    for model, pin in MODELS.items():
-        try:
-            result = {"machine": machine, "hardware": machine_hardware,
-                      **measure(base, model, pin, questions, fixtures)}
-        except (OSError, RuntimeError, ValueError) as error:
-            print(f"benchmark: {error}", flush=True)
-            failed += 1
-            continue
-        path = Path(f"benchmark-{model.replace(':', '-')}-{machine}.json")
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(f"{model}: right calls {result['right_call_rate']:.0%}, p50 {result['p50_seconds']} s, "
-              f"p95 {result['p95_seconds']} s, {'passes' if result['passed'] else 'fails'} the bar: {path}", flush=True)
-    return 1 if failed else 0
+    model = MODEL["model"]
+    try:
+        result = {"machine": machine, "hardware": machine_hardware,
+                  **measure(base, model, MODEL["digest"], questions, fixtures)}
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"benchmark: {error}", flush=True)
+        return 1
+    path = Path(f"benchmark-{model.replace(':', '-')}-{machine}.json")
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"{model}: right calls {result['right_call_rate']:.0%}, p50 {result['p50_seconds']} s, "
+          f"p95 {result['p95_seconds']} s, {'passes' if result['passed'] else 'fails'} the bar: {path}", flush=True)
+    return 0
 
 
 if __name__ == "__main__":
