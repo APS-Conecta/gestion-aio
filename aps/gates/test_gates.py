@@ -315,6 +315,58 @@ class MaintenanceWindowGate(unittest.TestCase):
                 self.assertIn(f"{path} names no maintenance-window hour", out)
 
 
+DIGEST = "sha256:" + "a" * 64
+
+
+def services(*images):
+    """A container definition file running each (image, image_tag)."""
+    return json.dumps({"aio_services_v1": [{"container_name": f"c{n}", "image": image, "image_tag": tag}
+                                           for n, (image, tag) in enumerate(images)]})
+
+
+PINS = {
+    "aps/keep-list.txt": "# base: 0 upstream fixture\ncommunity-containers/ollama/ IA local\n",
+    "php/containers.json": services(("ghcr.io/nextcloud-releases/aio-apache", DIGEST),
+                                    ("ghcr.io/aps-conecta/gestion-nextcloud", "%AIO_CHANNEL%")),
+    "community-containers/ollama/ollama.json": services(("ollama/ollama", DIGEST)),
+    "community-containers/jellyfin/jellyfin.json": services(("jellyfin/jellyfin", "latest")),  # never run
+    "aps/provisionador/model.json": json.dumps({"model": "gemma4:e2b", "digest": DIGEST}),
+}
+
+
+class PinsGate(unittest.TestCase):
+    """Every image the suite runs but our own, and the model «IA local» pulls, is pinned by digest: the official images
+    and the community containers the keep-list declares, and the model's tag with its digest, never a bare tag."""
+
+    def check(self, **changes):
+        repo = Repo({**PINS, **changes})
+        self.addCleanup(repo.close)
+        return run_gate("pins.py", repo)
+
+    def test_the_committed_tree_passes(self):
+        r = subprocess.run([sys.executable, "-I", str(GATES / "pins.py")], cwd=REPO, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_images_by_digest_ours_by_release_and_a_model_with_its_digest_pass(self):
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+
+    def test_an_image_by_tag_fails_naming_its_file_and_container(self):
+        for path in ("php/containers.json", "community-containers/ollama/ollama.json"):
+            with self.subTest(path):
+                code, out = self.check(**{path: services(("ollama/ollama", DIGEST), ("ollama/ollama", "0.40.16"))})
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"{path}: c1 runs ollama/ollama:0.40.16, not pinned by digest", out)
+
+    def test_a_bare_model_tag_or_a_model_without_its_tag_fails_naming_it(self):
+        for model, digest in (("gemma4:e2b", None), ("gemma4:e2b", "e2b"), ("gemma4", DIGEST)):
+            with self.subTest((model, digest)):
+                pin = {"model": model, **({"digest": digest} if digest else {})}
+                code, out = self.check(**{"aps/provisionador/model.json": json.dumps(pin)})
+                self.assertEqual(code, 1, out)
+                self.assertIn(f"aps/provisionador/model.json: {model} is not pinned by its tag and digest", out)
+
+
 class AioStartAnswer(unittest.TestCase):
     """The suite port reads AIO's start answer for the text AIO writes as it begins to download a container's image:
     once AIO writes another text, the gates fail instead of the install's log going quiet."""
@@ -540,16 +592,19 @@ class BootstrapRefusals(unittest.TestCase):
            "--volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config "
            f"--volume /var/run/docker.sock:/var/run/docker.sock:ro {IMAGE}:{TAG}")
 
-    def bootstrap(self, answers, holds=()):
+    def bootstrap(self, answers, holds=(), dri=False):
         """The exit code, the output and the calls made of the release's install.sh, with `answers` as
         {call: (exit code, output)} (nothing answers a call that fails loudly); `holds` names files the server already
-        holds, with their text, under the install folder; and what that folder's parent holds afterwards besides the
-        test's own files."""
+        holds, with their text, under the install folder; `dri`, whether the server has render devices; and what that
+        folder's parent holds afterwards besides the test's own files."""
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        if dri:
+            (tmp / "dri").mkdir()
         text = (REPO / "aps" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
         for old, new in (('\nRELEASE_TAG=""\n', f'\nRELEASE_TAG="{self.TAG}"\n'),
                          ('\nBUNDLE_SHA256=""\n', f'\nBUNDLE_SHA256="{"0" * 64}"\n'),
-                         ("\nINSTALL_DIR=/opt/aps-conecta/gestion\n", f"\nINSTALL_DIR={tmp}/gestion\n")):
+                         ("\nINSTALL_DIR=/opt/aps-conecta/gestion\n", f"\nINSTALL_DIR={tmp}/gestion\n"),
+                         ("\nDRI=/dev/dri ", f"\nDRI={tmp}/dri ")):
             self.assertEqual(text.count(old), 1, old)
             text = text.replace(old, new)
         (tmp / "install.sh").write_text(text, encoding="utf-8")
@@ -569,7 +624,7 @@ class BootstrapRefusals(unittest.TestCase):
         (tmp / "calls").touch()
         r = subprocess.run([shutil.which("bash"), str(tmp / "install.sh")], capture_output=True, encoding="utf-8",
                            env={"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "CALLS": str(tmp / "calls")})
-        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls", "gestion"})
+        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls", "gestion", "dri"})
         return r.returncode, r.stdout + r.stderr, (tmp / "calls").read_text().splitlines(), made
 
     def test_another_aio_installation_is_refused_naming_its_image(self):
@@ -593,6 +648,21 @@ class BootstrapRefusals(unittest.TestCase):
         self.assertIn("Descargando y verificando APS Conecta Gestión v1.0.1...", out)
         self.assertEqual(made, [], "something was unpacked before the bundle's checksum verified")
         self.assertTrue(any(call.startswith("curl -fsSL --retry 3 -o ") for call in calls), calls)
+
+    def test_a_server_with_render_devices_hands_them_to_the_mastercontainer_for_aio_to_pass_on(self):
+        run = self.RUN.replace(f" {self.IMAGE}:{self.TAG}", f" --device @DIR@/dri {self.IMAGE}:{self.TAG}")
+        answers = {self.INSPECT: (1, ""), self.VOLUME: (0, "[]"),
+                   f"docker pull --quiet {self.DIGEST}": (0, ""),
+                   f"docker tag {self.DIGEST} {self.IMAGE}:{self.TAG}": (0, ""),
+                   "docker rm -f nextcloud-aio-mastercontainer": (0, ""), run: (0, ""),
+                   "systemctl stop aps-provisionador.service": (0, ""),
+                   "python3 @DIR@/gestion/provisionador/provisionador.py upgrade": (1, "")}
+        code, out, calls, made = self.bootstrap(answers, holds=(("VERSION", f"{self.TAG}\n"),
+                                                                ("images.lock", f"{self.DIGEST}\n")), dri=True)
+        self.assertEqual(code, 1, out)  # the fake wizard's upgrade refuses: nothing after it matters here
+        runs = [call for call in calls if call.startswith("docker run ")]
+        self.assertEqual(len(runs), 1, calls)
+        self.assertTrue(runs[0].endswith(f"/dri {self.IMAGE}:{self.TAG}") and " --device " in runs[0], runs)
 
     def test_an_upgrade_the_bootstrap_cut_short_is_retaken(self):
         # the server holds this release's bundle, its volume and the wizard's state, but no mastercontainer; the
