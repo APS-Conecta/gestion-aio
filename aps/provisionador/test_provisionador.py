@@ -47,8 +47,14 @@ REGISTER = HEADER + """\
 
 
 def fingerprint(pem):
-    h = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
+    """A certificate's SHA-256 fingerprint, AA:BB:…, from its PEM text, whatever explanatory text comes before it."""
+    h = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem[pem.index("-----BEGIN CERTIFICATE-----"):])).hexdigest().upper()
     return ":".join(h[i:i + 2] for i in range(0, len(h), 2))
+
+
+# The CA certificate that issued the leaf of www.ispch.gob.cl, *.ispch.gob.cl: GlobalSign GCC R6 AlphaSSL CA 2025, as
+# http://secure.globalsign.com/cacert/gsgccr6alphasslca2025.crt serves it.
+ISP_INTERMEDIATE = "A8:83:55:92:31:F8:38:8D:AF:35:CE:41:C8:10:10:40:AE:8F:D9:B6:56:43:42:47:B9:47:5A:F5:92:CC:08:CA"
 
 
 class Link:
@@ -601,6 +607,10 @@ class InstallTest(WizardTest):
     def member_of(self, user):
         return {gid for gid, group in self.suite.groups.items() if user in group["members"]}
 
+    def issuers(self):
+        """The fingerprints of the CA certificates Nextcloud trusts for the ISP's leaf."""
+        return [fingerprint(pem) for pem in self.suite.issuers.values()]
+
     @staticmethod
     def texts(install):
         """The install's log, by its lines' texts."""
@@ -653,7 +663,6 @@ class Instalar(InstallTest):
             "maintenance_window_start": 1}.items(), self.suite.system.items())
         self.assertEqual((self.suite.apps["admin_audit"]["enabled"], self.suite.apps["core"]["backgroundjobs_mode"]),
                          ("yes", "cron"))
-        self.assertEqual(self.suite.issuers, ["www.ispch.gob.cl"])
 
     def test_progress_shows_each_container_as_aio_reports_it(self):
         """A component's container goes by its «Revisar» name; every other one keeps AIO's."""
@@ -799,7 +808,7 @@ class StepRunner(InstallTest):
         for name in NEEDS_NEXTCLOUD:
             self.assertIn("contenedor de Nextcloud no responde", self.steps(install)[name][1])
         self.assertLessEqual(AIO_SIDE, self.named(install, "green"))
-        self.assertEqual((self.suite.system, self.suite.issuers), ({}, []))
+        self.assertEqual((self.suite.system, self.suite.issuers), ({}, {}))
 
     def test_listo_waits_until_the_suite_answers_at_its_name_once_its_inside_address_is_published_again(self):
         self.claim()
@@ -816,8 +825,10 @@ class StepRunner(InstallTest):
         self.suite.down = {"issuer"}
         self.install()
         steps = self.steps(self.until("failed"))
-        self.assertEqual(steps["Certificado del ISP"][0], "failed")
-        self.assertIn("www.ispch.gob.cl", steps["Certificado del ISP"][1])
+        status, reason = steps["Certificado del ISP"]
+        self.assertEqual(status, "failed")
+        self.assertIn("certificado intermedio del ISP", reason)
+        self.assertNotIn("internet", reason)
         self.assertEqual(steps[SECURITY][0], "green")
         self.suite.system["session_lifetime"] = 86400
         self.suite.down = set()
@@ -829,7 +840,7 @@ class StepRunner(InstallTest):
         self.assertLessEqual((NEEDS_NEXTCLOUD - {SECURITY}) | AIO_SIDE, self.named(install, "green"))
         self.install()
         self.until("done")
-        self.assertEqual((self.suite.system["session_lifetime"], self.suite.issuers), (900, ["www.ispch.gob.cl"]))
+        self.assertEqual((self.suite.system["session_lifetime"], self.issuers()), (900, [ISP_INTERMEDIATE]))
 
     def test_the_end_of_install_check_reads_the_settings_config_list_hides(self):
         """occ config:list hides theming's link as sensitive: the check reads it, so a changed one is found too."""
@@ -1957,9 +1968,17 @@ class Recording(InstallTest):
 
 
 class TrustedCertificates(InstallTest):
-    """Nextcloud trusts what AIO's own folder of trusted CAs holds, which AIO also gives Talk: a test build's Let's
-    Encrypt staging roots, so server-side calls through the suite's name verify its staging certificate; a release
-    holds none and Nextcloud imports nothing."""
+    """Nextcloud trusts the ISP's intermediate, from the copy the suite ships, and what AIO's own folder of trusted CAs
+    holds, which AIO also gives Talk: a test build's Let's Encrypt staging roots, so server-side calls through the
+    suite's name verify its staging certificate; a release holds none and Nextcloud imports nothing of it."""
+
+    def test_instalar_trusts_the_isps_intermediate_the_suite_ships_and_never_asks_the_isps_site(self):
+        """www.ispch.gob.cl serves only its leaf and goes down now and then while that certificate keeps working: no
+        install waits for it, as Nextcloud trusts the CA that issued the leaf from the copy the suite ships."""
+        self.claim()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.issuers(), [ISP_INTERMEDIATE])
 
     def test_in_a_test_build_nextcloud_imports_each_ca_aio_trusts(self):
         self.suite.cacerts = ["letsencrypt-staging-1.crt", "letsencrypt-staging-2.crt"]
