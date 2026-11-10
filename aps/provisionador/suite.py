@@ -62,8 +62,8 @@ GITHUB_FAILED = ("No se pudo descargar {} desde GitHub. Revise la conexión a in
                  "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 GITHUB_LIMITED = ("GitHub limitó las consultas de este servidor al pedir {}. Presione «Reintentar» en una hora; si "
                   "vuelve a ocurrir, contacte a APS Conecta.")
-SEED_FAILED = ("Nextcloud no pudo recibir las carpetas y páginas de las carpetas de equipo. Presione «Reintentar»; si "
-               "vuelve a ocurrir, contacte a APS Conecta.")
+SEED_FAILED = ("Nextcloud no pudo recibir las páginas de la Intranet. Presione «Reintentar»; si vuelve a ocurrir, "
+               "contacte a APS Conecta.")
 GROUP_ADMIN_FAILED = ("Nextcloud no pudo revisar ni asignar los administradores de grupo de las cuentas de cargo. "
                       "Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de la aplicación. Presione «Reintentar»; si vuelve a ocurrir, "
@@ -179,20 +179,20 @@ php /var/www/html/occ --no-ansi --no-interaction user:add --password-from-env --
 """
 
 
-# In the Nextcloud container, the group folder $1's missing folders and files, from the JSON object on stdin that holds
-# each file's text, or null for a folder, by its path in the group folder; whatever the folder holds stays. Groupfolders
-# then scans the folder, so Nextcloud lists what was added.
+# In the Nextcloud container, the group folder $1's missing files, from the JSON object on stdin that holds each file's
+# text by its path in the group folder; whatever the folder holds stays. Groupfolders then scans the folder, so
+# Nextcloud lists what was added.
 SEED = r"""
 set -eu
 files="$(php /var/www/html/occ --no-ansi config:system:get datadirectory)/__groupfolders/$1/files"
 php -r '
 foreach (json_decode(stream_get_contents(STDIN), true, 3, JSON_THROW_ON_ERROR) as $path => $text) {
     $target = $argv[1] . "/" . $path;
-    $folder = $text === null ? $target : dirname($target);
+    $folder = dirname($target);
     if (in_array("..", explode("/", $path), true) || !(is_dir($folder) || mkdir($folder, 0755, true))) {
         exit(1);
     }
-    if ($text !== null && !file_exists($target) && file_put_contents($target, $text) === false) {
+    if (!file_exists($target) && file_put_contents($target, $text) === false) {
         exit(1);
     }
 }' -- "$files"
@@ -512,8 +512,8 @@ class Suite:
         return json.loads(self.execute(NEXTCLOUD, ("php", "-r", GROUP_ADMINS), failed=GROUP_ADMIN_FAILED))
 
     def seed(self, folder, files):
-        """The group folder holds each of the files it does not hold yet: their text by their path in it, None for a
-        folder. What it holds stays as staff left it."""
+        """The group folder holds each of the files it does not hold yet: their text by their path in it. What it holds
+        stays as staff left it."""
         self.execute(NEXTCLOUD, ("sh", "-c", SEED, "sh", str(folder)), json.dumps(files), SEED_FAILED)
     def trust_cacerts(self):
         """Nextcloud's own requests trust the CAs that AIO's folder of trusted CAs holds, as Talk does; a release has
@@ -921,7 +921,11 @@ class FakeSuite:
             if mount not in mounts:
                 self._group_folder(mount, {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7,
                                            "IntraVox Users": 1})
-        elif (command, args) != ("intravox:reindex", ()):
+        elif (command, args) == ("intravox:reindex", ()):  # as Nextcloud's admin, whom the admin group's grant lets read
+            mount = self.apps[app].get("groupfolder_name", "IntraVox")
+            if not self.group_folders.get(mounts.get(mount), {}).get("groups", {}).get("admin", 0) & 1:
+                raise failed
+        else:
             raise AssertionError(f"the fake suite runs no occ {(command, *args)}")
         return ""
 

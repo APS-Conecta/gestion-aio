@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The group folders, in Groupfolders (a default store app, which the step ensures): Transversal with its subfolders,
-one folder per unit and one per team, each with the permissions teams.py declares for its groups and none for any other
-group."""
+"""The group folders, in Groupfolders (a default store app, which the step ensures): one folder per unit and one per
+team, each with the permissions teams.py declares for its groups and none for any other group."""
 
 import json
 
@@ -24,10 +23,22 @@ def listed(suite):
 
 
 def grant(suite, folder, declared):
-    """Give each declared group its permissions in the folder, where it holds others."""
+    """Give each declared group its permissions in the folder, where it holds others, and no other group any."""
     for group, words in declared.items():
         if folder["groups"].get(group) != teams.bits(words):
             suite.occ("groupfolders:group", str(folder["id"]), group, *words)
+    for group in folder["groups"].keys() - declared.keys():
+        suite.occ("groupfolders:group", str(folder["id"]), group, "--delete")
+
+
+def reasons(suite, declared):
+    """What differs between the declared folders, by mount point with each group's permissions, and Groupfolders: the
+    missing ones and those with other grants, as Spanish reasons."""
+    held = listed(suite)
+    missing = [mount for mount in declared if mount not in held]
+    wrong = [mount for mount, grants in declared.items() if mount in held
+             and held[mount]["groups"] != {group: teams.bits(words) for group, words in grants.items()}]
+    return [reason.format(", ".join(mounts)) for reason, mounts in ((MISSING, missing), (WRONG, wrong)) if mounts]
 
 
 def run(context):
@@ -38,15 +49,8 @@ def run(context):
         if mount not in held:
             held[mount] = {"id": int(suite.occ("groupfolders:create", mount)), "groups": {}}
         grant(suite, held[mount], declared)
-        for group in held[mount]["groups"].keys() - declared.keys():
-            suite.occ("groupfolders:group", str(held[mount]["id"]), group, "--delete")
-    suite.seed(held[teams.TRANSVERSAL]["id"], dict.fromkeys(teams.SUBFOLDERS))
     return check(context)
 
 
 def check(context):
-    held, declared = listed(context.suite), teams.folders(context.teams)
-    missing = [mount for mount in declared if mount not in held]
-    wrong = [mount for mount, grants in declared.items() if mount in held
-             and held[mount]["groups"] != {group: teams.bits(words) for group, words in grants.items()}]
-    return [reason.format(", ".join(mounts)) for reason, mounts in ((MISSING, missing), (WRONG, wrong)) if mounts]
+    return reasons(context.suite, teams.folders(context.teams))
