@@ -7,17 +7,20 @@ staging service (its DNS has no answer for the production one); a release's cand
 the production one. Either way the certificate the suite serves at its name verifies against the suite's roots alone
 (browser.py: the staging roots, or the system's real roots), and a browser that trusts those alone opens the suite at
 its name, with the wizard closed at «Listo» (17-install checks what its page says then about this computer and the
-router)."""
+router). Nextcloud's trusted certificates list the ISP's intermediate, from the copy the suite ships."""
 
+import json
 import os
 import socket
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser import chromium, suite_name, tls  # noqa: E402
+REPO = Path(__file__).resolve().parents[3]
+sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
+from browser import chromium, occ, suite_name, tls  # noqa: E402
 from playwright.sync_api import Error, expect  # noqa: E402
+from steps.certificates import INTERMEDIATE  # noqa: E402
 
 address = os.environ["ADDRESS"]
 evidence = Path(os.environ["EVIDENCE"])
@@ -56,3 +59,8 @@ with chromium() as browser:
     if not response.ok:
         sys.exit(f"https://{name}/login answers {response.status}")
     expect(page.locator("input[type=password]")).to_be_visible()
+
+trusted = [certificate["name"] for certificate in json.loads(occ("security:certificates --output=json"))]
+if INTERMEDIATE.name not in trusted:
+    sys.exit(f"Nextcloud does not trust {INTERMEDIATE.name}, the ISP's intermediate the suite ships")
+print(f"Nextcloud trusts {INTERMEDIATE.name}, the ISP's intermediate the suite ships")
