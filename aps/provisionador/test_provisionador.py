@@ -13,6 +13,7 @@ import io
 import itertools
 import json
 import os
+import posixpath
 import re
 import ssl
 import subprocess
@@ -22,11 +23,13 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import urlencode, urlsplit
+from xml.etree import ElementTree
 
 import brand
 import provisionador
@@ -1485,6 +1488,179 @@ def csv_file(text, encoding="utf-8"):
     return {"file": "planilla-personal.csv", "content": base64.b64encode(text.encode(encoding)).decode()}
 
 
+def workbook_file(data):
+    """The upload of a spreadsheet saved as an Excel workbook."""
+    return {"file": "planilla-personal.xlsx", "content": base64.b64encode(data).decode()}
+
+
+HEADERS = ["Usuario", "Nombre", "Apellidos", "Correo", "Cargo", "Primer administrador"]
+RELATIONSHIP_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
+
+class OpenedWorkbook:
+    """A workbook as a spreadsheet program opens it: its package's relationships lead to the workbook, its sheets in
+    order by name, which are hidden, and for each sheet its cells by reference, where its panes freeze and its data
+    validations by the cells they cover, a list's values read from the range it references."""
+
+    def __init__(self, data):
+        self.package = zipfile.ZipFile(io.BytesIO(data))
+        book = self.related("", "officeDocument")[0]
+        targets = self.relations(book)
+        self.strings = [self.text(item) for part in self.related(book, "sharedStrings") for item in self.xml(part)]
+        self.sheets = {sheet.get("name"): (targets[sheet.get(RELATIONSHIP_ID)][1], sheet.get("state") == "hidden")
+                       for sheet in self.xml(book).iterfind(".//{*}sheet")}
+
+    def xml(self, part):
+        return ElementTree.fromstring(self.package.read(part))
+
+    def relations(self, part):
+        """Each relationship of a package part by its id: its type's last word and the part it points to."""
+        folder, name = posixpath.split(part)
+        return {r.get("Id"): (r.get("Type").rsplit("/", 1)[1],
+                              posixpath.normpath(posixpath.join("/", folder, r.get("Target"))).lstrip("/"))
+                for r in self.xml(posixpath.join(folder, "_rels", f"{name}.rels"))}
+
+    def related(self, part, kind):
+        return [target for found, target in self.relations(part).values() if found == kind]
+
+    @staticmethod
+    def text(item):
+        return "".join(t.text or "" for t in item.iterfind(".//{*}t"))
+
+    def cells(self, name):
+        """The sheet's values by cell reference."""
+        found = {}
+        for cell in self.xml(self.sheets[name][0]).iterfind(".//{*}c"):
+            kind, value = cell.get("t"), cell.findtext("{*}v")
+            found[cell.get("r")] = (self.text(cell) if kind == "inlineStr" else
+                                    self.strings[int(value)] if kind == "s" else value)
+        return found
+
+    def values(self, reference):
+        """The values of a range such as Listas!$A$1:$B$2, row by row, a blank cell empty."""
+        sheet, cells = reference.replace("$", "").rsplit("!", 1)
+        (first, top), (last, bottom) = (re.fullmatch(r"([A-Z])(\d+)", end).groups() for end in cells.split(":"))
+        found = self.cells(sheet.strip("'"))
+        return [found.get(f"{chr(column)}{row}") or "" for row in range(int(top), int(bottom) + 1)
+                for column in range(ord(first), ord(last) + 1)]
+
+    def rows(self, name):
+        """The sheet's rows, each from column A to the sheet's last column."""
+        ends = [re.fullmatch(r"([A-Z])(\d+)", reference).groups() for reference in self.cells(name)]
+        last = max(column for column, _ in ends)
+        return [self.values(f"{name}!A{row}:{last}{row}") for row in range(1, max(int(row) for _, row in ends) + 1)]
+
+    def frozen(self, name):
+        """The cell the sheet's frozen panes begin at, or None."""
+        pane = self.xml(self.sheets[name][0]).find("{*}sheetViews/{*}sheetView/{*}pane")
+        return pane.get("topLeftCell") if pane is not None and pane.get("state") == "frozen" else None
+
+    def validations(self, name):
+        """Each data validation of the sheet by the cells it covers: its type, its error style, its input message's
+        title and text when it shows one, and for a list read from a range, that range's sheet and values."""
+        found = {}
+        for rule in self.xml(self.sheets[name][0]).iterfind(".//{*}dataValidation"):
+            source = rule.findtext("{*}formula1") or ""
+            found[rule.get("sqref")] = {
+                "type": rule.get("type", "none"), "style": rule.get("errorStyle", "stop"),
+                "message": (rule.get("promptTitle"), rule.get("prompt"))
+                if rule.get("showInputMessage") in ("1", "true") else None,
+                "list": (source.replace("$", "").rsplit("!", 1)[0].strip("'"), self.values(source))
+                if "!" in source else None}
+        return found
+
+
+def filled(data, rows):
+    """The workbook with these rows typed into «Personal» below its headers, as a spreadsheet program saves them: inline
+    strings, a blank cell left out."""
+    book = OpenedWorkbook(data)
+    part = book.sheets["Personal"][0]
+    sheet = book.xml(part)
+    table = sheet.find("{*}sheetData")
+    namespace = table.tag.removesuffix("sheetData")
+    for number, values in enumerate(rows, 2):
+        row = ElementTree.SubElement(table, f"{namespace}row", r=str(number))
+        for column, value in zip("ABCDEF", values):
+            if value:
+                cell = ElementTree.SubElement(row, f"{namespace}c", r=f"{column}{number}", t="inlineStr")
+                ElementTree.SubElement(ElementTree.SubElement(cell, f"{namespace}is"), f"{namespace}t").text = value
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as package:
+        for item in book.package.infolist():
+            package.writestr(item.filename, ElementTree.tostring(sheet, encoding="utf-8") if item.filename == part
+                             else book.package.read(item))
+    return out.getvalue()
+
+
+def package(parts):
+    """A ZIP package of these parts, by path."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as made:
+        for path, text in parts.items():
+            made.writestr(path, text)
+    return out.getvalue()
+
+
+MAIN = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+LINKS = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+RELS = '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{}</Relationships>'
+LINK = ('<Relationship Id="{}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/{}" '
+        'Target="{}"/>')
+# As Excel saves the filled workbook: «Personal» second, its rows in shared strings, one of them rich text with a
+# phonetic guide, a blank cell left out, styled empty cells, an empty row, a username typed as a number, and theme,
+# styles and strings taking relationship ids before the sheets.
+EXCEL_PARTS = {
+    "_rels/.rels": RELS.format(LINK.format("rId3", "extended-properties", "docProps/app.xml")
+                               + LINK.format("rId1", "officeDocument", "xl/workbook.xml")),
+    "xl/workbook.xml": f'<workbook {MAIN} {LINKS}><sheets><sheet name="Instrucciones" sheetId="1" r:id="rId4"/>'
+                       '<sheet name="Personal" sheetId="2" r:id="rId5"/>'
+                       '<sheet name="Listas" sheetId="3" state="hidden" r:id="rId6"/></sheets></workbook>',
+    "xl/_rels/workbook.xml.rels": RELS.format(
+        LINK.format("rId1", "theme", "theme/theme1.xml") + LINK.format("rId2", "styles", "styles.xml")
+        + LINK.format("rId3", "sharedStrings", "sharedStrings.xml")
+        + LINK.format("rId4", "worksheet", "worksheets/sheet1.xml")
+        + LINK.format("rId5", "worksheet", "worksheets/sheet2.xml")
+        + LINK.format("rId6", "worksheet", "worksheets/sheet3.xml")),
+    "xl/sharedStrings.xml": f'<sst {MAIN} count="13" uniqueCount="13">' + "".join(
+        f"<si><t>{text}</t></si>" for text in (*HEADERS, "ana.rojas", "Ana María", "Rojas Núñez", "Enfermera/o", "sí"))
+                            + '<si><r><t>Pedro</t></r><r><rPr><b/></rPr><t xml:space="preserve"> Pablo</t></r>'
+                              '<rPh sb="0" eb="5"><t>ペドロ</t></rPh></si><si><t>Muñoz</t></si></sst>',
+    "xl/worksheets/sheet1.xml": f'<worksheet {MAIN}><sheetData/></worksheet>',
+    "xl/worksheets/sheet3.xml": f'<worksheet {MAIN}><sheetData/></worksheet>',
+    "xl/worksheets/sheet2.xml": f'<worksheet {MAIN}><sheetData><row r="1" spans="1:6">' + "".join(
+        f'<c r="{column}1" s="1" t="s"><v>{n}</v></c>' for n, column in enumerate("ABCDEF")) + "</row>"
+                                '<row r="2" spans="1:8"><c r="A2" t="s"><v>6</v></c><c r="B2" t="s"><v>7</v></c>'
+                                '<c r="C2" t="s"><v>8</v></c><c r="E2" t="s"><v>9</v></c><c r="F2" t="s"><v>10</v></c>'
+                                '<c r="G2" s="1"/><c r="H2" s="1"/></row>'
+                                '<row r="3" spans="1:6" ht="20" customHeight="1"/>'
+                                '<row r="4"><c r="A4"><v>2026</v></c><c r="B4" t="s"><v>11</v></c>'
+                                '<c r="C4" t="s"><v>12</v></c></row></sheetData></worksheet>'}
+# As LibreOffice Calc saves it, here with inline strings: the package's own relationships first, «Personal» last, behind
+# the hidden «Listas», and the sheet's target from the package's root.
+LIBREOFFICE_PARTS = {
+    "_rels/.rels": RELS.format(LINK.format("rId1", "metadata/core-properties", "docProps/core.xml")
+                               + LINK.format("rId3", "officeDocument", "xl/workbook.xml")),
+    "xl/workbook.xml": f'<workbook {MAIN} {LINKS}><sheets><sheet name="Instrucciones" sheetId="1" r:id="rId2"/>'
+                       '<sheet name="Listas" sheetId="2" state="hidden" r:id="rId3"/>'
+                       '<sheet name="Personal" sheetId="3" r:id="rId4"/></sheets></workbook>',
+    "xl/_rels/workbook.xml.rels": RELS.format(
+        LINK.format("rId1", "styles", "styles.xml") + LINK.format("rId2", "worksheet", "worksheets/sheet1.xml")
+        + LINK.format("rId3", "worksheet", "worksheets/sheet2.xml")
+        + LINK.format("rId4", "worksheet", "/xl/worksheets/sheet3.xml")),
+    "xl/worksheets/sheet1.xml": f'<worksheet {MAIN}><sheetData/></worksheet>',
+    "xl/worksheets/sheet2.xml": f'<worksheet {MAIN}><sheetData/></worksheet>',
+    "xl/worksheets/sheet3.xml": f'<worksheet {MAIN}><sheetData>' + "".join(
+        f'<row r="{number}">' + "".join(
+            f'<c r="{column}{number}" s="0" t="inlineStr"><is><t>{value}</t></is></c>'
+            for column, value in zip("ABCDEF", values) if value) + "</row>"
+        for number, values in enumerate((HEADERS, ("ana.rojas", "Ana María", "Rojas Núñez", "", "Enfermera/o", "sí"),
+                                         (), ("2026", "Pedro Pablo", "Muñoz", "", "", "")), 1))
+                                + "</sheetData></worksheet>"}
+# The people both load.
+SAVED = [{"user": "ana.rojas", "name": "Ana María Rojas Núñez", "email": "", "cargo": "role-enfermeria", "admin": True},
+         {"user": "2026", "name": "Pedro Pablo Muñoz", "email": "", "cargo": None, "admin": False}]
+
+
 # Ana's surname and email corrected; Pedro's cargo moved from Médico General, a Clínico, to Jefe/a de Programa.
 CORRECTED = spreadsheet("ana.rojas;Ana María;Rojas Muñoz;ana.rojas@salud.example.org;Enfermera/o;sí",
                         "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;Jefe/a de Programa;")
@@ -1508,19 +1684,66 @@ class PeopleTest(InstallTest):
         return body["errors"]
 
 
+class Planilla(InstallTest):
+    """«Descargar la planilla»: once the centre is chosen, before any team is typed, an Excel workbook built for the
+    centre's type, read here as a spreadsheet program opens it: «Instrucciones» first, «Personal» with its headers and a
+    dropdown of the cargos, named for the centre's type, and of «sí» and «no», from the hidden «Listas»."""
+
+    def download(self):
+        status, body = self.browser.get("/api/spreadsheet")
+        self.assertEqual((status, body.get("file")), (200, "planilla-personal.xlsx"), body)
+        return base64.b64decode(body["content"])
+
+    def test_before_a_centre_is_chosen_the_workbook_answers_the_centro_first_error(self):
+        status, body = self.browser.get("/api/spreadsheet")
+        self.assertEqual((status, body), self.browser.request("POST", "/api/address", {}))
+        self.assertEqual(status, 409)
+
+    def test_the_workbook_has_instrucciones_first_then_personal_with_dropdowns_of_the_centres_cargos_and_of_si_no(self):
+        self.browser.request("POST", "/api/centre", {"code": "999003"})
+        book = OpenedWorkbook(self.download())
+        self.assertEqual([(name, hidden) for name, (_, hidden) in book.sheets.items()],
+                         [("Instrucciones", False), ("Personal", False), ("Listas", True)])
+        self.assertEqual((book.rows("Personal"), book.frozen("Personal")), ([HEADERS], "A2"))
+        rules = {}
+        for cells, rule in book.validations("Personal").items():
+            column, last = re.fullmatch(r"([A-Z])2:\1(\d+)", cells).groups()
+            self.assertGreater(int(last), 8000, cells)  # a sheet of about 8,000 people
+            rules[column] = rule
+        self.assertEqual(sorted(rules), list("ABCDEF"))
+        self.assertEqual([rules[column]["message"][0] for column in "ABCDEF"], HEADERS)
+        self.assertTrue(all(rule["message"][1] for rule in rules.values()))
+        cargos = [name for roles in CARGOS.values() for name in roles.values()]
+        self.assertEqual({column: (rule["type"], rule["style"], rule["list"]) for column, rule in rules.items()
+                          if rule["type"] != "none"},
+                         {"E": ("list", "stop", ("Listas", cargos)), "F": ("list", "stop", ("Listas", ["sí", "no"]))})
+
+    def test_instrucciones_explains_each_column_with_an_example_row_that_loads_and_how_to_save_and_upload_it(self):
+        self.browser.request("POST", "/api/centre", {"code": "999001"})
+        data = self.download()
+        heading, *rows = OpenedWorkbook(data).rows("Instrucciones")
+        columns = {row[0]: dict(zip(heading, row)) for row in rows if row[0] in HEADERS}
+        self.assertEqual(list(columns), HEADERS)
+        self.assertEqual([columns[header]["Obligatoria"] for header in HEADERS[:5]], ["Sí", "Sí", "Sí", "No", "No"])
+        self.assertTrue(all(column["Qué acepta"] and column["Ejemplo"] for column in columns.values()))
+        text = " ".join(" ".join(row) for row in rows)
+        for told in ("«Personal»", ".xlsx", "CSV", "«Subir la planilla completa»"):
+            self.assertIn(told, text)
+        status, body = self.browser.request("POST", "/api/people", workbook_file(
+            filled(data, [[columns[header]["Ejemplo"] for header in HEADERS]])))
+        self.assertEqual((status, len(body["people"]), body["errors"]), (200, 1, []))
+
+    def test_the_blank_workbook_loads_nobody(self):
+        self.browser.request("POST", "/api/centre", {"code": "999001"})
+        status, body = self.browser.request("POST", "/api/people", workbook_file(self.download()))
+        self.assertEqual((status, body["people"], len(body["errors"])), (200, [], 1))
+
+
 class People(PeopleTest):
     """The people spreadsheet on «Equipos»: the operator downloads it blank, fills it in and uploads it; every error is
     named by its line, and the people list shows everyone the install will create. The install creates each account
     with its display name, email and groups, the first administrator's admin rights among them, and a first password
     the passwords file lists, made once."""
-
-    def test_the_blank_spreadsheet_has_the_columns_and_loads_nobody(self):
-        status, body = self.browser.get("/api/spreadsheet")
-        self.assertEqual(status, 200)
-        self.assertTrue(body["file"].endswith(".csv"))
-        self.assertEqual(body["text"].lstrip("\ufeff").splitlines(),
-                         ["Usuario;Nombre;Apellidos;Correo;Cargo;Primer administrador"])
-        self.assertEqual(len(self.errors(body["text"])), 1)
 
     def test_the_people_list_shows_everyone_the_install_will_create_with_their_cargo_matched_without_accents(self):
         status, body = self.upload(SPREADSHEET)
@@ -1558,6 +1781,33 @@ class People(PeopleTest):
         status, body = self.install()
         self.assertEqual(status, 409)
         self.assertIn("«Equipos»", body["error"])
+
+    def same_rows(self, rows):
+        """What a workbook made from the downloaded one and a CSV, in UTF-8 and in Windows-1252, with these rows load,
+        once the three agree: the people and the errors."""
+        blank = base64.b64decode(self.browser.get("/api/spreadsheet")[1]["content"])
+        text = spreadsheet(*(";".join(row) for row in rows))
+        loaded = [self.browser.request("POST", "/api/people", upload)[1]
+                  for upload in (workbook_file(filled(blank, rows)), csv_file(text), csv_file(text, "cp1252"))]
+        self.assertEqual([(body["people"], body["errors"]) for body in loaded],
+                         [(loaded[0]["people"], loaded[0]["errors"])] * 3)
+        return loaded[0]["people"], loaded[0]["errors"]
+
+    def test_a_workbook_and_a_csv_with_the_same_rows_load_the_same_people_and_the_same_errors(self):
+        rows = [["ana.rojas", "Ana María", "Rojas Núñez", "Ana.Rojas@Example.org", "Enfermera/o", "sí"],
+                ["pedro.munoz", "Pedro", "Muñoz Tapia", "pedro.munoz@example.org", "medico general / de familia", "no"],
+                ["luis.vera", "Luis", "Vera", "", "", ""]]
+        self.assertEqual(self.same_rows(rows), ([*PEOPLE, {"user": "luis.vera", "name": "Luis Vera", "email": "",
+                                                           "cargo": None, "admin": False}], []))
+        people, errors = self.same_rows([*rows, ["jose", "José", "Pérez", "", "Cardiólogo/a", ""],
+                                         ["Rosa Soto", "Rosa", "Soto", "", "TENS – Farmacia / PNAC", ""]])
+        self.assertEqual(([error.split(":")[0] for error in errors], people), (["Línea 5", "Línea 6"], []))
+        self.assertIn("«Cardiólogo/a»", errors[0])
+
+    def test_a_workbook_saved_by_excel_or_by_libreoffice_loads(self):
+        for name, parts in (("Excel", EXCEL_PARTS), ("LibreOffice", LIBREOFFICE_PARTS)):
+            status, body = self.browser.request("POST", "/api/people", workbook_file(package(parts)))
+            self.assertEqual((status, body["people"], body["errors"]), (200, SAVED, []), name)
 
     def test_a_spreadsheet_of_about_8000_people_uploads_in_base64(self):
         status, body = self.upload(spreadsheet(*(
@@ -1605,11 +1855,19 @@ class People(PeopleTest):
         self.assertIn("planilla del personal", body["error"])
         self.assertIsNone(self.progress())
 
-    def test_a_spreadsheet_that_is_not_text_is_refused_and_changes_nothing(self):
+    def test_a_spreadsheet_that_is_neither_a_workbook_nor_text_is_refused_and_changes_nothing(self):
         self.upload(SPREADSHEET)
-        for content in (["ana.rojas"], None, "no es base64", base64.b64encode(b"\x81\x8d").decode()):
-            status, body = self.browser.request("POST", "/api/people", {"file": "planilla.csv", "content": content})
-            self.assertEqual((status, bool(body["error"])), (400, True), content)
+        renamed = {**LIBREOFFICE_PARTS,
+                   "xl/workbook.xml": LIBREOFFICE_PARTS["xl/workbook.xml"].replace("Personal", "Hoja1")}
+        # far more than a sheet of 8,000 people unpacks to, from a few kilobytes
+        swollen = {**LIBREOFFICE_PARTS, "xl/worksheets/sheet3.xml": LIBREOFFICE_PARTS["xl/worksheets/sheet3.xml"]
+                   + " " * (20 << 20)}
+        for content in (["ana.rojas"], None, "no es base64", base64.b64encode(b"\x81\x8d").decode(),
+                        *(base64.b64encode(data).decode() for data in (
+                            b"PK\x03\x04 no es un ZIP", package({"planilla.txt": "ana.rojas"}), package(renamed),
+                            package(swollen), SPREADSHEET.encode() + b'"' + b"x" * 200_000))):  # a quote left open
+            status, body = self.browser.request("POST", "/api/people", {"file": "planilla.xlsx", "content": content})
+            self.assertEqual((status, bool(body["error"])), (400, True), str(content)[:40])
         self.assertEqual(self.browser.get("/api/state")[1]["people"], PEOPLE)
 
     def test_instalar_puts_each_person_in_all_staff_their_cargo_and_its_category_and_the_first_administrator_in_admin(

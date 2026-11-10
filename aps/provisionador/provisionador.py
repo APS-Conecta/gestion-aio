@@ -71,13 +71,14 @@ NOT_JSON = "La solicitud no es JSON válido."
 NO_SESSION = "Abra el enlace que mostró el comando de instalación."
 LINK_REFUSED = ("Este enlace ya se usó o fue reemplazado. Para obtener uno nuevo, vuelva a ejecutar el "
                 "comando de instalación en el servidor.")
-NO_CENTRE = "Elija primero el centro: la dirección es la de su nombre."
+NO_CENTRE = "Elija primero el centro en «Centro»."
 IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este establecimiento ya tenía una instalación, "
           "APS Conecta puede liberarla; después presione «Reintentar».")
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
 TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
-NOT_SPREADSHEET = "Suba la planilla del personal como texto CSV."
+NOT_SPREADSHEET = ("Suba la planilla del personal como libro de Excel (.xlsx), con su hoja «Personal», o como CSV "
+                   "delimitado por «;».")
 PEOPLE_KEPT = "La instalación terminó: el personal se administra ahora en «Cuentas», en APS Conecta Gestión."
 NOT_LISTED = "Marque en la lista del personal a las personas que retirará."
 FIRST_ADMIN = ("{} es el primer administrador y no puede retirarse. Marque a otra persona como primer administrador "
@@ -334,16 +335,22 @@ class Provisionador:
             return 200, self.shown(s)
 
     def get_spreadsheet(self, query, body):
-        """GET /api/spreadsheet: the blank people spreadsheet, for the operator to fill in."""
-        return 200, {"file": spreadsheet.FILE, "text": spreadsheet.TEMPLATE}
+        """GET /api/spreadsheet: the blank people workbook, built for the centre's type once it is chosen, for the
+        operator to fill in: its file name and its bytes, base64."""
+        centre = self.state.read().get("centre")
+        if centre is None:
+            return 409, {"error": NO_CENTRE}
+        return 200, {"file": spreadsheet.FILE,
+                     "content": base64.b64encode(spreadsheet.template(centre["type"])).decode()}
 
     def post_people(self, query, body):
-        """POST /api/people {"file": its name, "content": its bytes, base64}: the people spreadsheet, kept as its text.
+        """POST /api/people {"file": its name, "content": its bytes, base64}: the people spreadsheet, as Excel or CSV,
+        kept as its rows.
         The plan then lists the people it loads or each of its errors, and reads it again whenever the teams change;
         «Instalar» and «Reintentar» wait for one that loads people. From «Instalar» on, a corrected one updates the
         people already loaded once «Reintentar» applies it; at «Listo» it stays."""
         try:
-            uploaded = spreadsheet.decoded(base64.b64decode(body.get("content"), validate=True))
+            uploaded = spreadsheet.rows(base64.b64decode(body.get("content"), validate=True))
         except (TypeError, ValueError):
             return 400, {"error": NOT_SPREADSHEET}
         with self.install_lock, self.state.change() as s:
