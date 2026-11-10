@@ -8,7 +8,8 @@ Norte» and «sector norte» are one team, Sector Norte: its id is sector-norte 
 «Cardiovascular» and «Programa Cardiovascular» are Programa Cardiovascular, prog-cardiovascular, in
 Programas/Cardiovascular. Group ids are old gestion's; their names are Spanish, and a name that names the kind of
 establishment names the centre's DEIS type (Director/a de SAPU). Groups do not nest: an account is in the staff-wide
-group, its role's category and its role, and each folder grants groups.
+group, outside the directorate also in the recovery group, its role's category and its role, and each folder grants
+groups.
 """
 
 import re
@@ -17,6 +18,7 @@ import unicodedata
 from deis import fold, hyphenated
 
 STAFF = "all-staff"
+RECOVERY = "staff-recovery"  # every staff member outside the directorate, whose passwords the jefaturas reset
 JEFATURAS = "cat-jefaturas"
 CATEGORIES = {JEFATURAS: "Jefaturas", "cat-clinicos": "Clínicos", "cat-tecnicos": "Técnicos",
               "cat-administrativos": "Administrativos"}
@@ -118,9 +120,16 @@ def declare(sectors, programs):
 
 
 def groups(centre_type):
-    """Every group the install creates, by id, with its name: the staff-wide group, the categories and the roles."""
-    return {STAFF: "Todo el personal", **CATEGORIES,
+    """Every group the install creates, by id, with its name: the staff-wide group, the recovery group, the categories
+    and the roles."""
+    return {STAFF: "Todo el personal", RECOVERY: "Personal fuera del equipo directivo", **CATEGORIES,
             **{role: name.format(type=centre_type) for role, (name, _) in ROLES.items()}}
+
+
+def staff(role):
+    """The staff-wide groups of an account with that role, or with none: «Todo el personal» and, outside the
+    directorate, the recovery group."""
+    return [STAFF] if role in DIRECTORATE else [STAFF, RECOVERY]
 
 
 def bits(words):
@@ -136,16 +145,21 @@ def folders(teams):
 
 
 def cargo_accounts(teams, centre_type):
-    """The cargo accounts, each with its username, name and groups: one per position every establishment has and a
-    jefatura per sector. A sector's jefatura is jefe.<the sector> (jefe.norte), or jefe.<its team id>
-    (jefe.sector-farmacia) when a position holds that username."""
-    accounts = {user: {"user": user, "name": name.format(type=centre_type), "groups": [role, JEFATURAS, STAFF]}
-                for user, name, role in POSITIONS}
+    """The cargo accounts, each with its username, name, groups and the groups it administers: one per position every
+    establishment has and a jefatura per sector. A sector's jefatura is jefe.<the sector> (jefe.norte), or jefe.<its
+    team id> (jefe.sector-farmacia) when a position holds that username. The directorate's administer «Todo el
+    personal», so they set a temporary password for every staff member; the others the recovery group alone."""
+    accounts = {user: account(user, name.format(type=centre_type), role) for user, name, role in POSITIONS}
     for team in teams:
         if team["kind"] == "sector":
             user = "jefe." + team["id"].removeprefix(KINDS["sector"][0])
             if user in accounts:
                 user = "jefe." + team["id"]
-            accounts[user] = {"user": user, "name": f"Jefe/a de {team['name']}",
-                              "groups": ["role-jefe-sector-mais", JEFATURAS, STAFF]}
+            accounts[user] = account(user, f"Jefe/a de {team['name']}", "role-jefe-sector-mais")
     return list(accounts.values())
+
+
+def account(user, name, role):
+    """A jefatura cargo account with that role."""
+    return {"user": user, "name": name, "groups": [role, JEFATURAS, *staff(role)],
+            "administers": [STAFF if role in DIRECTORATE else RECOVERY]}

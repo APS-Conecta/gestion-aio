@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Each person the people spreadsheet loads gets an account with their display name, email and groups: the staff-wide
-group, their cargo's and its category's and, for the first administrator, Nextcloud's admin group. A person retired with
-«Retirar» keeps their account, files and shares, disabled and in none of the groups the install manages (teams.py's and
-admin), and so does a person a corrected spreadsheet drops once the install made their account, until a later
-spreadsheet lists them again. A corrected spreadsheet takes a person out of the managed groups it no longer gives them.
-Any other group, and any account the install did not make, stays as Nextcloud has it. The first passwords of the
-accounts it makes are made once and the passwords file lists them under their current name; an account that existed
-before keeps its own and is not listed.
+group, outside the directorate the recovery group, their cargo's and its category's and, for the first administrator,
+Nextcloud's admin group. A person retired with «Retirar» keeps their account, files and shares, disabled and in none of
+the groups the install manages (teams.py's and admin), and so does a person a corrected spreadsheet drops once the
+install made their account, until a later spreadsheet lists them again. A corrected spreadsheet takes a person out of
+the managed groups it no longer gives them. Any other group, and any account the install did not make, stays as
+Nextcloud has it. The first passwords of the accounts it makes are made once and the passwords file lists them under
+their current name; an account that existed before keeps its own and is not listed.
 
 The step applies the people as «Equipos» declared them when «Instalar» or «Reintentar» was pressed. Its part of the
 end-of-install check compares them with what «Equipos» declares now (a change made since then waits for «Reintentar»)
@@ -33,7 +33,8 @@ OWNED = True  # after «Listo» the Users page owns the people: an upgrade keeps
 def groups(person):
     """Every group the person's account is in."""
     cargo = person["cargo"]
-    return {teams.STAFF, *([cargo, teams.ROLES[cargo][1]] if cargo else []), *([ADMINS] if person["admin"] else [])}
+    return {*teams.staff(cargo), *([cargo, teams.ROLES[cargo][1]] if cargo else []),
+            *([ADMINS] if person["admin"] else [])}
 
 
 def accounts(suite):
