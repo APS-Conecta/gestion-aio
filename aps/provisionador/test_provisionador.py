@@ -508,6 +508,7 @@ RELEASED = [app for app in apps.MANIFEST if app["source"] != "store"]  # the own
 DEFAULT_APPS = {app["id"] for app in apps.MANIFEST if not app.get("optional")}
 OPTIONAL_APPS = {app["id"] for app in apps.MANIFEST if app.get("optional")}
 APPS_STEP = "Aplicaciones"
+PIN = json.loads((HERE / "model.json").read_text(encoding="utf-8"))  # the release's model, by its tag and digest
 versions = itertools.count(1)
 
 
@@ -533,10 +534,12 @@ PUBLISHED = {app["repo"]: dict([app_release(app["id"])]) for app in RELEASED}
 
 def publish(suite):
     """GitHub serves one compatible App release of each own and fork app, signed with the test app key, which the
-    suite ships; the open app store offers every store app."""
+    suite ships; the open app store offers every store app, «IA local»'s connector among them; Ollama's registry serves
+    the release's model at its pinned digest."""
     suite.app_key = KEY.public
     suite.app_releases = {repo: dict(releases) for repo, releases in PUBLISHED.items()}
-    suite.store = {app["id"] for app in apps.MANIFEST if app["source"] == "store"}
+    suite.store = {app["id"] for app in apps.MANIFEST if app["source"] == "store"} | {"integration_openai"}
+    suite.registry = {PIN["model"]: PIN["digest"]}
 
 
 class InstallTest(WizardTest):
@@ -1988,6 +1991,117 @@ class Recording(InstallTest):
         for cpus, listed in ((self.THRESHOLD["cpus"], True), (self.THRESHOLD["cpus"] - 1, False)):
             self.suite.machine = {**self.THRESHOLD, "cpus": cpus}
             self.assertEqual("Grabador de Talk" in self.browser.get("/api/state")[1]["components"], listed, cpus)
+
+
+class LocalAI(InstallTest):
+    """«IA local», the optional install step, off by default and changeable once «Instalar» was pressed. On, our
+    «ollama» community container runs with the GPU the suite port found, one request at a time under a memory cap
+    derived from the server's memory, its model is pulled at the release's pinned digest and Nextcloud's
+    OpenAI-compatible connector points at it, so the suite has a text-generation provider. Off, the container stops,
+    the provider is gone and the model's volume stays."""
+
+    def test_revisar_offers_it_off_and_says_which_gpu_it_found(self):
+        self.claim()
+        for gpu, found in ((None, "ninguna GPU"), ("nvidia", "una GPU NVIDIA"), ("dri", "una GPU AMD o Intel")):
+            self.suite.found_gpu = gpu
+            ai = self.browser.get("/api/state")[1]["ai"]
+            self.assertEqual(ai["chosen"], False, gpu)
+            self.assertIn(found, ai["gpu"])
+
+    def on(self, **machine):
+        """«IA local» turned on before «Instalar», on a server with this hardware, through to «Listo»."""
+        self.suite.machine.update(machine)
+        self.claim()
+        status, body = self.browser.request("POST", "/api/ai", {"on": True})
+        self.assertEqual((status, body["ai"]["chosen"]), (200, True), body)
+        self.install()
+        return self.until("done")
+
+    def test_turned_on_it_runs_ollama_with_the_gpu_under_the_memory_cap_pulls_the_model_and_points_the_connector(self):
+        self.suite.found_gpu = "nvidia"
+        install = self.on(memory_gib=16)
+        self.assertEqual(self.steps(install)["IA local"], ("green", None))
+        # The server's memory beside the suite's own floor, the bootstrap's.
+        self.assertEqual(self.suite.ollama, {"gpu": "nvidia", "memory_gib": 16 - bootstrap_floors()["memory_gib"]})
+        self.assertIn(("nextcloud-aio-ollama", "running"), {(c["id"], c["state"]) for c in self.suite.containers()})
+        self.assertEqual((self.suite.pulled, self.suite.pulls), ({PIN["model"]: PIN["digest"]}, [PIN["model"]]))
+        self.assertEqual(self.suite.apps["integration_openai"], {
+            "enabled": "yes", "url": "http://nextcloud-aio-ollama:11434/v1",
+            "default_completion_model_id": PIN["model"], "chat_endpoint_enabled": "1"})
+        self.assertTrue(self.browser.get("/api/state")[1]["ai"]["chosen"])
+
+    def test_left_off_the_install_runs_no_ollama_and_the_suite_has_no_provider(self):
+        self.claim()
+        self.install()
+        install = self.until("done")
+        self.assertEqual(self.steps(install)["IA local"], ("green", None))
+        self.assertEqual((self.suite.ollama, self.suite.pulls, self.suite.volumes), (None, [], set()))
+        self.assertNotEqual(self.suite.apps.get("integration_openai", {}).get("enabled"), "yes")
+
+    def test_turned_off_after_the_install_the_provider_is_gone_and_the_models_volume_stays(self):
+        self.on(memory_gib=16)
+        status, body = self.browser.request("POST", "/api/ai", {"on": False})
+        self.assertEqual((status, body["ai"]["chosen"]), (200, False), body)
+        install = self.until("done")
+        self.assertIn("«IA local»: se desactiva.", self.texts(install))
+        self.assertEqual(self.suite.apps["integration_openai"]["enabled"], "no")
+        self.assertIsNone(self.suite.ollama)
+        self.assertNotIn("nextcloud-aio-ollama", {c["id"] for c in self.suite.containers()})
+        self.assertEqual(self.suite.volumes, {"nextcloud_aio_ollama"})
+        self.browser.request("POST", "/api/ai", {"on": True})
+        self.until("done")
+        self.assertEqual(self.suite.pulls, [PIN["model"]], "the model in the kept volume was pulled again")
+
+    def test_an_upgrade_runs_it_again_idempotently_and_keeps_the_pins(self):
+        self.suite.found_gpu = "dri"
+        self.on(memory_gib=12)
+        self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
+        self.stop()
+        self.assertIsNone(provisionador.upgrade(self.suite, provisionador.State(self.state), "v1.1.0"))
+        self.start()
+        self.browser = self.operator()
+        install = self.until("done")
+        self.assertEqual(self.steps(install)["IA local"], ("green", None))
+        self.assertEqual(self.suite.ollama, {"gpu": "dri", "memory_gib": 12 - bootstrap_floors()["memory_gib"]})
+        self.assertEqual((self.suite.pulled, self.suite.pulls), ({PIN["model"]: PIN["digest"]}, [PIN["model"]]))
+        self.assertEqual(self.suite.apps["integration_openai"]["default_completion_model_id"], PIN["model"])
+
+    def test_a_tag_the_registry_moved_off_the_pinned_digest_is_refused_and_no_provider_points_at_it(self):
+        self.suite.registry = {PIN["model"]: "sha256:" + "f" * 64}
+        self.suite.machine.update(memory_gib=16)
+        self.claim()
+        self.browser.request("POST", "/api/ai", {"on": True})
+        self.install()
+        status, reason = self.steps(self.until("failed"))["IA local"]
+        self.assertEqual(status, "failed")
+        self.assertIn(f"El modelo {PIN['model']}", reason)
+        self.assertNotIn("integration_openai", self.suite.apps)
+
+    def test_a_server_whose_memory_leaves_nothing_beside_the_suite_refuses_it_saying_so(self):
+        floor = bootstrap_floors()["memory_gib"]
+        self.claim()
+        self.browser.request("POST", "/api/ai", {"on": True})
+        self.install()
+        status, reason = self.steps(self.until("failed"))["IA local"]
+        self.assertEqual(status, "failed")
+        self.assertIn(f"tiene {floor} GiB de memoria y APS Conecta Gestión usa {floor} GiB", reason)
+        self.assertIsNone(self.suite.ollama)
+
+    def test_a_choice_that_is_not_on_or_off_or_one_made_while_installing_is_refused_and_changes_nothing(self):
+        self.claim()
+        for on in ("sí", 1, None):
+            status, body = self.browser.request("POST", "/api/ai", {"on": on})
+            self.assertEqual(status, 400, on)
+            self.assertIn("IA local", body["error"])
+        self.suite.release.clear()
+        self.install()
+        status, body = self.browser.request("POST", "/api/ai", {"on": True})
+        self.assertEqual(status, 409)
+        self.assertIn("Espere", body["error"])
+        self.suite.release.set()
+        self.until("done")
+        self.assertFalse(self.browser.get("/api/state")[1]["ai"]["chosen"])
+        self.assertIsNone(self.suite.ollama)
 
 
 class TrustedCertificates(InstallTest):

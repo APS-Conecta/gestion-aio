@@ -48,7 +48,7 @@ import deis
 import runner
 import spreadsheet
 import teams
-from steps import apps, backups, components, passwords, people
+from steps import apps, backups, components, local_ai, passwords, people
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -85,6 +85,9 @@ FIRST_ADMIN = ("{} es el primer administrador y no puede retirarse. Marque a otr
 PEOPLE_WRONG = "La planilla del personal tiene errores. Corríjalos en «Equipos» y súbala de nuevo."
 NO_PEOPLE = "Suba en «Equipos» la planilla del personal, con su primer administrador."
 NOT_OFFERED = "Elija solo entre las aplicaciones opcionales que ofrece «Revisar»."
+NOT_AI = "Indique si la IA local queda activada o desactivada."
+AI_BUSY = "Espere a que termine la instalación en curso para activar o desactivar la IA local."
+AI_LINE = {True: "«IA local»: se activa.", False: "«IA local»: se desactiva."}
 NOT_LISTO = "El archivo de contraseñas se entrega en «Listo», cuando la instalación terminó."
 CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gestión está instalada en https://{}.\n"
           "El archivo de contraseñas quedó en este servidor, legible solo por root: {}")
@@ -272,6 +275,7 @@ class Provisionador:
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
                                        for app in apps.MANIFEST if app["id"] in apps.OPTIONAL],
+                     "ai": {"chosen": bool(state.get("ai")), "gpu": local_ai.FOUND[self.suite.gpu()]},
                      **self.shown(state), "install": self.progress(busy, state)}
 
     def get_register(self, query, body):
@@ -402,7 +406,8 @@ class Provisionador:
         loaded, retired = declared(state)
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
-                                  optional=frozenset(state.get("optional", ())), teams=state.get("teams", []),
+                                  optional=frozenset(state.get("optional", ())), ai=bool(state.get("ai")),
+                                  teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
                                   upgrade=bool(state.get("install", {}).get("upgrade")),
                                   log=lambda text: runner.log(self.state, text))
@@ -431,6 +436,30 @@ class Provisionador:
                 self.run_install()
         return 202, {"install": self.progress(*self.snapshot())}
 
+    def post_ai(self, query, body):
+        """POST /api/ai {"on": true|false}, «IA local» on «Revisar», off by default: the choice is kept. Once «Instalar»
+        was pressed, a change runs the step again, then the end-of-install check, and «Listo» follows once it is clean.
+        While the install runs, nothing changes."""
+        on = body.get("on")
+        if not isinstance(on, bool):
+            return 400, {"error": NOT_AI}
+        with self.install_lock:
+            busy, state = self.snapshot()
+            if busy:
+                return 409, {"error": AI_BUSY}
+            changed = bool(state.get("ai")) != on and "install" in state
+            with self.state.change() as s:
+                s["ai"] = on
+                if changed:
+                    s["install"]["steps"]["local_ai"] = {"status": "pending"}
+                    s["install"]["listo"] = False
+                    runner.add_line(s["install"], AI_LINE[on])
+            if changed:
+                self.run_install()
+        busy, state = self.snapshot()
+        return 200, {"ai": {"chosen": on, "gpu": local_ai.FOUND[self.suite.gpu()]},
+                     "install": self.progress(busy, state)}
+
     def post_close(self, query, body):
         """POST /api/close, at «Listo»: the passwords file, whose copy stays on the server. The wizard then closes: the
         link and every session stop working and the Provisionador stops."""
@@ -453,6 +482,7 @@ class Provisionador:
         ("POST", "/api/people"): post_people,
         ("POST", "/api/retire"): post_retire,
         ("POST", "/api/install"): post_install,
+        ("POST", "/api/ai"): post_ai,
         ("POST", "/api/close"): post_close,
     }
 

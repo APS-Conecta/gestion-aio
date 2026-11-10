@@ -170,6 +170,10 @@
 					"shm_size": {
 						"type": "integer"
 					},
+					"memory_limit": {
+						"type": "string",
+						"pattern": "^(%[A-Z_]+%|[0-9]+)$"
+					},
 					"secrets": {
 						"type": "array",
 						"items": {
