@@ -6,7 +6,7 @@ in the tokens' colours, the establishment's name in site.css and in the lost-pas
 Theming then says «APS Conecta Gestión» with the token file's colours, the theme's logo and the dark violet as backdrop,
 light only. Nextcloud's own voice goes quiet: its announcements, first-login slides, usage survey and support apps, its
 help links, its «get your own free account» link, its update banners and its iOS app banner are off, and a new person's
-home starts empty instead of with its sample files. «¿Olvidó su contraseña?» opens the help page, which Nextcloud's web
+home starts empty instead of with its sample files. «¿Contraseña olvidada?» opens the help page, which Nextcloud's web
 server serves from the theme folder, in place of Nextcloud's email reset, which then answers that reset is disabled: the
 suite sends no email, and a person gets a temporary password in person. Everyone's personal settings link the suite's
 source code and its licence.

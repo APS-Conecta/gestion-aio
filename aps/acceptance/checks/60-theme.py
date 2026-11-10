@@ -4,7 +4,7 @@
 """Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page and the dashboard
 load the theme's stylesheet, theming's colours are the brand token file's, Nunito Sans is the font Nextcloud serves,
 and the login page names the establishment and shows the suite's motto after its name, with no console error and no
-content-security-policy violation. Its «¿Olvidó su contraseña?» link opens the help page, which the server answers from
+content-security-policy violation. Its «¿Contraseña olvidada?» link opens the help page, which the server answers from
 the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
 no content-security-policy violation, and links back to the login page; Nextcloud's email reset is refused, so no screen
 says a message was sent. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
@@ -58,6 +58,7 @@ evidence = Path(os.environ["EVIDENCE"])
 suite = f"https://{suite_name()}"
 help_link = f"{suite}/themes/{THEME}/{HELP}"
 establishment = provisionador_state()["centre"]["short_name"]
+core = json.loads(machine(f"{NEXTCLOUD} cat /var/www/html/core/l10n/es.json"))["translations"]
 password = person(PERSON, "Persona de prueba")
 
 
@@ -109,7 +110,6 @@ def email_reset_refused(page):
     """Nextcloud's email reset answers, in its own Spanish, that reset is disabled: it sends nothing."""
     answer = page.evaluate(RESET, PERSON)
     print(f"Nextcloud's email reset answers {answer['status']}: {answer['text'][:200]}")
-    core = json.loads(machine(f"{NEXTCLOUD} cat /var/www/html/core/l10n/es.json"))["translations"]
     disabled = core.get("Password reset is disabled", "Password reset is disabled")
     try:
         said = json.loads(answer["text"])
@@ -121,15 +121,18 @@ def email_reset_refused(page):
 
 
 def help_page(page):
-    """From the login page, «¿Olvidó su contraseña?» opens the help page: 200 from the server, the establishment's name,
+    """From the login page, «¿Contraseña olvidada?» opens the help page: 200 from the server, the establishment's name,
     the brand token file's fonts, no console error nor content-security-policy violation, and a link back to the login
     page that works."""
     found = faults(page)
     forgot = page.locator(f'a[href="{help_link}"]')
     if not forgot.is_visible():
         return [f"the login page does not link {help_link}"]
+    label = core["Forgot password?"]
     print(f"login: «{forgot.inner_text().strip()}» links {help_link}")
     wrong = []
+    if forgot.inner_text().strip() != label:
+        wrong.append(f"the login page's link to {help_link} does not read «{label}»")
     with page.expect_response(help_link) as answer:
         forgot.click()
     page.wait_for_load_state()
