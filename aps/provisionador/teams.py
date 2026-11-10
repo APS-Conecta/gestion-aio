@@ -3,12 +3,12 @@
 """The establishment's teams and what the install declares from them, in one place: the groups, the group folders with
 each group's permissions, and the cargo accounts.
 
-A team is a sector or a program the operator types on «Equipos». «Norte», «Sector Norte» and «sector norte» are one
-team, Sector Norte: its group is sector-norte and its folder Sectores/Sector Norte. «Cardiovascular» and «Programa
-Cardiovascular» are Programa Cardiovascular, prog-cardiovascular, in Programas/Cardiovascular. Group ids are old
-gestion's; their names are Spanish, and a name that names the kind of establishment names the centre's DEIS type
-(Director/a de SAPU). Groups do not nest: an account is in the staff-wide group, its role's category, its role and its
-teams, and each folder grants groups.
+A team is a sector or a program the operator types on «Equipos», a shared folder with no member list. «Norte», «Sector
+Norte» and «sector norte» are one team, Sector Norte: its id is sector-norte and its folder Sectores/Sector Norte.
+«Cardiovascular» and «Programa Cardiovascular» are Programa Cardiovascular, prog-cardiovascular, in
+Programas/Cardiovascular. Group ids are old gestion's; their names are Spanish, and a name that names the kind of
+establishment names the centre's DEIS type (Director/a de SAPU). Groups do not nest: an account is in the staff-wide
+group, its role's category and its role, and each folder grants groups.
 """
 
 import re
@@ -65,18 +65,17 @@ ROLES = {
     "role-secretario-direccion": ("Secretario/a de Dirección", "cat-administrativos"),
     "role-guardia-seguridad": ("Guardia de Seguridad", "cat-administrativos"),
 }
-# By kind: the group id's prefix, the word the team's name starts with and the folder its folders sit in.
+# By kind: the team id's prefix, the word the team's name starts with and the folder its folders sit in.
 KINDS = {"sector": ("sector-", "Sector", "Sectores"), "program": ("prog-", "Programa", "Programas")}
 LONGEST = 60  # characters in a typed name
-# Groupfolders' permission words: «read» alone reads; managing also writes, deletes and shares.
-READ, READ_SHARE, EDIT, MANAGE = ("read",), ("read", "share"), ("read", "write"), ("read", "write", "delete", "share")
+# Groupfolders' permission words: managing a folder reads, writes, deletes and shares in it.
+MANAGE = ("read", "write", "delete", "share")
 BITS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # each word's permissions, as Groupfolders lists them
-TRANSVERSAL = "Transversal"
-SUBFOLDERS = ("Protocolos", "Flujogramas", "Documentación", "Registro de redes", "Actas de reuniones")
-UNITS = {"SOME": ("role-administrativo-some",), "Farmacia": ("role-quimico-farmaceutico", "role-tens-farmacia"),
-         "Dental": ("role-dentista", "role-tons"), "OIRS": ("role-oirs",),
-         "Estadística-REM": ("role-estadistica-rem",), "Dirección": ()}  # each with the roles that manage it
-INTRANET = {STAFF: READ, JEFATURAS: EDIT, "role-oirs": EDIT}  # the welcome page's folder: staff read it, these edit it
+SHARED = {STAFF: MANAGE}  # a shared folder's grants: every staff member manages it
+UNITS = ("SOME", "Farmacia", "Dental", "OIRS", "Estadística-REM")  # the units whose folders are shared
+PRIVATE = ("Dirección", "Subdirección")  # the directorate's units, whose folders only its cargos manage and see
+DIRECTORATE = dict.fromkeys(("role-director-cesfam", "role-subdirector-jefe-tecnico", "role-secretario-direccion"),
+                            MANAGE)
 # The positions every establishment has: username, name and role.
 POSITIONS = (("director", "Director/a de {type}", "role-director-cesfam"),
              ("subdirector", "Subdirector/a Médico o Jefe Técnico", "role-subdirector-jefe-tecnico"),
@@ -118,12 +117,10 @@ def declare(sectors, programs):
     return list(found.values())
 
 
-def groups(teams, centre_type):
-    """Every group the install creates, by id, with its name: the staff-wide group, the categories, the roles and one
-    per team."""
+def groups(centre_type):
+    """Every group the install creates, by id, with its name: the staff-wide group, the categories and the roles."""
     return {STAFF: "Todo el personal", **CATEGORIES,
-            **{role: name.format(type=centre_type) for role, (name, _) in ROLES.items()},
-            **{team["id"]: team["name"] for team in teams}}
+            **{role: name.format(type=centre_type) for role, (name, _) in ROLES.items()}}
 
 
 def bits(words):
@@ -131,21 +128,17 @@ def bits(words):
 
 
 def folders(teams):
-    """Every group folder, by its mount point, with each group's permissions in it: the staff read Transversal and the
-    Jefaturas manage it; a unit's roles manage its folder, which the Jefaturas read and share, or manage when the unit
-    has no role of its own; a team and the Jefaturas manage the team's folder."""
-    declared = {TRANSVERSAL: {STAFF: READ, JEFATURAS: MANAGE}}
-    for unit, roles in UNITS.items():
-        declared[f"Unidades/{unit}"] = {**dict.fromkeys(roles, MANAGE), JEFATURAS: READ_SHARE if roles else MANAGE}
-    for team in teams:
-        declared[team["folder"]] = {team["id"]: MANAGE, JEFATURAS: MANAGE}
-    return declared
+    """Every group folder but the Intranet, by its mount point, with each group's permissions in it: every staff member
+    manages each shared unit's and each team's folder; only the directorate's cargos manage Dirección and Subdirección,
+    which nobody else sees."""
+    return {**{f"Unidades/{unit}": SHARED for unit in UNITS}, **{f"Unidades/{unit}": DIRECTORATE for unit in PRIVATE},
+            **{team["folder"]: SHARED for team in teams}}
 
 
 def cargo_accounts(teams, centre_type):
     """The cargo accounts, each with its username, name and groups: one per position every establishment has and a
-    jefatura per sector, in its sector's team too. A sector's jefatura is jefe.<the sector> (jefe.norte), or
-    jefe.<its group> (jefe.sector-farmacia) when a position holds that username."""
+    jefatura per sector. A sector's jefatura is jefe.<the sector> (jefe.norte), or jefe.<its team id>
+    (jefe.sector-farmacia) when a position holds that username."""
     accounts = {user: {"user": user, "name": name.format(type=centre_type), "groups": [role, JEFATURAS, STAFF]}
                 for user, name, role in POSITIONS}
     for team in teams:
@@ -154,5 +147,5 @@ def cargo_accounts(teams, centre_type):
             if user in accounts:
                 user = "jefe." + team["id"]
             accounts[user] = {"user": user, "name": f"Jefe/a de {team['name']}",
-                              "groups": ["role-jefe-sector-mais", team["id"], JEFATURAS, STAFF]}
+                              "groups": ["role-jefe-sector-mais", JEFATURAS, STAFF]}
     return list(accounts.values())

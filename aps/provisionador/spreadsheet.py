@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The people spreadsheet the operator uploads on «Equipos», as a spreadsheet saves it as CSV with «;»: a first line
-naming the columns, then one person per line. A person's groups are ids teams.py gives (sector-norte, role-medico),
+naming the columns, then one person per line. A person's groups are ids teams.py gives (cat-clinicos, role-medico),
 separated by spaces or commas; exactly one person is the first administrator, «sí» in primer_admin, and not one
 retired with «Retirar». The suite's administrator and the cargo accounts keep their usernames. Each error names its
 line, and a spreadsheet with any error loads nobody.
@@ -50,7 +50,7 @@ def read(text, declared, centre_type, retired=()):
     nobody. `retired` holds the usernames retired with «Retirar»."""
     if not text:
         return [], []
-    known = teams.groups(declared, centre_type)
+    known = teams.groups(centre_type)
     reserved = {ADMINISTRATOR: "el administrador de la suite",
                 **{account["user"]: f"la cuenta de cargo «{account['name']}»"
                    for account in teams.cargo_accounts(declared, centre_type)}}
