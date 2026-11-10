@@ -129,7 +129,7 @@ def help_page(page):
     if not forgot.is_visible():
         return [f"the login page does not link {help_link}"]
     print(f"login: «{forgot.inner_text().strip()}» links {help_link}")
-    wrong = email_reset_refused(page)
+    wrong = []
     with page.expect_response(help_link) as answer:
         forgot.click()
     page.wait_for_load_state()
@@ -177,7 +177,7 @@ def stale_talk_texts():
 problems = []
 with chromium() as browser:
     page = browser.new_page(**WINDOW)
-    problems += login_page(page, "login") + help_page(page)
+    problems += login_page(page, "login") + email_reset_refused(page) + help_page(page)
     log_in(page, suite, PERSON, password)
     for label in PAGES:
         open_page(page, label)
