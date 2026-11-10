@@ -76,7 +76,8 @@ def hardware():
                           if re.fullmatch(r"card\d+", card.parent.name)})
         for device in devices:
             vendor, vram = sysfs(device / "vendor"), sysfs(device / "mem_info_vram_total")
-            gpus.append({"name": GPU_VENDORS.get(vendor, vendor), "vram_mib": int(vram) // 1048576 if vram else None})
+            if vendor in GPU_VENDORS:
+                gpus.append({"name": GPU_VENDORS[vendor], "vram_mib": int(vram) // 1048576 if vram else None})
     ram = re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text())
     cpu = re.search(r"model name\s*:\s*(.+)", Path("/proc/cpuinfo").read_text())
     return {"gpus": gpus, "ram_gib": round(int(ram[1]) / 1048576, 1) if ram else None,
