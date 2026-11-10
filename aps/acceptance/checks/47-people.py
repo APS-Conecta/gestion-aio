@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The people the spreadsheet uploaded on «Equipos» (17-install) loaded, in the installed suite: each one not retired
 (48-retire checks those) has an enabled account with their display name and email, and of the groups the install manages
-is in the staff-wide group, their cargo's and its category's alone, the first administrator in the admin group too.
+is in the staff-wide groups, their cargo's and its category's alone, the first administrator in the admin group too.
 Each logs in at the suite's name, in a browser that trusts the suite's roots alone, with the first password the
 passwords file lists for them; the passwords are masked in the log, never printed."""
 
@@ -37,7 +37,7 @@ wrong, first = [], {}
 for person in people:
     info = json.loads(occ(f"user:info {person['user']} --output=json"))
     cargo = person["cargo"]  # 17-install gives everyone a cargo
-    wanted = {teams.STAFF, cargo, teams.ROLES[cargo][1], *([ADMINS] if person["admin"] else [])}
+    wanted = {*teams.staff(cargo), cargo, teams.ROLES[cargo][1], *([ADMINS] if person["admin"] else [])}
     print(f"{person['user']}: {info['display_name']}, {info['email']}, enabled {info['enabled']}, "
           f"in {sorted(info['groups'])}")
     if ((info["display_name"], info["email"], info["enabled"]) != (person["name"], person["email"], True)

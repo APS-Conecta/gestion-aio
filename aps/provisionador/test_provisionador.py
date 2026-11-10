@@ -1381,7 +1381,8 @@ class Equipos(InstallTest):
         self.install()
         self.until("done")
         made = set(self.suite.groups) - {"admin", "IntraVox Admins", "IntraVox Editors", "IntraVox Users"}
-        self.assertEqual(made, {"all-staff", *CARGOS, *(role for roles in CARGOS.values() for role in roles)})
+        self.assertEqual(made, {"all-staff", "staff-recovery", *CARGOS,
+                                *(role for roles in CARGOS.values() for role in roles)})
         self.assertEqual(self.suite.groups["all-staff"]["name"], "Todo el personal")
         self.assertEqual({mount: folder["groups"] for mount, folder in self.folders().items()}, FOLDERS)
 
@@ -1400,7 +1401,8 @@ class Equipos(InstallTest):
         self.assertEqual({gid: group["name"] for gid, group in self.suite.groups.items() if gid.startswith("role-")},
                          cargos)
         for n, (role, category) in enumerate((role, category) for category, roles in CARGOS.items() for role in roles):
-            self.assertEqual(self.member_of(f"p{n}") - {"admin"}, {"all-staff", category, role}, role)
+            outside = [] if role in DIRECTORATE else ["staff-recovery"]  # the directorate's cargos are not in it
+            self.assertEqual(self.member_of(f"p{n}") - {"admin"}, {"all-staff", *outside, category, role}, role)
 
     def test_the_cargo_accounts_join_their_groups_and_the_passwords_file_lists_each_first_password(self):
         self.claim()
@@ -1410,8 +1412,8 @@ class Equipos(InstallTest):
         self.assertLessEqual(CARGO, set(self.suite.users))
         members = {gid: group["members"] for gid, group in self.suite.groups.items()}
         for user, groups in (("director", ("role-director-cesfam", "cat-jefaturas", "all-staff")),
-                             ("jefe.some", ("role-jefe-some", "cat-jefaturas", "all-staff")),
-                             ("jefe.norte", ("role-jefe-sector-mais", "cat-jefaturas", "all-staff"))):
+                             ("jefe.some", ("role-jefe-some", "cat-jefaturas", "all-staff", "staff-recovery")),
+                             ("jefe.norte", ("role-jefe-sector-mais", "cat-jefaturas", "all-staff", "staff-recovery"))):
             self.assertEqual({gid for gid, users in members.items() if user in users}, set(groups), user)
         self.assertEqual(self.suite.users["jefe.norte"]["name"], "Jefe/a de Sector Norte")
         passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
@@ -1419,13 +1421,14 @@ class Equipos(InstallTest):
             self.assertIn(f"  Usuario: {user}\n  Contraseña: {self.suite.users[user]['password']}\n", passwords)
         self.assertEqual(len({self.suite.users[user]["password"] for user in CARGO}), len(CARGO))
 
-    def test_instalar_makes_exactly_the_cargo_accounts_group_admins_of_all_staff_a_sector_added_on_equipos_too(self):
+    def test_instalar_makes_exactly_the_cargo_accounts_group_admins_a_sector_added_on_equipos_too(self):
         self.claim()
         self.teams(**TEAMS)
         self.teams(sectors=[*TEAMS["sectors"], "Oriente"], programs=TEAMS["programs"])
         self.install()
         self.until("done")
-        self.assertEqual(self.suite.sub_admins, dict.fromkeys(CARGO | {"jefe.oriente"}, {"all-staff"}))
+        self.assertEqual(self.suite.sub_admins, {**dict.fromkeys(CARGO | {"jefe.oriente"}, {"staff-recovery"}),
+                                                 "director": {"all-staff"}, "subdirector": {"all-staff"}})
 
     def test_the_end_of_install_check_finds_a_missing_and_an_extra_group_admin_and_reintentar_restores_the_set(self):
         self.claim()
@@ -1442,7 +1445,8 @@ class Equipos(InstallTest):
         self.assertIn("ana, director, jefe.norte", reason)
         self.install()
         self.until("done")
-        self.assertEqual(self.suite.sub_admins, dict.fromkeys(CARGO, {"all-staff"}))
+        self.assertEqual(self.suite.sub_admins, {**dict.fromkeys(CARGO, {"staff-recovery"}),
+                                                 "director": {"all-staff"}, "subdirector": {"all-staff"}})
 
     def test_every_staff_member_lands_on_the_welcome_page_which_names_the_establishment(self):
         self.claim()
@@ -1940,15 +1944,33 @@ class People(PeopleTest):
                           for user in ("ana.rojas", "pedro.munoz")},
                          {"ana.rojas": ("Ana María Rojas Núñez", "ana.rojas@example.org"),
                           "pedro.munoz": ("Pedro Muñoz Tapia", "pedro.munoz@example.org")})
-        self.assertEqual(self.member_of("ana.rojas"), {"admin", "all-staff", "cat-clinicos", "role-enfermeria"})
-        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico"})
+        self.assertEqual(self.member_of("ana.rojas"),
+                         {"admin", "all-staff", "staff-recovery", "cat-clinicos", "role-enfermeria"})
+        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "staff-recovery", "cat-clinicos", "role-medico"})
 
-    def test_a_person_with_a_blank_cargo_is_in_all_staff_alone_and_in_admin_as_the_first_administrator(self):
+    def test_a_person_with_a_blank_cargo_is_in_the_staff_wide_groups_alone_and_in_admin_as_the_first_administrator(
+            self):
         self.upload(spreadsheet("ana.rojas;Ana;Rojas;;;sí", "luis.vera;Luis;Vera;;  ;no"))
         self.install()
         self.until("done")
-        self.assertEqual((self.member_of("ana.rojas"), self.member_of("luis.vera")), ({"admin", "all-staff"},
-                                                                                     {"all-staff"}))
+        self.assertEqual((self.member_of("ana.rojas"), self.member_of("luis.vera")),
+                         ({"admin", "all-staff", "staff-recovery"}, {"all-staff", "staff-recovery"}))
+
+    def test_the_jefaturas_administer_the_staff_outside_the_directorate_and_the_director_and_subdirector_everyone(
+            self):
+        """The recovery group holds every staff member but the directorate's people and cargo accounts: the jefaturas
+        set temporary passwords for its members alone, the director and subdirector cargo accounts for every staff
+        member."""
+        self.upload(spreadsheet("ana.rojas;Ana;Rojas;;Enfermera/o;sí", "luis.vera;Luis;Vera;;;",
+                                "olga.pinto;Olga;Pinto;;Subdirector/a Médico o Jefe Técnico;",
+                                "rosa.diaz;Rosa;Díaz;;Secretario/a de Dirección;"))
+        self.install()
+        self.until("done")
+        jefaturas = {"jefe.farmacia", "jefe.some", "jefe.norte", "jefe.sur"}
+        self.assertEqual(self.suite.groups["staff-recovery"], {"name": "Personal fuera del equipo directivo",
+                                                               "members": {"ana.rojas", "luis.vera", *jefaturas}})
+        self.assertEqual(self.suite.sub_admins, {"director": {"all-staff"}, "subdirector": {"all-staff"},
+                                                 **dict.fromkeys(jefaturas, {"staff-recovery"})})
 
     def test_the_passwords_file_lists_each_persons_first_password(self):
         self.upload(SPREADSHEET)
@@ -2003,7 +2025,7 @@ class PeopleChanges(PeopleTest):
         ana = self.suite.users["ana.rojas"]
         self.assertEqual((ana["name"], ana["email"]), ("Ana María Rojas Muñoz", "ana.rojas@salud.example.org"))
         self.assertEqual(self.member_of("pedro.munoz"),
-                         {"all-staff", "cat-jefaturas", "role-jefe-programa", "comite-calidad"})
+                         {"all-staff", "staff-recovery", "cat-jefaturas", "role-jefe-programa", "comite-calidad"})
         self.assertEqual(self.passwords(), first)
         passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
         self.assertIn(f"\nAna María Rojas Muñoz\n  Usuario: ana.rojas\n  Contraseña: {first['ana.rojas']}\n", passwords)
@@ -2199,7 +2221,8 @@ class PeopleChanges(PeopleTest):
         self.suite.answering = True
         self.until("done")
         self.assertEqual((ana["name"], ana["email"]), ("Ana Rojas", "ana@example.org"))
-        self.assertEqual(self.member_of("pedro.munoz"), {"all-staff", "cat-clinicos", "role-medico-oftalmologo"})
+        self.assertEqual(self.member_of("pedro.munoz"),
+                         {"all-staff", "staff-recovery", "cat-clinicos", "role-medico-oftalmologo"})
 
     def test_the_end_of_install_check_flags_a_listed_persons_disabled_account_and_reintentar_enables_it(self):
         self.retire("pedro.munoz")
