@@ -1463,6 +1463,21 @@ class Equipos(InstallTest):
         self.assertIn("Centro de Salud Familiar Los Castaños", json.dumps(home, ensure_ascii=False))
         self.assertEqual(json.loads(intranet["files"]["es/navigation.json"])["items"][0]["uniqueId"], home["uniqueId"])
 
+    def test_the_welcome_page_is_the_only_home_and_reintentar_turns_a_dashboard_turned_back_on_off_again(self):
+        self.claim()
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        self.assertEqual((self.suite.system["defaultapp"], self.suite.apps["dashboard"]["enabled"]), ("intravox", "no"))
+        self.suite.apps["dashboard"]["enabled"] = "yes"  # an administrator turned Nextcloud's Dashboard back on
+        self.suite.answering = True
+        steps = self.steps(self.until("failed"))
+        self.assertEqual(steps[WELCOME_STEP][0], "failed")
+        self.assertIn("dashboard.enabled", steps[WELCOME_STEP][1])
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["dashboard"]["enabled"], "no")
+
     def test_the_end_of_install_check_finds_a_changed_grant_on_any_folder_and_reintentar_restores_it(self):
         self.claim()
         self.teams(**TEAMS)

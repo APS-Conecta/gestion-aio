@@ -740,10 +740,10 @@ class FakeSuite:
         self.release.set()
         self.dies = False  # the Provisionador dies while AIO's start runs; AIO goes on
         self.system = {}  # Nextcloud's system settings
-        # Each installed app's settings, as Nextcloud ships them: Nextcloud's own voice on.
+        # Each installed app's settings, as Nextcloud ships them: Nextcloud's own voice and its Dashboard on.
         self.apps = {"core": {}, "admin_audit": {}, "theming": {}, "office": {}, "eurooffice": {},
                      **{app: {"enabled": "yes"} for app in ("nextcloud_announcements", "firstrunwizard",
-                                                            "survey_client", "support")}}
+                                                            "survey_client", "support", "dashboard")}}
         # The apps AIO's start installs and sets up with the components' switches: the antivirus, which only logs what
         # its background scan finds infected, and full-text search, with the store's files provider.
         self.apps |= {"files_antivirus": {"enabled": "yes", "av_infected_action": "only_log"},

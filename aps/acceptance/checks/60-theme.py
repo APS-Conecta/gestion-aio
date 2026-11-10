@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page and the dashboard
+"""Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page and «Inicio»
 load the theme's stylesheet, theming's colours are the brand token file's, Nunito Sans is the font Nextcloud serves,
 and the login page names the establishment and shows the suite's motto after its name, with no console error and no
 content-security-policy violation. Its «¿Contraseña olvidada?» link opens the help page, which the server answers from
 the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
 no content-security-policy violation, and links back to the login page; Nextcloud's email reset is refused, so no screen
-says a message was sent. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
-the login page, the dashboard, Files, Talk or the personal settings, which link the suite's source code and its
-licence. The custom menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of
-Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme
-overrides texts of, after upstream's start updated them: Talk's, left stale before the restart, is its own Spanish as
-Nextcloud holds it with the theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh browser."""
+says a message was sent. A staff member who logs in lands on «Inicio», the welcome page, the only home: Nextcloud's
+Dashboard is off, and its address does not open it. They see no «Nextcloud» and no link to nextcloud.com on the login
+page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. The custom
+menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of Nextcloud's container,
+and the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme overrides texts of, after
+upstream's start updated them: Talk's, left stale before the restart, is its own Spanish as Nextcloud holds it with the
+theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh browser."""
 
 import json
 import os
@@ -23,16 +24,21 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
+import teams  # noqa: E402
 from browser import (NEXTCLOUD, chromium, faults, fonts, log_in, machine, occ, person,  # noqa: E402
                      provisionador_state, suite_name)
 from playwright.sync_api import Error  # noqa: E402
 from steps.theme import HELP, PLACED, SUITE, THEME  # noqa: E402
+from steps.welcome import APP, DASHBOARD, GREETING  # noqa: E402
 
 PERSON = "tema-prueba"
 WINDOW = {"viewport": {"width": 1280, "height": 900}, "locale": "es-CL"}
 SOURCE = "https://github.com/APS-Conecta/gestion-aio"
-PAGES = {"dashboard": ("/apps/dashboard/", "#app-dashboard"), "files": ("/apps/files/", "#app-navigation-vue"),
-         "talk": ("/apps/spreed/", "#app-navigation-vue"), "settings": ("/settings/user", f'a[href="{SOURCE}"]')}
+# Each page by its label: its address and what shows once it is ready. «Inicio» is ready once its seeded first heading
+# shows, matched exactly: IntraVox's own Spanish has «bienvenida» in other texts.
+PAGES = {"inicio": (f"/apps/{APP}/", f'#app-{APP} >> text="{GREETING}"'),
+         "files": ("/apps/files/", "#app-navigation-vue"), "talk": ("/apps/spreed/", "#app-navigation-vue"),
+         "settings": ("/settings/user", f'a[href="{SOURCE}"]')}
 # What the page shows of the theme: its stylesheet, theming's colours and the establishment's name.
 THEMED = """() => {
   const style = getComputedStyle(document.body), headline = document.querySelector('.login-form__headline');
@@ -60,6 +66,7 @@ help_link = f"{suite}/themes/{THEME}/{HELP}"
 establishment = provisionador_state()["centre"]["short_name"]
 core = json.loads(machine(f"{NEXTCLOUD} cat /var/www/html/core/l10n/es.json"))["translations"]
 password = person(PERSON, "Persona de prueba")
+occ(f"group:adduser {teams.STAFF} {PERSON}")  # staff, as the people step makes them: «Inicio» is theirs to read
 
 
 def shows(page, label):
@@ -153,6 +160,21 @@ def help_page(page):
     return wrong + ([f"the help page logged errors or content-security-policy violations: {found}"] if found else [])
 
 
+def inicio_is_the_only_home(page):
+    """Login landed on «Inicio», and Nextcloud's Dashboard is off: the server lists it disabled, and its address does
+    not open it."""
+    page.wait_for_load_state()
+    landed = page.url
+    disabled = json.loads(occ("app:list --output=json"))["disabled"]
+    answer = page.goto(f"{suite}/apps/{DASHBOARD}/")
+    opened = page.locator(f"#app-{DASHBOARD}").count() > 0
+    print(f"login landed on {landed}; the Dashboard is {'off' if DASHBOARD in disabled else 'on'}, and its address "
+          f"answers {answer.status}{', opening it' if opened else ''}")
+    return ([f"login lands on {landed}, not «Inicio»"] if f"/apps/{APP}/" not in landed else []) + (
+        [] if DASHBOARD in disabled else ["Nextcloud's Dashboard is on"]) + (
+        ["the Dashboard's address still opens it"] if opened else [])
+
+
 def open_page(page, label):
     path, ready = PAGES[label]
     page.goto(f"{suite}{path}")
@@ -182,9 +204,10 @@ with chromium() as browser:
     page = browser.new_page(**WINDOW)
     problems += login_page(page, "login") + email_reset_refused(page) + help_page(page)
     log_in(page, suite, PERSON, password)
+    problems += inicio_is_the_only_home(page)
     for label in PAGES:
         open_page(page, label)
-        problems += (themed(page, label) if label == "dashboard" else []) + shows(page, label)
+        problems += (themed(page, label) if label == "inicio" else []) + shows(page, label)
     if not page.locator(f'a[href="{SOURCE}"]').is_visible():
         problems.append("the personal settings do not link the source code")
     if not page.locator('a[href="https://www.gnu.org/licenses/agpl-3.0.html"]').is_visible():

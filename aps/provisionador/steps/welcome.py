@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The welcome page: every staff member lands on IntraVox («Inicio», a default fork app), whose home page names the
-establishment and says where its shared folders are. IntraVox keeps its pages in the group folder Intranet, which
-grants every staff member what teams.SHARED declares, and no other group but Nextcloud's administrators, as whom
-IntraVox's setup and occ reach the folder; IntraVox follows those grants, so every staff member edits the pages. A page
-that is already there stays as staff left it. The step ensures IntraVox and Groupfolders."""
+establishment and says where its shared folders are. Nextcloud's Dashboard, a second home with Nextcloud's own widgets
+and voice, is off, so «Inicio» is the only one; without IntraVox, Nextcloud lands on Files. IntraVox keeps its pages in
+the group folder Intranet, which grants every staff member what teams.SHARED declares, and no other group but
+Nextcloud's administrators, as whom IntraVox's setup and occ reach the folder; IntraVox follows those grants, so every
+staff member edits the pages. A page that is already there stays as staff left it. The step ensures IntraVox and
+Groupfolders."""
 
 import json
 
@@ -17,7 +19,10 @@ NAME = "Página de bienvenida"
 NEEDS = ("groups",)
 APP = "intravox"
 MOUNT = "Intranet"  # the group folder's name, as staff see it in Files
-SETTINGS = {"system": {"defaultapp": APP}, "apps": {APP: {"groupfolder_name": MOUNT}}}
+DASHBOARD = "dashboard"  # Nextcloud's Dashboard app, which the step turns off
+IMPORTED = {"system": {"defaultapp": APP}, "apps": {APP: {"groupfolder_name": MOUNT}}}  # what occ config:import sets
+SETTINGS = {**IMPORTED, "apps": {**IMPORTED["apps"], DASHBOARD: {"enabled": "no"}}}  # what Nextcloud holds once done
+GREETING = "Bienvenida"  # the home page's first heading
 HOME = "page-aps-00000001-0000-4000-8000-000000000001"
 LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folder"),
          ("Calendario", "La agenda del equipo", "/apps/calendar/", "calendar"),
@@ -39,7 +44,7 @@ def pages(centre):
                f"{MOUNT}, donde puede editar esta página. Las carpetas {' y '.join(teams.PRIVATE)} son del equipo "
                f"directivo: solo las ven {', '.join(directorate[:-1])} y {directorate[-1]}.")
     home = {"uniqueId": HOME, "title": "Inicio", "language": "es", "layout": {"columns": 1, "sideColumns": [], "rows": [
-        row({"type": "heading", "content": "Bienvenida", "level": 3},
+        row({"type": "heading", "content": GREETING, "level": 3},
             {"type": "heading", "content": centre["name"], "level": 1},
             {"type": "text", "content": f"{centre['comuna']} · {centre['health_service']}"},
             backgroundColor="var(--color-primary-element)"),
@@ -57,7 +62,8 @@ def run(context):
     if failed := apps.ensure(context, "groupfolders", APP):
         return failed
     suite = context.suite
-    suite.occ("config:import", stdin=json.dumps(SETTINGS))  # IntraVox names its folder before it makes it
+    suite.occ("config:import", stdin=json.dumps(IMPORTED))  # IntraVox names its folder before it makes it
+    suite.occ("app:disable", DASHBOARD)
     suite.occ("intravox:setup", "--skip-demo")
     intranet = listed(suite).get(MOUNT)
     if intranet is None:
