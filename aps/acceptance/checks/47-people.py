@@ -30,7 +30,7 @@ people, errors = spreadsheet.read(state.get("spreadsheet"), state.get("teams", [
 if errors or not people:
     sys.exit(f"«Equipos» loaded no people: {errors}")
 people = [person for person in people if person["user"] not in state.get("retired", [])]
-managed = {*teams.groups(state.get("teams", []), state["centre"]["type"]), ADMINS}
+managed = {*teams.groups(state["centre"]["type"]), ADMINS}
 suite = f"https://{suite_name()}"
 passwords = provisionador_file(FILE)  # never printed
 wrong, first = [], {}

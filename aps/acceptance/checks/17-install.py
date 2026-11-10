@@ -49,7 +49,8 @@ DECLARED = teams.declare(SECTORS, PROGRAMS)
 PEOPLE = ("Usuario;Nombre;Apellidos;Correo;Cargo;Primer administrador\r\n"
           "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;Enfermera/o;sí\r\n"
           "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;medico general / de familia;no\r\n"
-          "luis.vera;Luis;Vera Soto;luis.vera@example.org;TENS – Procedimientos / Vacunatorio;no\r\n")
+          "luis.vera;Luis;Vera Soto;luis.vera@example.org;TENS – Procedimientos / Vacunatorio;no\r\n"
+          "rosa.diaz;Rosa;Díaz Fuentes;rosa.diaz@example.org;Secretario/a de Dirección;no\r\n")
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,

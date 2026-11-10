@@ -1257,16 +1257,25 @@ CARGOS = {
         "role-abastecimiento-finanzas": "Abastecimiento y Finanzas",
         "role-secretario-direccion": "Secretario/a de Dirección",
         "role-guardia-seguridad": "Guardia de Seguridad"}}
-READ, READ_SHARE, EDIT, MANAGE = 1, 17, 7, 31  # Groupfolders' permission bits
+MANAGE = 31  # Groupfolders' permission bits to read, write, delete and share
+STAFF = {"all-staff": MANAGE}
+DIRECTORATE = {"role-director-cesfam": MANAGE, "role-subdirector-jefe-tecnico": MANAGE,
+               "role-secretario-direccion": MANAGE}
+# Every group folder the install makes for TEAMS, by its mount point, with each group's permissions in it.
+FOLDERS = {"Sectores/Sector Norte": STAFF, "Sectores/Sector Sur": STAFF, "Programas/Atención Domiciliaria": STAFF,
+           "Programas/Salud Mental-Adulto": STAFF, "Unidades/SOME": STAFF, "Unidades/Farmacia": STAFF,
+           "Unidades/Dental": STAFF, "Unidades/OIRS": STAFF, "Unidades/Estadística-REM": STAFF,
+           "Unidades/Dirección": DIRECTORATE, "Unidades/Subdirección": DIRECTORATE,
+           "Intranet": {**STAFF, "admin": MANAGE}}  # IntraVox reaches it as Nextcloud's admin
 FOLDERS_STEP = "Carpetas de equipo y permisos"
 WELCOME_STEP = "Página de bienvenida"
 
 
 class Equipos(InstallTest):
-    """«Equipos»: each sector and program the operator types becomes a team, with its group and its folder, and each
-    sector a cargo account; «Revisar» follows them until «Instalar». The install creates the groups, the group folders
-    with their permissions, the welcome page every staff member lands on and the cargo accounts, whose first passwords
-    the passwords file lists."""
+    """«Equipos»: each sector and program the operator types becomes a team, with its folder, and each sector a cargo
+    account; «Revisar» follows them until «Instalar». The install creates the groups, the group folders with their
+    permissions, the welcome page every staff member lands on and the cargo accounts, whose first passwords the
+    passwords file lists."""
 
     def teams(self, **body):
         return self.browser.request("POST", "/api/teams", body)
@@ -1275,7 +1284,7 @@ class Equipos(InstallTest):
         """Each group folder by its mount point: each group's permissions and the files seeded in it."""
         return {f["mount"]: f for f in self.suite.group_folders.values()}
 
-    def test_each_sector_and_program_becomes_one_team_with_its_group_and_folder(self):
+    def test_each_sector_and_program_becomes_one_team_with_its_folder(self):
         status, body = self.teams(**TEAMS)
         self.assertEqual((status, body["teams"]), (200, DECLARED))
         self.assertEqual(self.browser.get("/api/state")[1]["teams"], DECLARED)
@@ -1303,30 +1312,19 @@ class Equipos(InstallTest):
         self.assertEqual(status, 409)
         self.assertIn("«Instalar»", body["error"])
         self.assertEqual([t["name"] for t in self.browser.get("/api/state")[1]["teams"]], ["Sector Oriente"])
-        self.assertIn("sector-oriente", self.suite.groups)
+        self.assertIn("Sectores/Sector Oriente", self.folders())
 
-    def test_instalar_creates_the_groups_and_the_group_folders_with_their_permissions(self):
+    def test_instalar_creates_no_team_group_and_each_folder_grants_exactly_its_groups(self):
+        """Every staff member manages each team's, unit's and the Intranet's folder; only the directorate's three
+        cargos manage Dirección and Subdirección, so nobody else sees them."""
         self.claim()
         self.teams(**TEAMS)
         self.install()
         self.until("done")
-        groups = {gid: group["name"] for gid, group in self.suite.groups.items()}
-        self.assertLessEqual({"all-staff": "Todo el personal", "cat-jefaturas": "Jefaturas", "cat-clinicos": "Clínicos",
-                              "cat-tecnicos": "Técnicos", "cat-administrativos": "Administrativos",
-                              "role-director-cesfam": "Director/a de CESFAM", "role-oirs": "Encargado/a OIRS",
-                              "sector-norte": "Sector Norte", "prog-salud-mental-adulto": "Programa Salud Mental-Adulto"
-                              }.items(), groups.items())
-        folders = {mount: folder["groups"] for mount, folder in self.folders().items()}
-        self.assertLessEqual({
-            "Transversal": {"all-staff": READ, "cat-jefaturas": MANAGE},
-            "Sectores/Sector Norte": {"sector-norte": MANAGE, "cat-jefaturas": MANAGE},
-            "Programas/Atención Domiciliaria": {"prog-atencion-domiciliaria": MANAGE, "cat-jefaturas": MANAGE},
-            "Unidades/Farmacia": {"role-quimico-farmaceutico": MANAGE, "role-tens-farmacia": MANAGE,
-                                  "cat-jefaturas": READ_SHARE},
-            "Unidades/Dirección": {"cat-jefaturas": MANAGE}}.items(), folders.items())
-        self.assertEqual(len([m for m in folders if m.split("/")[0] in ("Sectores", "Programas", "Unidades")]), 10)
-        self.assertEqual(self.folders()["Transversal"]["files"], dict.fromkeys(
-            ["Protocolos", "Flujogramas", "Documentación", "Registro de redes", "Actas de reuniones"]))
+        made = set(self.suite.groups) - {"admin", "IntraVox Admins", "IntraVox Editors", "IntraVox Users"}
+        self.assertEqual(made, {"all-staff", *CARGOS, *(role for roles in CARGOS.values() for role in roles)})
+        self.assertEqual(self.suite.groups["all-staff"]["name"], "Todo el personal")
+        self.assertEqual({mount: folder["groups"] for mount, folder in self.folders().items()}, FOLDERS)
 
     def test_equipos_lists_the_41_cargos_instalar_makes_their_groups_and_a_person_with_a_cargo_joins_its_category(
             self):
@@ -1354,7 +1352,7 @@ class Equipos(InstallTest):
         members = {gid: group["members"] for gid, group in self.suite.groups.items()}
         for user, groups in (("director", ("role-director-cesfam", "cat-jefaturas", "all-staff")),
                              ("jefe.some", ("role-jefe-some", "cat-jefaturas", "all-staff")),
-                             ("jefe.norte", ("role-jefe-sector-mais", "sector-norte", "cat-jefaturas", "all-staff"))):
+                             ("jefe.norte", ("role-jefe-sector-mais", "cat-jefaturas", "all-staff"))):
             self.assertEqual({gid for gid, users in members.items() if user in users}, set(groups), user)
         self.assertEqual(self.suite.users["jefe.norte"]["name"], "Jefe/a de Sector Norte")
         passwords = self.browser.request("POST", "/api/close", {})[1]["passwords"]
@@ -1362,35 +1360,67 @@ class Equipos(InstallTest):
             self.assertIn(f"  Usuario: {user}\n  Contraseña: {self.suite.users[user]['password']}\n", passwords)
         self.assertEqual(len({self.suite.users[user]["password"] for user in CARGO}), len(CARGO))
 
+    def test_instalar_makes_exactly_the_cargo_accounts_group_admins_of_all_staff_a_sector_added_on_equipos_too(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.teams(sectors=[*TEAMS["sectors"], "Oriente"], programs=TEAMS["programs"])
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.sub_admins, dict.fromkeys(CARGO | {"jefe.oriente"}, {"all-staff"}))
+
+    def test_the_end_of_install_check_finds_a_missing_and_an_extra_group_admin_and_reintentar_restores_the_set(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        del self.suite.sub_admins["jefe.norte"]
+        self.suite.sub_admins["director"].add("cat-clinicos")
+        self.suite.sub_admins["ana"] = {"all-staff"}
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))["Cuentas de cargo"]
+        self.assertEqual(status, "failed")
+        self.assertIn("ana, director, jefe.norte", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.sub_admins, dict.fromkeys(CARGO, {"all-staff"}))
+
     def test_every_staff_member_lands_on_the_welcome_page_which_names_the_establishment(self):
         self.claim()
         self.install()
         self.until("done")
         self.assertEqual(self.suite.system["defaultapp"], "intravox")
         intranet = self.folders()["Intranet"]
-        self.assertLessEqual({"all-staff": READ, "cat-jefaturas": EDIT, "role-oirs": EDIT}.items(),
-                             intranet["groups"].items())
+        self.assertEqual(intranet["groups"], FOLDERS["Intranet"])
         home = json.loads(intranet["files"]["es/home.json"])
         self.assertEqual(home["title"], "Inicio")
+        links = next(w for row in home["layout"]["rows"] for w in row["widgets"] if w["type"] == "links")
+        self.assertEqual([link["url"] for link in links["items"]],
+                         ["/apps/files/", "/apps/calendar/", "/apps/contacts/", "/apps/spreed/"])
         self.assertIn("Centro de Salud Familiar Los Castaños", json.dumps(home, ensure_ascii=False))
         self.assertEqual(json.loads(intranet["files"]["es/navigation.json"])["items"][0]["uniqueId"], home["uniqueId"])
 
-    def test_the_end_of_install_check_finds_an_undeclared_grant_and_reintentar_revokes_it_keeping_every_password(self):
+    def test_the_end_of_install_check_finds_a_changed_grant_on_any_folder_and_reintentar_restores_it(self):
         self.claim()
         self.teams(**TEAMS)
         self.suite.answering = False
         self.install()
         self.until_checked("Dirección de la suite")
-        north = self.folders()["Sectores/Sector Norte"]
-        north["groups"]["all-staff"] = MANAGE
+        held = self.folders()
+        held["Sectores/Sector Norte"]["groups"]["all-staff"] = 1
+        held["Unidades/Dirección"]["groups"]["all-staff"] = 1
+        held["Intranet"]["groups"]["all-staff"] = 1
+        held["Intranet"]["groups"]["IntraVox Users"] = MANAGE
         first = {user: self.suite.users[user]["password"] for user in CARGO}
         self.suite.answering = True
-        status, reason = self.steps(self.until("failed"))[FOLDERS_STEP]
-        self.assertEqual(status, "failed")
-        self.assertIn("Sectores/Sector Norte", reason)
+        steps = self.steps(self.until("failed"))
+        self.assertEqual((steps[FOLDERS_STEP][0], steps[WELCOME_STEP][0]), ("failed", "failed"))
+        for mount in ("Sectores/Sector Norte", "Unidades/Dirección"):
+            self.assertIn(mount, steps[FOLDERS_STEP][1])
+        self.assertIn("Intranet", steps[WELCOME_STEP][1])
         self.install()
         self.until("done")
-        self.assertEqual(north["groups"], {"sector-norte": MANAGE, "cat-jefaturas": MANAGE})
+        self.assertEqual({mount: folder["groups"] for mount, folder in self.folders().items()}, FOLDERS)
         self.assertEqual({user: self.suite.users[user]["password"] for user in CARGO}, first)
 
     def test_a_failed_optional_app_leaves_the_folders_and_the_welcome_page_green(self):
@@ -1683,7 +1713,8 @@ class PeopleChanges(PeopleTest):
         self.install()
         self.until("done")
         self.assertEqual((self.suite.users["pedro.munoz"]["enabled"], self.member_of("pedro.munoz")),
-                         (False, {"comite-calidad"}), "disabled and in no team, the account and its files kept")
+                         (False, {"comite-calidad"}),
+                         "disabled and in no managed group, the account and its files kept")
         self.assertEqual(self.passwords(), first)
         self.assertNotIn("user:delete", {command[0] for command in self.suite.commands})
 
@@ -1799,13 +1830,13 @@ class PeopleChanges(PeopleTest):
     def test_an_account_made_later_in_nextcloud_and_not_in_the_spreadsheet_is_untouched(self):
         self.until_people()
         self.suite.add_user("rosa.soto", "Rosa Soto", "contraseña de Rosa")
-        for group in ("all-staff", "sector-norte"):
+        for group in ("all-staff", "cat-tecnicos"):
             self.suite.groups[group]["members"].add("rosa.soto")
         self.upload(CORRECTED)
         self.assertEqual(self.browser.get("/api/state")[1]["dropped"], [])
         self.reintentar()
         self.assertEqual((self.suite.users["rosa.soto"]["enabled"], self.member_of("rosa.soto")),
-                         (True, {"all-staff", "sector-norte"}))
+                         (True, {"all-staff", "cat-tecnicos"}))
         self.assertEqual((self.suite.users["director"]["enabled"], self.member_of("director")),
                          (True, {"role-director-cesfam", "cat-jefaturas", "all-staff"}), "a cargo account stays")
 

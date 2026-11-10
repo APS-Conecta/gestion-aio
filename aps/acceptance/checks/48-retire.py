@@ -25,7 +25,7 @@ WHOAMI = ("fetch('/ocs/v2.php/cloud/user?format=json', {headers: {'OCS-APIReques
 evidence = Path(os.environ["EVIDENCE"])
 state = provisionador_state()
 retired = state.get("retired") or sys.exit("«Retirar» retired nobody on «Equipos»")
-managed = {*teams.groups(state["teams"], state["centre"]["type"]), ADMINS}
+managed = {*teams.groups(state["centre"]["type"]), ADMINS}
 name = suite_name()
 passwords = provisionador_file(FILE)  # never printed
 wrong = []

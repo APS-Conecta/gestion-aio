@@ -212,7 +212,7 @@ async function equipos() {
 
 function showTeams({teams: declared}) {
   $("teams").replaceChildren(...declared.map(
-    (team) => item(team.name, "", `Grupo ${team.id} · carpeta ${team.folder}`)));
+    (team) => item(team.name, "", `Carpeta ${team.folder}`)));
 }
 
 async function keepTeams() {
