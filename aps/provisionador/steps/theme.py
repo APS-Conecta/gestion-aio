@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The APS Conecta theme and branding. The theme folder (aps/theme/apsconecta) goes into Nextcloud's themes folder,
 which upstream's updates keep, with the brand folder (the brand token file, its fonts and the favicon), its art rendered
-in the tokens' colours, the establishment's name in site.css and the text overrides. Theming then says «APS Conecta
-Gestión» with the token file's colours, the theme's logo and the dark violet as backdrop, light only. Nextcloud's own
-voice goes quiet: its announcements, first-login slides, usage survey and support apps, its help links, its «get your
-own free account» link, its update banners and its iOS app banner are off, and a new person's home starts empty
-instead of with its sample files. Everyone's personal settings link the suite's source code and its licence.
+in the tokens' colours, the establishment's name in site.css and in the lost-password help page, and the text overrides.
+Theming then says «APS Conecta Gestión» with the token file's colours, the theme's logo and the dark violet as backdrop,
+light only. Nextcloud's own voice goes quiet: its announcements, first-login slides, usage survey and support apps, its
+help links, its «get your own free account» link, its update banners and its iOS app banner are off, and a new person's
+home starts empty instead of with its sample files. «¿Contraseña olvidada?» opens the help page, which Nextcloud's web
+server serves from the theme folder, in place of Nextcloud's email reset, which then answers that reset is disabled: the
+suite sends no email, and a person gets a temporary password in person. Everyone's personal settings link the suite's
+source code and its licence.
 
 The text overrides (aps/theme/texts.json) are Spanish translations, Nextcloud's and its apps', that name the suite
 «Nextcloud», saying «APS Conecta Gestión» instead («Nextcloud Talk» is «Talk», and Euro-Office's «Nextcloud Office» is
@@ -15,6 +18,7 @@ a theme's translations to its own on every screen and email it renders, and its 
 aps/images/nextcloud/browser-texts.php builds them.
 """
 
+import html
 import json
 from pathlib import Path
 
@@ -26,6 +30,7 @@ NEEDS = ("start",)
 THEME = "apsconecta"
 SOURCE = Path(__file__).resolve().parents[2] / "theme"  # aps/theme, or theme/ in the bundle
 PLACED = f"/var/www/html/themes/{THEME}"
+HELP = "contrasena.html"  # the lost-password help page, in the theme folder
 SUITE = "APS Conecta Gestión"
 SITE = "https://apsconecta.cl"  # where the suite's name links on the login page
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
@@ -44,11 +49,17 @@ def theming():
             **{image: f"{PLACED}/{path}" for image, path in IMAGES.items()}, "background": "backgroundColor"}
 
 
-def settings():
+def imported(context):
+    """What occ config:import sets: IMPORTED, and the help page's address on the suite as the lost-password link."""
+    link = f"https://{context.name}/themes/{THEME}/{HELP}"
+    return {**IMPORTED, "system": {**IMPORTED["system"], "lost_password_link": link}}
+
+
+def settings(context):
     """What Nextcloud holds once the step is done, as occ config:list answers it."""
     held = {key: True if key == "disable-user-theming" else value for key, value in theming().items()
             if key not in IMAGES and key != "background"}
-    return {"system": IMPORTED["system"],
+    return {"system": imported(context)["system"],
             "apps": {"theming": {**IMPORTED["apps"]["theming"], **held, "backgroundMime": "backgroundColor",
                                  **{f"{image}Mime": "image/svg+xml" for image in IMAGES}},
                      **{app: {"enabled": "no"} for app in OFF}}}
@@ -66,13 +77,15 @@ def files(context):
         placed[f"{folder}/l10n/es.json"] = json.dumps({"translations": overrides}, ensure_ascii=False).encode()
     quoted = context.centre["short_name"].replace("\\", "\\\\").replace('"', '\\"')
     placed["core/css/site.css"] = f':root {{ --aps-establishment: "{quoted}"; }}\n'.encode()
+    named = html.escape(context.centre["short_name"])
+    placed[HELP] = found[HELP].read_text(encoding="utf-8").replace("{establishment}", named).encode()
     return placed
 
 
 def run(context):
     context.suite.theme(THEME, files(context))
     context.suite.browser_texts()
-    context.suite.occ("config:import", stdin=json.dumps(IMPORTED))
+    context.suite.occ("config:import", stdin=json.dumps(imported(context)))
     for key, value in theming().items():
         context.suite.occ("theming:config", key, value)
     for app in OFF:
@@ -81,4 +94,4 @@ def run(context):
 
 
 def check(context):
-    return differences(context.suite, settings())
+    return differences(context.suite, settings(context))
