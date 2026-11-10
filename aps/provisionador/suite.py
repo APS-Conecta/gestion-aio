@@ -75,8 +75,8 @@ THEME_FAILED = ("No se pudo instalar el tema de APS Conecta Gestión en el servi
 NO_BACKUP_PASSWORD = ("El contenedor maestro de la suite aún no tiene la contraseña de cifrado de las copias de "
                       "seguridad, que el archivo de contraseñas debe incluir. Presione «Reintentar»; si vuelve a "
                       "ocurrir, contacte a APS Conecta.")
-ISSUER_FAILED = ("No se pudo obtener ni verificar el certificado intermedio de {}. Revise la conexión a internet del "
-                 "servidor y presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+ISSUER_FAILED = ("Nextcloud no pudo verificar ni importar el certificado intermedio del ISP. Presione «Reintentar»; si "
+                 "vuelve a ocurrir, contacte a APS Conecta.")
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
 NEXTCLOUD = "nextcloud-aio-nextcloud"
 DOWN = {MASTERCONTAINER: SUITE_DOWN, NEXTCLOUD: NEXTCLOUD_DOWN}
@@ -188,26 +188,17 @@ OCC = """input=$(mktemp) && cat > "$input" && php /var/www/html/occ --no-ansi --
 status=$?; rm -f "$input"; exit $status"""
 
 
-# In the Nextcloud container, for the host in $1 that serves only its leaf: the CA its certificate names (its CA
-# Issuers pointer) is imported into Nextcloud's trusted certificates once it is verified to chain the leaf to a root
-# the container trusts, as Nextcloud's own requests then do. An import already there is kept.
+# In the Nextcloud container, the CA certificate on stdin, in PEM: imported into Nextcloud's trusted certificates as $1
+# once it verifies against the roots the container trusts, as Nextcloud's own requests then do. An import already there
+# is kept.
 ISSUER = r"""
 set -eu
-host=$1
+php /var/www/html/occ security:certificates --output=json | grep -qF "\"$1\"" && exit 0
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
-timeout 20 openssl s_client -connect "$host:443" -servername "$host" < /dev/null 2> /dev/null \
-  | openssl x509 > "$dir/leaf"
-issuer=$(openssl x509 -in "$dir/leaf" -noout -ext authorityInfoAccess | sed -n 's/^ *CA Issuers - URI://p' | head -n 1)
-name=$(basename "$issuer" .crt).pem
-case "$issuer" in http://*.crt | https://*.crt) ;; *) echo "no CA Issuers pointer: $issuer" >&2; exit 1 ;; esac
-case "$name" in *[!A-Za-z0-9._-]*) echo "unexpected issuer name: $name" >&2; exit 1 ;; esac
-php /var/www/html/occ security:certificates --output=json | grep -qF "\"$name\"" && exit 0
-curl -fsS --max-time 20 --proto =http,https -o "$dir/issuer" "$issuer"
-openssl x509 -inform DER -in "$dir/issuer" -out "$dir/$name" 2> /dev/null \
-  || openssl x509 -in "$dir/issuer" -out "$dir/$name"
-openssl verify -untrusted "$dir/$name" -verify_hostname "$host" "$dir/leaf"
-php /var/www/html/occ security:certificates:import "$dir/$name"
+openssl x509 -out "$dir/$1"
+openssl verify "$dir/$1"
+php /var/www/html/occ security:certificates:import "$dir/$1"
 """
 
 
@@ -494,10 +485,10 @@ class Suite:
         theme folders."""
         self.execute(NEXTCLOUD, ("php", "/browser-texts.php"), failed=THEME_FAILED)
 
-    def trust_issuer(self, host):
-        """Nextcloud's own requests verify a host that serves only its leaf certificate: the CA that issued it is among
-        Nextcloud's trusted certificates."""
-        self.execute(NEXTCLOUD, ("sh", "-c", ISSUER, "sh", host), failed=ISSUER_FAILED.format(host))
+    def trust_issuer(self, name, certificate):
+        """Nextcloud's own requests verify the ISP's site, which serves only its leaf certificate: the CA certificate
+        that issued it, `certificate` in PEM, is among Nextcloud's trusted certificates as `name`."""
+        self.execute(NEXTCLOUD, ("sh", "-c", ISSUER, "sh", name), certificate, ISSUER_FAILED)
 
     @staticmethod
     def download(url, what, method="GET"):
@@ -716,8 +707,8 @@ class FakeSuite:
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
         # Calls in an outage: the name service's "claim" and "address", "aio" (the mastercontainer), "nextcloud"
-        # (Nextcloud's container), "issuer" (a host's CA, out of the internet's reach) and "eurooffice" (Euro-Office,
-        # which does not answer Nextcloud).
+        # (Nextcloud's container), "issuer" (the ISP's intermediate, which the roots Nextcloud's container trusts do not
+        # verify) and "eurooffice" (Euro-Office, which does not answer Nextcloud).
         self.down = set()
         self.limited = False  # the name service refuses claims over its limits
         self.claims = []  # the DEIS codes the name service gave a name
@@ -762,7 +753,7 @@ class FakeSuite:
         self.indexed = False  # whether full-text search's index was built
         self.commands = []  # every occ command, by its arguments
         self.imports = []  # the settings each config:import brought
-        self.issuers = []  # the hosts whose certificate's issuer Nextcloud trusts
+        self.issuers = {}  # the CA certificates Nextcloud trusts for the ISP's leaf: their PEM text, by their name
         self.app_key = ""  # the app key the suite ships; the tests sign their App releases with their own
         self.app_releases = {}  # GitHub's App releases, by repo, newest first: {tag: {file name: bytes}}
         self.store = set()  # the ids of the apps the open app store offers
@@ -972,12 +963,11 @@ class FakeSuite:
         self.texts_built.append({"themes": set(self.themes),
                                  "apps": {app for app, values in self.apps.items() if values.get("enabled") == "yes"}})
 
-    def trust_issuer(self, host):
+    def trust_issuer(self, name, certificate):
         self._outage_guard("nextcloud")
         if "issuer" in self.down:
-            raise Unreachable(ISSUER_FAILED.format(host))
-        if host not in self.issuers:
-            self.issuers.append(host)
+            raise Unreachable(ISSUER_FAILED)
+        self.issuers.setdefault(name, certificate)
 
     def trust_cacerts(self):
         self._outage_guard("nextcloud")
