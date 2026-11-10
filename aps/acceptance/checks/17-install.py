@@ -20,18 +20,14 @@ other optional one off (Talk recording follows the hardware: 70-talk checks it) 
 folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO
 keeps it in."""
 
-import io
 import json
 import os
-import posixpath
 import subprocess
 import sys
 import tempfile
 import time
-import zipfile
 from pathlib import Path
 from urllib.parse import quote, urlsplit
-from xml.etree import ElementTree
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
@@ -39,7 +35,7 @@ import spreadsheet  # noqa: E402
 import teams  # noqa: E402
 from browser import aio_config, aio_file, as_person, chromium, hardware, machine, suite_name, verified  # noqa: E402
 from browser import STORED, first_password, provisionador_file, provisionador_state, wizard_link  # noqa: E402
-from browser import faults, fonts  # noqa: E402
+from browser import PEOPLE, XLSX, faults, fonts, people_workbook, upload_people  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import chosen  # noqa: E402
@@ -50,47 +46,14 @@ from steps.start import NAME as START  # noqa: E402
 LISTO_WITHIN = 20  # minutes: the install's GitHub downloads alone can take several on a slow day
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
-# 47-people checks these people but the one retired.
-PEOPLE = (("ana.rojas", "Ana María", "Rojas Núñez", "ana.rojas@example.org", "Enfermera/o", "sí"),
-          ("pedro.munoz", "Pedro", "Muñoz Tapia", "pedro.munoz@example.org", "medico general / de familia", "no"),
-          ("luis.vera", "Luis", "Vera Soto", "luis.vera@example.org", "TENS – Procedimientos / Vacunatorio", "no"),
-          ("rosa.diaz", "Rosa", "Díaz Fuentes", "rosa.diaz@example.org", "Secretario/a de Dirección", "no"))
 # As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252.
 CSV = "".join(";".join(row) + "\r\n" for row in (spreadsheet.COLUMNS, *PEOPLE)).encode("cp1252")
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
             "isFulltextsearchEnabled": True, "isHarpEnabled": False,
             "isDockerSocketProxyEnabled": False, "isWhiteboardEnabled": False, "aio_community_containers": "caddy",
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
-
-
-def filled(data, rows):
-    """The downloaded workbook with these rows typed into «Personal» below its headers, as a spreadsheet program saves
-    them: inline strings, a blank cell left out."""
-    with zipfile.ZipFile(io.BytesIO(data)) as package:
-        parts = {item.filename: package.read(item) for item in package.infolist()}
-    sheet = next(sheet for sheet in ElementTree.fromstring(parts["xl/workbook.xml"]).iterfind("{*}sheets/{*}sheet")
-                 if sheet.get("name") == spreadsheet.PERSONAL)
-    link = next(value for key, value in sheet.attrib.items() if key.endswith("}id"))
-    links = ElementTree.fromstring(parts["xl/_rels/workbook.xml.rels"])
-    part = posixpath.join("xl", next(r.get("Target") for r in links if r.get("Id") == link))
-    root = ElementTree.fromstring(parts[part])
-    table = root.find("{*}sheetData")
-    namespace = table.tag.removesuffix("sheetData")
-    for number, values in enumerate(rows, 2):
-        row = ElementTree.SubElement(table, f"{namespace}row", r=str(number))
-        for column, value in zip("ABCDEF", values):
-            if value:
-                cell = ElementTree.SubElement(row, f"{namespace}c", r=f"{column}{number}", t="inlineStr")
-                ElementTree.SubElement(ElementTree.SubElement(cell, f"{namespace}is"), f"{namespace}t").text = value
-    parts[part] = ElementTree.tostring(root, encoding="utf-8")
-    out = io.BytesIO()
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as package:
-        for name, content in parts.items():
-            package.writestr(name, content)
-    return out.getvalue()
 
 
 def red(page):
@@ -144,18 +107,9 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.fill("#sectors", "\n".join(SECTORS))
     page.fill("#programs", "\n".join(PROGRAMS))
     expect(page.locator("#teams li strong")).to_have_text([team["name"] for team in DECLARED])
-    with page.expect_download() as download:
-        page.click("#people-template")
-    if download.value.suggested_filename != spreadsheet.FILE:
-        sys.exit(f"«Descargar la planilla» gave {download.value.suggested_filename}, not {spreadsheet.FILE}")
-    workbook = filled(Path(download.value.path()).read_bytes(), PEOPLE)
+    workbook = people_workbook(page)
     for file, kind, data in (("planilla-personal.csv", "text/csv", CSV), (spreadsheet.FILE, XLSX, workbook)):
-        with page.expect_response("**/api/people") as answer:
-            page.set_input_files("#people-file", files=[{"name": file, "mimeType": kind, "buffer": data}])
-        loaded = answer.value.json()
-        if answer.value.status != 200 or loaded["errors"] or loaded["people"] != people:
-            sys.exit(f"«Equipos» did not load the people of {file}: {loaded.get('errors') or loaded.get('error')}")
-        expect(page.locator("#people li strong")).to_have_text([person["name"] for person in people])
+        upload_people(page, file, kind, data, people)
     expect(page.locator("#people li span")).to_contain_text(
         [teams.ROLES[person["cargo"]][0].format(type=centre["type"]) for person in people])
     page.screenshot(path=evidence / "equipos.png")
