@@ -45,9 +45,10 @@ SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operato
 DECLARED = teams.declare(SECTORS, PROGRAMS)
 # As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people but the one retired.
 PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
-          "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;sector-norte role-enfermeria;sí\r\n"
-          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur prog-cardiovascular role-medico;no\r\n"
-          "luis.vera;Luis;Vera Soto;luis.vera@example.org;sector-norte role-tens-procedimientos;no\r\n")
+          "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;role-enfermeria;sí\r\n"
+          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;role-medico;no\r\n"
+          "luis.vera;Luis;Vera Soto;luis.vera@example.org;role-tens-procedimientos;no\r\n"
+          "rosa.diaz;Rosa;Díaz Fuentes;rosa.diaz@example.org;role-secretario-direccion;no\r\n")
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,

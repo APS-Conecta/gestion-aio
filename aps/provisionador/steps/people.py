@@ -54,7 +54,7 @@ def differences(context, found):
     display name, email and groups, and their account enabled if the install made it and «Retirar» did not retire them;
     the account of a person retired, or dropped from the spreadsheet once the install made it, disabled. A person the
     spreadsheet no longer lists is reconciled while their account exists."""
-    managed, retired = {*teams.groups(context.teams, context.centre["type"]), ADMINS}, set(context.retired)
+    managed, retired = {*teams.groups(context.centre["type"]), ADMINS}, set(context.retired)
     listed = {person["user"]: person for person in context.people}
     ours = set(made(context.folder, context.teams, context.centre["type"]))
     leaving = retired | ours
