@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The people spreadsheet the operator uploads on «Equipos», as a spreadsheet saves it as CSV with «;»: a first line
-naming the columns, then one person per line. A person's groups are ids teams.py gives (sector-norte, role-medico),
-separated by spaces or commas; exactly one person is the first administrator, «sí» in primer_admin, and not one
-retired with «Retirar». The suite's administrator and the cargo accounts keep their usernames. Each error names its
-line, and a spreadsheet with any error loads nobody.
+naming the columns, then one person per line. A person's cargo is blank or one of the cargo names teams.py gives;
+exactly one person is the first administrator, «sí» in «Primer administrador», and not one retired with «Retirar».
+Headers, cargos and «sí» are read without accents or capitals. The suite's administrator and the cargo accounts keep
+their usernames. Each error names its line, and a spreadsheet with any error loads nobody.
 """
 
 import csv
@@ -15,15 +15,14 @@ import unicodedata
 import teams
 from deis import fold
 
-COLUMNS = ("usuario", "nombre", "apellidos", "correo", "grupos", "primer_admin")
+COLUMNS = ("Usuario", "Nombre", "Apellidos", "Correo", "Cargo", "Primer administrador")
 FILE = "planilla-personal.csv"
 TEMPLATE = "\ufeff" + ";".join(COLUMNS) + "\r\n"  # the byte order mark has Excel read it as UTF-8
 ADMINISTRATOR = "admin"  # the suite's administrator, whom AIO creates
 USER = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 EMAIL = re.compile(r"\w[\w.+'-]*@[\w-]+(\.[\w-]+)+")
-SEPARATOR = re.compile(r"[\s,]+")
 LONGEST = 64  # characters in a display name, as Nextcloud keeps it
-FIRST_ADMIN = {"si": True, "no": False, "": False}  # primer_admin's answers, accent- and case-blind
+FIRST_ADMIN = {"si": True, "no": False, "": False}  # «Primer administrador»'s answers, accent- and case-blind
 
 HEADER = "Línea 1: debe nombrar las columnas {}, separadas por «;». Descargue la planilla y vuelva a completarla."
 WIDTH = "Línea {}: tiene {} columnas y debe tener {}, separadas por «;»."
@@ -36,21 +35,31 @@ NO_NAME = "Línea {}: faltan el nombre o los apellidos."
 NOT_TEXT = "Línea {}: el nombre tiene caracteres que no son texto."
 TOO_LONG = "Línea {}: «{}» es demasiado largo: el nombre y los apellidos deben sumar a lo más {} caracteres."
 BAD_EMAIL = "Línea {}: el correo «{}» no es válido."
-UNKNOWN = "Línea {}: el grupo «{}» no existe. Use los grupos que muestra «Equipos»."
-BAD_FIRST_ADMIN = "Línea {}: primer_admin dice «{}». Escriba «sí» o déjelo vacío."
+NO_CARGO = "Línea {}: el cargo «{}» no está en la lista de cargos del establecimiento. Corríjalo o déjelo vacío."
+BAD_FIRST_ADMIN = "Línea {}: «Primer administrador» dice «{}». Escriba «sí» o «no»."
 SECOND_ADMIN = "Línea {}: la línea {} ya marca al primer administrador. Marque solo una persona."
 RETIRED_ADMIN = "Línea {}: «{}» fue retirado/a y no puede ser el primer administrador. Marque a otra persona."
-NO_ADMIN = "Ninguna persona está marcada como primer administrador. Escriba «sí» en primer_admin para una sola."
+NO_ADMIN = ("Ninguna persona está marcada como primer administrador. Escriba «sí» en «Primer administrador» para una "
+            "sola.")
 EMPTY = "La planilla no tiene personas. Agregue una por línea, bajo la que nombra las columnas."
 
 
+def decoded(data):
+    """The text of a spreadsheet saved as CSV: UTF-8, or Windows-1252 as Excel saves a plain CSV. UnicodeDecodeError, a
+    ValueError, for bytes that are neither."""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("cp1252")
+
+
 def read(text, declared, centre_type, retired=()):
-    """The people the spreadsheet's text loads, each with its username, display name, email, the groups its line lists
-    and whether it is the first administrator, and its errors in Spanish: nobody while it has one. No text loads
-    nobody. `retired` holds the usernames retired with «Retirar»."""
+    """The people the spreadsheet's text loads, each with its username, display name, email, the group id of its cargo
+    (None when blank) and whether it is the first administrator, and its errors in Spanish: nobody while it has one. No
+    text loads nobody. `retired` holds the usernames retired with «Retirar»."""
     if not text:
         return [], []
-    known = teams.groups(declared, centre_type)
+    cargos = {fold(name): role for role, name in teams.groups(centre_type).items() if role in teams.ROLES}
     reserved = {ADMINISTRATOR: "el administrador de la suite",
                 **{account["user"]: f"la cuenta de cargo «{account['name']}»"
                    for account in teams.cargo_accounts(declared, centre_type)}}
@@ -62,7 +71,7 @@ def read(text, declared, centre_type, retired=()):
         while len(cells) > len(COLUMNS) and not cells[-1]:
             cells.pop()  # the empty columns a sheet may carry
         if line == 1:
-            if [cell.lower() for cell in cells] != list(COLUMNS):
+            if [fold(cell) for cell in cells] != [fold(column) for column in COLUMNS]:
                 return [], [HEADER.format(";".join(COLUMNS))]
             continue
         if not any(cells):
@@ -73,7 +82,7 @@ def read(text, declared, centre_type, retired=()):
         elif len(cells) != len(COLUMNS):
             errors.append(WIDTH.format(line, len(cells), len(COLUMNS)))
         else:
-            found, wrong = person(line, cells, known, reserved, retired, seen, admins)
+            found, wrong = person(line, cells, cargos, reserved, retired, seen, admins)
             people += [found] if found else []
             errors += wrong
     if not end:
@@ -85,13 +94,12 @@ def read(text, declared, centre_type, retired=()):
     return ([] if errors else people), errors
 
 
-def person(line, cells, known, reserved, retired, seen, admins):
-    """The person a line with every column loads, or None, and its errors. `seen` and `admins` gather the usernames and
-    the first administrators' lines so far."""
-    user, first, last, email, groups, admin = cells
+def person(line, cells, cargos, reserved, retired, seen, admins):
+    """The person a line with every column loads, or None, and its errors. `cargos` holds each cargo's group id by its
+    folded name; `seen` and `admins` gather the usernames and the first administrators' lines so far."""
+    user, first, last, email, cargo, admin = cells
     user, email = user.lower(), email.lower()
     name = " ".join(unicodedata.normalize("NFC", f"{first} {last}").split())
-    listed = list(dict.fromkeys(group.lower() for group in SEPARATOR.split(groups) if group))
     errors = []
     if not USER.fullmatch(user):
         errors.append(BAD_USER.format(line, user))
@@ -109,12 +117,13 @@ def person(line, cells, known, reserved, retired, seen, admins):
         errors.append(TOO_LONG.format(line, name, LONGEST))
     if email and not EMAIL.fullmatch(email):
         errors.append(BAD_EMAIL.format(line, email))
-    errors += [UNKNOWN.format(line, group) for group in listed if group not in known]
+    if cargo and fold(cargo) not in cargos:
+        errors.append(NO_CARGO.format(line, cargo))
     if fold(admin) not in FIRST_ADMIN:
         errors.append(BAD_FIRST_ADMIN.format(line, admin))
     elif FIRST_ADMIN[fold(admin)]:
         errors += [SECOND_ADMIN.format(line, admins[0])] if admins else []
         errors += [RETIRED_ADMIN.format(line, user)] if user in retired else []
         admins.append(line)
-    return None if errors else {"user": user, "name": name, "email": email, "groups": listed,
+    return None if errors else {"user": user, "name": name, "email": email, "cargo": cargos.get(fold(cargo)),
                                 "admin": FIRST_ADMIN[fold(admin)]}, errors

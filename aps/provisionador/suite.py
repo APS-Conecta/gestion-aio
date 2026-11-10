@@ -62,8 +62,10 @@ GITHUB_FAILED = ("No se pudo descargar {} desde GitHub. Revise la conexión a in
                  "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 GITHUB_LIMITED = ("GitHub limitó las consultas de este servidor al pedir {}. Presione «Reintentar» en una hora; si "
                   "vuelve a ocurrir, contacte a APS Conecta.")
-SEED_FAILED = ("Nextcloud no pudo recibir las carpetas y páginas de las carpetas de equipo. Presione «Reintentar»; si "
-               "vuelve a ocurrir, contacte a APS Conecta.")
+SEED_FAILED = ("Nextcloud no pudo recibir las páginas de la Intranet. Presione «Reintentar»; si vuelve a ocurrir, "
+               "contacte a APS Conecta.")
+GROUP_ADMIN_FAILED = ("Nextcloud no pudo revisar ni asignar los administradores de grupo de las cuentas de cargo. "
+                      "Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 UNPACK_FAILED = ("Nextcloud no pudo recibir los archivos de la aplicación. Presione «Reintentar»; si vuelve a ocurrir, "
                  "contacte a APS Conecta.")
 THEME_FAILED = ("No se pudo instalar el tema de APS Conecta Gestión en el servidor de aplicaciones. Presione "
@@ -177,24 +179,67 @@ php /var/www/html/occ --no-ansi --no-interaction user:add --password-from-env --
 """
 
 
-# In the Nextcloud container, the group folder $1's missing folders and files, from the JSON object on stdin that holds
-# each file's text, or null for a folder, by its path in the group folder; whatever the folder holds stays. Groupfolders
-# then scans the folder, so Nextcloud lists what was added.
+# In the Nextcloud container, the group folder $1's missing files, from the JSON object on stdin that holds each file's
+# text by its path in the group folder; whatever the folder holds stays. Groupfolders then scans the folder, so
+# Nextcloud lists what was added.
 SEED = r"""
 set -eu
 files="$(php /var/www/html/occ --no-ansi config:system:get datadirectory)/__groupfolders/$1/files"
 php -r '
 foreach (json_decode(stream_get_contents(STDIN), true, 3, JSON_THROW_ON_ERROR) as $path => $text) {
     $target = $argv[1] . "/" . $path;
-    $folder = $text === null ? $target : dirname($target);
+    $folder = dirname($target);
     if (in_array("..", explode("/", $path), true) || !(is_dir($folder) || mkdir($folder, 0755, true))) {
         exit(1);
     }
-    if ($text !== null && !file_exists($target) && file_put_contents($target, $text) === false) {
+    if (!file_exists($target) && file_put_contents($target, $text) === false) {
         exit(1);
     }
 }' -- "$files"
 php /var/www/html/occ --no-ansi groupfolders:scan "$1" > /dev/null
+"""
+
+
+# In the Nextcloud container, through Nextcloud's sub-admin API, as occ has no command for group admins: the account
+# $argv[1] is a group admin of exactly the groups the further arguments name.
+GROUP_ADMIN = r"""
+require '/var/www/html/lib/base.php';
+$groups = \OCP\Server::get(\OCP\IGroupManager::class);
+$subAdmin = $groups->getSubAdmin();
+$user = \OCP\Server::get(\OCP\IUserManager::class)->get($argv[1]);
+$wanted = array_slice($argv, 2);
+if ($user === null) {
+    exit(1);
+}
+foreach ($subAdmin->getSubAdminsGroups($user) as $group) {
+    if (!in_array($group->getGID(), $wanted, true)) {
+        $subAdmin->deleteSubAdmin($user, $group);
+    }
+}
+foreach ($wanted as $gid) {
+    $group = $groups->get($gid);
+    if ($group === null) {
+        exit(1);
+    }
+    if (!$subAdmin->isSubAdminOfGroup($user, $group)) {
+        $subAdmin->createSubAdmin($user, $group);
+    }
+}
+"""
+
+
+# In the Nextcloud container, through Nextcloud's sub-admin API: each group admin's groups, as a JSON object by its
+# username.
+GROUP_ADMINS = r"""
+require '/var/www/html/lib/base.php';
+$groups = \OCP\Server::get(\OCP\IGroupManager::class);
+$admins = [];
+foreach ($groups->search('') as $group) {
+    foreach ($groups->getSubAdmin()->getGroupsSubAdmins($group) as $user) {
+        $admins[$user->getUID()][] = $group->getGID();
+    }
+}
+echo json_encode((object) $admins, JSON_THROW_ON_ERROR);
 """
 
 
@@ -458,9 +503,17 @@ class Suite:
         self.execute(NEXTCLOUD, ("sh", "-c", ADD_USER, "sh", user, name), password,
                      OCC_FAILED.format(f"user:add {user}"))
 
+    def group_admin(self, user, groups):
+        """The account is a group admin of exactly these groups, none for an empty list."""
+        self.execute(NEXTCLOUD, ("php", "-r", GROUP_ADMIN, "--", user, *groups), failed=GROUP_ADMIN_FAILED)
+
+    def group_admins(self):
+        """Each group admin's groups, by its username."""
+        return json.loads(self.execute(NEXTCLOUD, ("php", "-r", GROUP_ADMINS), failed=GROUP_ADMIN_FAILED))
+
     def seed(self, folder, files):
-        """The group folder holds each of the files it does not hold yet: their text by their path in it, None for a
-        folder. What it holds stays as staff left it."""
+        """The group folder holds each of the files it does not hold yet: their text by their path in it. What it holds
+        stays as staff left it."""
         self.execute(NEXTCLOUD, ("sh", "-c", SEED, "sh", str(folder)), json.dumps(files), SEED_FAILED)
     def trust_cacerts(self):
         """Nextcloud's own requests trust the CAs that AIO's folder of trusted CAs holds, as Talk does; a release has
@@ -593,6 +646,7 @@ class FakeSuite:
         # Each account, by its username.
         self.users = {"admin": {"name": "admin", "password": self.ADMINISTRATOR, "enabled": True}}
         self.groups = {"admin": {"name": "admin", "members": {"admin"}}}  # each group, by its id: its name and members
+        self.sub_admins = {}  # each group admin's groups, by its username: Nextcloud's sub-admins
         self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
         self.answering = True  # whether the suite's reverse proxy answers at its name
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
@@ -867,7 +921,11 @@ class FakeSuite:
             if mount not in mounts:
                 self._group_folder(mount, {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7,
                                            "IntraVox Users": 1})
-        elif (command, args) != ("intravox:reindex", ()):
+        elif (command, args) == ("intravox:reindex", ()):  # as Nextcloud's admin, whom the admin group's grant lets read
+            mount = self.apps[app].get("groupfolder_name", "IntraVox")
+            if not self.group_folders.get(mounts.get(mount), {}).get("groups", {}).get("admin", 0) & 1:
+                raise failed
+        else:
             raise AssertionError(f"the fake suite runs no occ {(command, *args)}")
         return ""
 
@@ -910,6 +968,18 @@ class FakeSuite:
     def add_user(self, user, name, password):
         self._outage_guard("nextcloud")
         self.users.setdefault(user, {"name": name, "password": password, "enabled": True})
+
+    def group_admin(self, user, groups):
+        self._outage_guard("nextcloud")
+        if user not in self.users or not set(groups) <= self.groups.keys():
+            raise Unreachable(GROUP_ADMIN_FAILED)
+        self.sub_admins.pop(user, None)
+        if groups:
+            self.sub_admins[user] = set(groups)
+
+    def group_admins(self):
+        self._outage_guard("nextcloud")
+        return {user: sorted(groups) for user, groups in self.sub_admins.items()}
 
     def seed(self, folder, files):
         self._outage_guard("nextcloud")

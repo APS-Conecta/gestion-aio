@@ -65,7 +65,7 @@ STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
 SERVICES = HERE.parent / "services.json"  # the release's name service and ACME directory
 PORT = 8081  # clear of AIO's 80, 8080 and 8443 and the suite's 443 (Talk's TURN included)
 COOKIE = "__Host-session"
-MAX_BODY = 1024 * 1024  # a people spreadsheet of about 8,000 people
+MAX_BODY = 1024 * 1024 * 4 // 3  # a people spreadsheet of about 8,000 people, in base64
 
 NOT_JSON = "La solicitud no es JSON válido."
 NO_SESSION = "Abra el enlace que mostró el comando de instalación."
@@ -92,7 +92,7 @@ CLOSED = ("El asistente de instalación se cerró en «Listo»: APS Conecta Gest
 
 def plan(state):
     """The teams «Equipos» declared and, once the centre is chosen, what follows from them, named for its type: the
-    cargo accounts, the groups the people spreadsheet may name, the people the uploaded spreadsheet loads or its
+    cargo accounts, the groups by id, which name each person's cargo, the people the uploaded spreadsheet loads or its
     errors, and the usernames retired with «Retirar»; as «Equipos» and «Revisar» show them."""
     declared, centre, retired = state.get("teams", []), state.get("centre"), state.get("retired", [])
     if not centre:
@@ -100,7 +100,7 @@ def plan(state):
     loaded, errors = spreadsheet.read(state.get("spreadsheet"), declared, centre["type"], retired)
     return {"teams": declared, "cargo_accounts": [{"user": account["user"], "name": account["name"]}
                                                   for account in teams.cargo_accounts(declared, centre["type"])],
-            "groups": teams.groups(declared, centre["type"]), "people": loaded, "errors": errors, "retired": retired}
+            "groups": teams.groups(centre["type"]), "people": loaded, "errors": errors, "retired": retired}
 
 
 def declared(state):
@@ -320,9 +320,9 @@ class Provisionador:
         return 200, {"address": self.address(self.state.read())}
 
     def post_teams(self, query, body):
-        """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its group and its
-        folder, and the cargo accounts they bring once the centre is chosen. «Revisar» and «Instalar» follow the last
-        ones posted; once «Instalar» was pressed they stay."""
+        """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
+        the cargo accounts they bring once the centre is chosen. «Revisar» and «Instalar» follow the last ones posted;
+        once «Instalar» was pressed they stay."""
         try:
             declared = teams.declare(body.get("sectors", []), body.get("programs", []))
         except ValueError as refusal:
@@ -338,12 +338,13 @@ class Provisionador:
         return 200, {"file": spreadsheet.FILE, "text": spreadsheet.TEMPLATE}
 
     def post_people(self, query, body):
-        """POST /api/people {"spreadsheet": its text}: the people spreadsheet, kept as uploaded. The plan then lists the
-        people it loads or each of its errors, and reads it again whenever the teams change; «Instalar» and «Reintentar»
-        wait for one that loads people. From «Instalar» on, a corrected one updates the people already loaded once
-        «Reintentar» applies it; at «Listo» it stays."""
-        uploaded = body.get("spreadsheet")
-        if not isinstance(uploaded, str):
+        """POST /api/people {"file": its name, "content": its bytes, base64}: the people spreadsheet, kept as its text.
+        The plan then lists the people it loads or each of its errors, and reads it again whenever the teams change;
+        «Instalar» and «Reintentar» wait for one that loads people. From «Instalar» on, a corrected one updates the
+        people already loaded once «Reintentar» applies it; at «Listo» it stays."""
+        try:
+            uploaded = spreadsheet.decoded(base64.b64decode(body.get("content"), validate=True))
+        except (TypeError, ValueError):
             return 400, {"error": NOT_SPREADSHEET}
         with self.install_lock, self.state.change() as s:
             if s.get("install", {}).get("listo"):
@@ -355,8 +356,8 @@ class Provisionador:
 
     def post_retire(self, query, body):
         """POST /api/retire {"users": [usernames]}, «Retirar» once confirmed: each of these people the list shows keeps
-        their account, files and shares, disabled and in no team, whatever spreadsheet follows; from «Instalar» on,
-        «Reintentar» applies it. The first administrator is not retired; at «Listo» nobody is."""
+        their account, files and shares, disabled and in no managed group, whatever spreadsheet follows; from
+        «Instalar» on, «Reintentar» applies it. The first administrator is not retired; at «Listo» nobody is."""
         users = body.get("users")
         with self.install_lock, self.state.change() as s:
             if s.get("install", {}).get("listo"):
