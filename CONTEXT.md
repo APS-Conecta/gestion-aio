@@ -94,7 +94,7 @@ Nextcloud's OpenAI-compatible connector points at it, so Nextcloud's apps have a
 the server.
 
 **Model** (modelo):
-The one language model «IA local» serves, which each Suite release pins by its tag and digest.
+`gemma4:e2b`, the one language model «IA local» serves, which each Suite release pins by its tag and digest.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
