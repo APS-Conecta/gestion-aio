@@ -260,8 +260,8 @@ function ticked() {
 // their files and shares.
 function askRetire() {
   $("retire-question").textContent = `¿Retirar a ${ticked().map((box) => box.parentElement.textContent).join(", ")}? `
-    + "Su cuenta se desactivará y saldrá de todos sus grupos; sus archivos y lo que compartió se conservan, y podrá "
-    + "reactivarse en «Cuentas», en APS Conecta Gestión.";
+    + "Su cuenta se desactivará y saldrá de todos los grupos que asigna la instalación; sus archivos y lo que "
+    + "compartió se conservan, y podrá reactivarse en «Cuentas», en APS Conecta Gestión.";
   $("retire-confirm").hidden = false;
 }
 
