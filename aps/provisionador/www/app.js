@@ -488,6 +488,7 @@ async function start() {
   } catch (e) {
     return locked(e.message);
   }
+  $("motto").textContent = state.motto;
   $("fingerprint").querySelector("code").textContent = state.fingerprint;
   $("fingerprint").hidden = false;
   $("register-date").textContent = ` del ${register.date.split("-").reverse().join("-")}`;

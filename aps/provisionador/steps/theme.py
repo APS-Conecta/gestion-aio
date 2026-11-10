@@ -39,7 +39,7 @@ IMPORTED = {"system": {"theme": THEME, "enforce_theme": "light", "knowledgebasee
 def theming():
     """What occ theming:config sets, in the order it sets it: the backdrop is the background colour."""
     tokens = brand.tokens()
-    return {"name": SUITE, "url": SITE, "primary_color": tokens["--aps-violet"],
+    return {"name": SUITE, "url": SITE, "slogan": brand.MOTTO, "primary_color": tokens["--aps-violet"],
             "background_color": tokens["--aps-violet-dark"], "disable-user-theming": "yes",
             **{image: f"{PLACED}/{path}" for image, path in IMAGES.items()}, "background": "backgroundColor"}
 
