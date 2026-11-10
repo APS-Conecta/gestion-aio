@@ -862,6 +862,29 @@ class StepRunner(InstallTest):
         self.until("done")
         self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
+    def help_link_flagged_then_set_again(self, change):
+        """The theme step green while the install failed elsewhere, `change` to Nextcloud's system settings: the
+        end-of-install check flags the help link, and «Reintentar» sets it again."""
+        self.claim("999004")
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[THEME], ("green", None))
+        change(self.suite.system)
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[THEME]
+        self.assertEqual(status, "failed")
+        self.assertIn("lost_password_link", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.system["lost_password_link"], HELP_LINK)
+
+    def test_the_end_of_install_check_flags_a_missing_help_link_and_reintentar_sets_it_again(self):
+        self.help_link_flagged_then_set_again(lambda system: system.pop("lost_password_link", None))
+
+    def test_the_end_of_install_check_flags_a_changed_help_link_and_reintentar_sets_it_again(self):
+        self.help_link_flagged_then_set_again(lambda system: system.update(lost_password_link="https://nextcloud.com"))
+
 
 class Upgrade(InstallTest):
     """The one command's upgrade of an installed server: `provisionador.py upgrade` (install.sh runs it once the new
@@ -2161,6 +2184,8 @@ class InstallLog(InstallTest):
 TOKENS = brand.tokens()
 SUITE = "APS Conecta Gestión"
 MOTTO = "La salud que compartimos es la que mejora"
+HELP_PAGE = "contrasena.html"  # in the theme folder
+HELP_LINK = "https://cesfam-doctor-juan-perez.gestion.apsconecta.cl/themes/apsconecta/contrasena.html"
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
 
 
@@ -2201,6 +2226,12 @@ class Branding(InstallTest):
 
     def test_theming_takes_the_motto_as_its_slogan(self):
         self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
+
+    def test_the_theme_carries_the_lost_password_help_page_naming_the_centre(self):
+        self.assertIn("CESFAM Doctor Juan Pérez", self.theme[HELP_PAGE].decode())
+
+    def test_lost_password_opens_the_help_page_on_the_suites_direccion(self):
+        self.assertEqual(self.suite.system["lost_password_link"], HELP_LINK)
 
     def test_nextclouds_announcements_slides_survey_support_help_signup_and_update_banners_are_off(self):
         self.assertEqual({app: self.suite.apps[app]["enabled"] for app in OFF}, dict.fromkeys(OFF, "no"))
