@@ -59,7 +59,7 @@ def read(text, declared, centre_type, retired=()):
     text loads nobody. `retired` holds the usernames retired with «Retirar»."""
     if not text:
         return [], []
-    cargos = {fold(name.format(type=centre_type)): role for role, (name, _) in teams.ROLES.items()}
+    cargos = {fold(name): role for role, name in teams.groups(declared, centre_type).items() if role in teams.ROLES}
     reserved = {ADMINISTRATOR: "el administrador de la suite",
                 **{account["user"]: f"la cuenta de cargo «{account['name']}»"
                    for account in teams.cargo_accounts(declared, centre_type)}}

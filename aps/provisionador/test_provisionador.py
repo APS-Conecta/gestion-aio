@@ -1500,8 +1500,10 @@ class People(PeopleTest):
         self.assertEqual(state["groups"]["role-medico"], "Médico General / de Familia")
 
     def test_a_csv_saved_as_windows_1252_loads_exactly_like_the_same_file_in_utf_8(self):
-        text = SPREADSHEET.removeprefix("\ufeff") + "luis.vera;Luis;Vera;;Kinesiólogo/a;sí\r\n"
-        self.assertEqual(self.upload(text, "cp1252")[1], self.upload(text)[1])
+        text = SPREADSHEET.removeprefix("\ufeff") + "luis.vera;Luis;Vera;;Kinesiólogo/a;no\r\n"
+        loaded = self.upload(text, "cp1252")[1]
+        self.assertEqual(loaded, self.upload(text)[1])
+        self.assertEqual(len(loaded["people"]), 3)
         self.assertEqual(self.upload(SPREADSHEET.removeprefix("\ufeff"), "cp1252")[1]["people"], PEOPLE)
 
     def test_every_error_is_named_by_its_line_in_spanish_and_the_spreadsheet_loads_nobody(self):

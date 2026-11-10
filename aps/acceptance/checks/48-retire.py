@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[2] / "provisionador")]
-import spreadsheet  # noqa: E402
 import teams  # noqa: E402
 from browser import STORED, chromium, first_password, occ, provisionador_file, provisionador_state  # noqa: E402
 from browser import suite_name  # noqa: E402
@@ -26,8 +25,6 @@ WHOAMI = ("fetch('/ocs/v2.php/cloud/user?format=json', {headers: {'OCS-APIReques
 evidence = Path(os.environ["EVIDENCE"])
 state = provisionador_state()
 retired = state.get("retired") or sys.exit("«Retirar» retired nobody on «Equipos»")
-listed = {person["user"]: person for person in
-          spreadsheet.read(state.get("spreadsheet"), state["teams"], state["centre"]["type"])[0]}
 managed = {*teams.groups(state["teams"], state["centre"]["type"]), ADMINS}
 name = suite_name()
 passwords = provisionador_file(FILE)  # never printed
@@ -35,9 +32,8 @@ wrong = []
 with chromium() as browser:
     for user in retired:
         info = json.loads(occ(f"user:info {user} --output=json"))
-        cargo = listed[user]["cargo"]  # 17-install gives everyone a cargo
-        still = ({teams.STAFF, cargo, teams.ROLES[cargo][1]} | managed) & set(info["groups"])
-        print(f"{user} ({cargo}): enabled {info['enabled']}, in {sorted(info['groups'])}")
+        still = managed & set(info["groups"])
+        print(f"{user}: enabled {info['enabled']}, in {sorted(info['groups'])}")
         if info["enabled"] or still:
             wrong.append(f"{user} is enabled or still in {sorted(still)}")
         if occ(f"files:get '/{user}/files/{STORED}' -") != user:
