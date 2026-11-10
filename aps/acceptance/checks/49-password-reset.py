@@ -2,12 +2,12 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """A temporary password, in the installed suite: a sector's jefatura, signed in with the first password the passwords
-file lists, sets one for a staff member through Nextcloud's provisioning API, which «Cuentas» also uses. The person logs
-in with it at the suite's name, in a browser that trusts the suite's roots alone, and replaces it in «Configuración
-personal → Seguridad»; their own client then signs in with the new one. Nextcloud's audit log holds the change with the
-jefatura as the acting account. The jefatura is refused when setting an administrator's password, and the audit log
-holds no such change. Every password stays in this process's memory and in request bodies: never printed, never on a
-command line."""
+file lists, sets one for a staff member of the recovery group through Nextcloud's provisioning API, which «Cuentas» also
+uses. The person logs in with it at the suite's name, in a browser that trusts the suite's roots alone, and replaces it
+in «Configuración personal → Seguridad»; their own client then signs in with the new one. Nextcloud's audit log holds
+the change with the jefatura as the acting account. The jefatura is refused when setting the password of an
+administrator or of the directorate, its people and its cargo accounts, and the audit log holds no such change. Every
+password stays in this process's memory and in request bodies: never printed, never on a command line."""
 
 import json
 import os
@@ -32,8 +32,9 @@ positions = {user for user, _, _ in teams.POSITIONS}
 jefe = next((user for user in accounts if user not in positions), None) or sys.exit("«Equipos» declared no sector")
 listed = json.loads(occ("group:list --output=json"))
 administrators = listed.get("admin", [])
-staff = sorted(set(listed.get(teams.STAFF, [])) - set(administrators) - set(accounts))
-person = staff[0] if staff else sys.exit("«Todo el personal» has no staff member but administrators and cargo accounts")
+directorate = sorted({user for role in teams.DIRECTORATE for user in listed.get(role, ())} - set(administrators))
+staff = sorted(set(listed.get(teams.RECOVERY, [])) - set(administrators) - set(accounts))
+person = staff[0] if staff else sys.exit("the recovery group has no staff member but administrators and cargo accounts")
 suite = f"https://{suite_name()}"
 password = first_password(provisionador_file(FILE), jefe) or sys.exit(f"the passwords file does not list {jefe}")
 temporary, replaced = secrets.token_urlsafe(18), secrets.token_urlsafe(18)  # never printed
@@ -75,11 +76,12 @@ if as_person(person, replaced, "GET", f"{suite}/ocs/v2.php/cloud/user?format=jso
     sys.exit(f"{person}'s own client does not sign in with the new password")
 
 wrong = []
-for administrator in administrators:
-    status, meta = reset(administrator, secrets.token_urlsafe(18))
-    print(f"{jefe} sets {administrator}'s password: HTTP {status}, {meta}")
+out_of_reach = {**dict.fromkeys(administrators, "an administrator"), **dict.fromkeys(directorate, "of the directorate")}
+for user, who in out_of_reach.items():
+    status, meta = reset(user, secrets.token_urlsafe(18))
+    print(f"{jefe} sets {user}'s password: HTTP {status}, {meta}")
     if status == 200:
-        wrong.append(f"{jefe} sets the password of {administrator}, an administrator")
+        wrong.append(f"{jefe} sets the password of {user}, {who}")
 
 audit = occ("config:system:get logfile_audit").strip()
 entries = [json.loads(line) for line in machine(f"{NEXTCLOUD} cat {audit}").splitlines() if "Password of user" in line]
@@ -88,9 +90,9 @@ for entry in entries:
     print(f"audit: {entry.get('time')} {entry.get('user')}: {entry.get('message')}")
 if (jefe, CHANGED.format(person)) not in changes:
     wrong.append(f"the audit log holds no change of {person}'s password by {jefe}")
-wrong += [f"the audit log holds a change of {administrator}'s password by {jefe}" for administrator in administrators
-          if (jefe, CHANGED.format(administrator)) in changes]
+wrong += [f"the audit log holds a change of {user}'s password by {jefe}" for user in out_of_reach
+          if (jefe, CHANGED.format(user)) in changes]
 if wrong:
     sys.exit("\n".join(wrong))
 print(f"{jefe} set a temporary password for {person}, who logged in with it and replaced it; the audit log names "
-      f"{jefe} as the actor; {jefe} cannot set the password of {', '.join(administrators)}")
+      f"{jefe} as the actor; {jefe} cannot set the password of {', '.join(out_of_reach)}")

@@ -114,8 +114,14 @@ A person's job, chosen from the establishment's list. It places the person in on
 Técnicos or Administrativos.
 
 **Cargo account** (cuenta de cargo):
-A standing account for a position: director, subdirector, the jefaturas. Each one can set a temporary password for any
-staff member and create, disable or delete staff accounts, never an administrator's.
+A standing account for a position: director, subdirector, the jefaturas. Each one can set a temporary password for a
+staff member and create, disable or delete staff accounts, never an administrator's: the director's and subdirector's for
+every staff member, the other jefaturas' for the recovery group's members alone.
+
+**Recovery group** («Personal fuera del equipo directivo»):
+Every staff member outside the directorate: Director/a, Subdirector/a, Secretario/a de Dirección and their cargo
+accounts. The jefaturas set temporary passwords for its members; the directorate's come from the director, the
+subdirector or an administrator.
 
 **Retire** (retirar):
 Disable a person's account and remove it from every group the install manages, keeping their files and shares.
