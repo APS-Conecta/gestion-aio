@@ -24,8 +24,8 @@ never sends data off the server. Upstream AIO has no Ollama container; its only 
   less the suite's own floor, the bootstrap's. AIO has no memory setting for a container, so ours adds `memory_limit`.
 - Nextcloud's OpenAI-compatible connector, a store app, points at Ollama with the Model and its chat endpoint on.
 - Each Suite release pins Ollama's image and the Model by digest (`aps/gates/pins.py`). The Model is pulled by its tag
-  and kept only at its pinned digest, so a tag the registry moved is refused. `gemma4:e2b` is provisional until the
-  benchmark (#97) chooses.
+  and kept only at its pinned digest, so a tag the registry moved is refused. The Model is `gemma4:e2b`
+  ([ADR 0002](0002-the-suite-ai-s-model-is-gemma4-e2b.md)).
 
 ## Consequences
 

@@ -367,6 +367,16 @@ class PinsGate(unittest.TestCase):
                 self.assertIn(f"aps/provisionador/model.json: {model} is not pinned by its tag and digest", out)
 
 
+class ModelBenchmark(unittest.TestCase):
+    """The model benchmark measures the Model alone, at the tag and digest the release pins (ADR 0002): it chooses
+    no model."""
+
+    def test_the_benchmark_measures_the_pinned_model_alone(self):
+        pin = json.loads((REPO / "aps" / "provisionador" / "model.json").read_text(encoding="utf-8"))
+        benchmark = runpy.run_path(str(REPO / "aps" / "benchmark" / "benchmark.py"))
+        self.assertEqual(benchmark.get("MODEL"), pin, "the benchmark measures other models than the Model")
+
+
 class AioStartAnswer(unittest.TestCase):
     """The suite port reads AIO's start answer for the text AIO writes as it begins to download a container's image:
     once AIO writes another text, the gates fail instead of the install's log going quiet."""
