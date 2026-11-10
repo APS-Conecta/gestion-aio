@@ -41,7 +41,9 @@ readonly class Container {
         public AioVariables                  $aioVariables,
         public string                        $documentation,
         public bool                          $hideFromList,
-        private DockerActionManager           $dockerActionManager
+        private DockerActionManager           $dockerActionManager,
+        // APS: the memory cap in bytes, or a placeholder AIO resolves to it; empty for none
+        public string                        $memoryLimit = '',
     ) {
     }
 
