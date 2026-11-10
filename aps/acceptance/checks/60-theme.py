@@ -4,7 +4,10 @@
 """Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page and the dashboard
 load the theme's stylesheet, theming's colours are the brand token file's, Nunito Sans is the font Nextcloud serves,
 and the login page names the establishment and shows the suite's motto after its name, with no console error and no
-content-security-policy violation. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
+content-security-policy violation. Its «¿Olvidó su contraseña?» link opens the help page, which the server answers from
+the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
+no content-security-policy violation, and links back to the login page; Nextcloud's email reset is refused, so no screen
+says a message was sent. A person who logs in sees no «Nextcloud» and no link to nextcloud.com on
 the login page, the dashboard, Files, Talk or the personal settings, which link the suite's source code and its
 licence. The custom menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of
 Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme
@@ -20,9 +23,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import brand  # noqa: E402
-from browser import NEXTCLOUD, chromium, faults, fonts, log_in, machine, occ, person, suite_name  # noqa: E402
+from browser import (NEXTCLOUD, chromium, faults, fonts, log_in, machine, occ, person,  # noqa: E402
+                     provisionador_state, suite_name)
 from playwright.sync_api import Error  # noqa: E402
-from steps.theme import PLACED, SUITE, THEME  # noqa: E402
+from steps.theme import HELP, PLACED, SUITE, THEME  # noqa: E402
 
 PERSON = "tema-prueba"
 WINDOW = {"viewport": {"width": 1280, "height": 900}, "locale": "es-CL"}
@@ -42,12 +46,18 @@ THEMED = """() => {
 # In-page requests, so they go through Chromium's own TLS (which trusts the suite's roots) and the page's session.
 TEXT = "url => fetch(url, {cache: 'no-store'}).then(r => r.text())"
 STATUS = "url => fetch(url, {cache: 'no-store'}).then(r => r.ok ? r.json() : {})"
+# Nextcloud's email reset, posted as its own reset form posts it from the login page, with the page's request token.
+RESET = """user => fetch('/lostpassword/email', {method: 'POST', body: JSON.stringify({user}),
+  headers: {'Content-Type': 'application/json', requesttoken: document.head.dataset.requesttoken}})
+  .then(r => r.text().then(text => ({status: r.status, text})))"""
 TALK = "/var/www/html/custom_apps/spreed/l10n/es"  # Talk's own Spanish, .json and .js
 BROWSER = f"{PLACED}/core/spreed/l10n/es.js"  # the theme's browser file for Talk, which the browser loads in its place
 
 tokens = brand.tokens()
 evidence = Path(os.environ["EVIDENCE"])
 suite = f"https://{suite_name()}"
+help_link = f"{suite}/themes/{THEME}/{HELP}"
+establishment = provisionador_state()["centre"]["short_name"]
 password = person(PERSON, "Persona de prueba")
 
 
@@ -95,6 +105,51 @@ def login_page(page, label):
     return wrong + ([f"{label} logged errors or content-security-policy violations: {found}"] if found else [])
 
 
+def email_reset_refused(page):
+    """Nextcloud's email reset answers, in its own Spanish, that reset is disabled: it sends nothing."""
+    answer = page.evaluate(RESET, PERSON)
+    print(f"Nextcloud's email reset answers {answer['status']}: {answer['text'][:200]}")
+    core = json.loads(machine(f"{NEXTCLOUD} cat /var/www/html/core/l10n/es.json"))["translations"]
+    disabled = core.get("Password reset is disabled", "Password reset is disabled")
+    try:
+        said = json.loads(answer["text"])
+    except ValueError:
+        said = {}
+    if answer["status"] == 200 and said == {"status": "error", "msg": disabled}:
+        return []
+    return [f"Nextcloud's email reset does not answer «{disabled}»"]
+
+
+def help_page(page):
+    """From the login page, «¿Olvidó su contraseña?» opens the help page: 200 from the server, the establishment's name,
+    the brand token file's fonts, no console error nor content-security-policy violation, and a link back to the login
+    page that works."""
+    found = faults(page)
+    forgot = page.locator(f'a[href="{help_link}"]')
+    if not forgot.is_visible():
+        return [f"the login page does not link {help_link}"]
+    print(f"login: «{forgot.inner_text().strip()}» links {help_link}")
+    wrong = email_reset_refused(page)
+    with page.expect_response(help_link) as answer:
+        forgot.click()
+    page.wait_for_load_state()
+    page.screenshot(path=evidence / "help.png", full_page=True)
+    loaded = fonts(page)
+    print(f"help page: {answer.value.status}, fonts {loaded}")
+    if answer.value.status != 200:
+        wrong.append(f"the server answers the help page with {answer.value.status}")
+    if establishment not in page.inner_text("body"):
+        wrong.append(f"the help page does not name {establishment}")
+    if not {"Fraunces", "Nunito Sans"} <= set(loaded):
+        wrong.append("the help page did not load the brand token file's fonts")
+    page.get_by_role("link", name="Volver al inicio de sesión").click()
+    try:
+        page.wait_for_selector("#user", timeout=30_000)
+    except Error:
+        wrong.append("the help page's link does not lead back to the login page")
+    return wrong + ([f"the help page logged errors or content-security-policy violations: {found}"] if found else [])
+
+
 def open_page(page, label):
     path, ready = PAGES[label]
     page.goto(f"{suite}{path}")
@@ -122,7 +177,7 @@ def stale_talk_texts():
 problems = []
 with chromium() as browser:
     page = browser.new_page(**WINDOW)
-    problems += login_page(page, "login")
+    problems += login_page(page, "login") + help_page(page)
     log_in(page, suite, PERSON, password)
     for label in PAGES:
         open_page(page, label)

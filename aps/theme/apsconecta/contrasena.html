@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 APS Conecta
+     SPDX-License-Identifier: AGPL-3.0-or-later
+     The help page «¿Olvidó su contraseña?» opens on the login page: the suite sends no email, so a person gets a
+     temporary password in person. The theme step writes the establishment's name in it; it looks like the login page,
+     in the brand token file's colours and fonts, and loads only the theme's own files. -->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>¿Olvidó su contraseña? · APS Conecta Gestión</title>
+  <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="brand/tokens.css">
+  <style>
+    body {
+      margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 24px 16px; box-sizing: border-box;
+      background: var(--aps-violet-dark); color: var(--aps-ink); font: 16px/1.5 var(--aps-font-body);
+    }
+    img { width: 175px; height: auto; margin-block-end: 24px; }
+    main { width: 100%; max-width: 440px; box-sizing: border-box; padding: 24px 28px; border-radius: 16px;
+           background: var(--aps-paper); }
+    .establishment { margin: 0 0 6px; font: 700 19px/1.25 var(--aps-font-display); }
+    h1 { margin: 0 0 12px; font: 600 24px/1.25 var(--aps-font-display); }
+    ol { padding-inline-start: 1.25em; }
+    li + li { margin-block-start: 8px; }
+    a { color: var(--aps-violet); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <img src="core/img/logo.svg" alt="APS Conecta Gestión">
+  <main>
+    <p class="establishment">{establishment}</p>
+    <h1>¿Olvidó su contraseña?</h1>
+    <p>APS Conecta Gestión no envía correos para restablecerla. Recupere el acceso en persona:</p>
+    <ol>
+      <li>Pida a su jefatura, o a la administración de la suite, una contraseña temporal.</li>
+      <li>Inicie sesión con ella y cámbiela de inmediato en «Ajustes → Seguridad».</li>
+      <li>No comparta nunca su contraseña con nadie.</li>
+    </ol>
+    <p><a href="/login">Volver al inicio de sesión</a></p>
+  </main>
+</body>
+</html>
