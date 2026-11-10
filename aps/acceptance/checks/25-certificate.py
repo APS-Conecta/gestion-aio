@@ -61,6 +61,6 @@ with chromium() as browser:
     expect(page.locator("input[type=password]")).to_be_visible()
 
 trusted = [certificate["name"] for certificate in json.loads(occ("security:certificates --output=json"))]
-print(f"Nextcloud's trusted certificates: {', '.join(trusted)}")
 if INTERMEDIATE.name not in trusted:
     sys.exit(f"Nextcloud does not trust {INTERMEDIATE.name}, the ISP's intermediate the suite ships")
+print(f"Nextcloud trusts {INTERMEDIATE.name}, the ISP's intermediate the suite ships")
