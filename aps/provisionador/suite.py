@@ -17,9 +17,11 @@ keeps on this server: its optional-containers form, its backup settings and its 
 Apache runs. The first time its page opens, AIO makes the backup's encryption password, which the Provisionador only
 reads. The passphrase and that password leave this process only in the passwords file. The containers' progress is AIO's
 own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording, are read
-here too. Every later install step runs occ in the Nextcloud container. The apps step downloads App releases from
-GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step places the theme
-folder in Nextcloud's themes folder, which upstream's updates keep, and the theme and apps steps have
+here too, as is the GPU «IA local» can use. Every later install step runs occ in the Nextcloud container; «IA local»
+switches our «ollama» community container on or off through AIO's own code in its mastercontainer, as AIO's start would,
+and asks Ollama, through Nextcloud's container, which models it holds and to pull one. The apps step downloads App
+releases from GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step
+places the theme folder in Nextcloud's themes folder, which upstream's updates keep, and the theme and apps steps have
 aps/images/nextcloud/browser-texts.php build the browser's texts.
 """
 
@@ -81,6 +83,11 @@ DOWN = {MASTERCONTAINER: SUITE_DOWN, NEXTCLOUD: NEXTCLOUD_DOWN}
 AIO_CONFIG = "/mnt/docker-aio-config/data/configuration.json"  # AIO's settings, its passphrase among them
 AIO_AUTHORITY = "/mnt/docker-aio-config/caddy-internal/pki/authorities/local/root.crt"  # signs AIO's page certificate
 OFFICE_SUITES = {"collabora", "onlyoffice", "eurooffice"}  # AIO's office suites, one choice among them
+OLLAMA = "nextcloud-aio-ollama"  # «IA local»'s container, as community-containers/ollama names it
+OLLAMA_API = "http://nextcloud-aio-ollama:11434/api/"  # Ollama's API, as Nextcloud reaches it inside the suite
+OLLAMA_FAILED = ("La IA local no pudo {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+PULL_WAIT = 2 * 60 * 60  # seconds a model's pull may take
+VENDORS = {"0x1002", "0x8086"}  # the PCI vendors of AMD and Intel, whose GPUs Ollama reaches through the DRI devices
 HIDDEN = "***REMOVED SENSITIVE VALUE***"  # what occ config:list shows of a value Nextcloud counts as sensitive
 # How AIO's start answer ends once every container started (DockerController::getStreamingResponseHtmlEnd); when one
 # fails, it stops short or Slim's error page follows.
@@ -120,6 +127,42 @@ $config->setDomain($in['domain'], true);
 (function (array $values): void {
     $this->set('secrets', array_merge($this->get('secrets', []), $values));
 })->call($config, $in['secrets']);
+"""
+
+
+# «IA local»'s switch of our «ollama» community container (community-containers/ollama), from the JSON object on stdin:
+# on, it joins AIO's community containers with AIO's NVIDIA switch as the GPU found asks and its memory cap among AIO's
+# secrets, and AIO's own code recreates and starts it, as AIO's start does; off, it stops, AIO removes it, keeping its
+# volume, and it leaves the list. AIO's start, every night too, then starts it with the suite only while it is listed.
+SWITCH_OLLAMA = r"""
+ini_set('display_errors', 'stderr');
+require '/var/www/docker-aio/php/vendor/autoload.php';
+$di = \AIO\DependencyInjection::GetContainer();
+$config = $di->get(\AIO\Data\ConfigurationManager::class);
+$docker = $di->get(\AIO\Docker\DockerActionManager::class);
+$fetcher = $di->get(\AIO\ContainerDefinitionFetcher::class);
+$in = json_decode(stream_get_contents(STDIN), true, 4, JSON_THROW_ON_ERROR);
+$others = array_values(array_filter($config->aioCommunityContainers, fn($c) => $c !== '' && $c !== 'ollama'));
+if (in_array('ollama', $config->aioCommunityContainers, true)) {
+    $ollama = $fetcher->GetContainerById('nextcloud-aio-ollama');
+    $docker->StopContainer($ollama);
+    $docker->DeleteContainer($ollama);
+}
+$config->enableNvidiaGpu = $in['on'] && $in['nvidia'];
+if (!$in['on']) {
+    $config->aioCommunityContainers = $others;
+    exit(0);
+}
+(function (string $memory): void {
+    $this->set('secrets', array_merge($this->get('secrets', []), ['OLLAMA_MEMORY_LIMIT' => $memory]));
+})->call($config, $in['memory']);
+$config->aioCommunityContainers = [...$others, 'ollama'];
+$ollama = $fetcher->GetContainerById('nextcloud-aio-ollama');
+$docker->CreateVolumes($ollama);
+$docker->PullImage($ollama, true);
+$docker->CreateContainer($ollama);
+$docker->StartContainer($ollama);
+$docker->ConnectContainerToNetwork($ollama);
 """
 
 
@@ -412,13 +455,13 @@ class Suite:
         return credential["name"]
 
     @staticmethod
-    def execute(container, command, stdin="", failed=None):
-        """What a command run in the container as its web user printed. What it printed may be a secret and is never
-        logged; a failure logs its errors only and is Unreachable: the container's own message when it does not answer,
-        `failed` when the command fails."""
+    def execute(container, command, stdin="", failed=None, timeout=120):
+        """What a command run in the container as its web user printed, within `timeout` seconds. What it printed may
+        be a secret and is never logged; a failure logs its errors only and is Unreachable: the container's own message
+        when it does not answer, `failed` when the command fails."""
         try:
             run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data", container, *command],
-                                 input=stdin, capture_output=True, text=True, timeout=120, check=False)
+                                 input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             print(f"{container} {command[0]}: {error}", file=sys.stderr)
             raise Unreachable(DOWN[container]) from error
@@ -428,8 +471,8 @@ class Suite:
             raise Unreachable(failed if failed and answered else DOWN[container])
         return run.stdout
 
-    def mastercontainer(self, *command, stdin=""):
-        return self.execute(MASTERCONTAINER, command, stdin)
+    def mastercontainer(self, *command, stdin="", timeout=120):
+        return self.execute(MASTERCONTAINER, command, stdin, timeout=timeout)
 
     def occ(self, *args, stdin=""):
         """What Nextcloud's command line printed."""
@@ -543,6 +586,44 @@ class Suite:
         memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         return {"cpus": len(os.sched_getaffinity(0)), "memory_gib": (memory + 2 ** 30 - 1) // 2 ** 30}
 
+    @staticmethod
+    def gpu():
+        """The GPU of this server that Ollama can use: "nvidia" for an NVIDIA one that Docker reaches through the
+        NVIDIA Container Toolkit's runtime, "dri" for an AMD or Intel one's render device, which the bootstrap hands
+        to AIO, and None for none, so the CPU."""
+        if Path("/dev/nvidia0").exists():
+            try:
+                info = subprocess.run(["docker", "info", "--format", "{{json .Runtimes}}"], capture_output=True,
+                                      text=True, timeout=30, check=False)
+                if "nvidia" in json.loads(info.stdout or "{}"):
+                    return "nvidia"
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
+        devices = Path("/sys/class/drm").glob("renderD*/device/vendor")
+        return "dri" if {path.read_text(encoding="ascii").strip() for path in devices} & VENDORS else None
+
+    def switch_ollama(self, settings):
+        """«IA local»'s container on, with these settings, the GPU found ("gpu") and the memory cap ("memory_gib"),
+        or, with None, off: it stops and AIO no longer runs it, and its volume, with the models, stays. AIO's own code
+        pulls its pinned image, which can take minutes."""
+        on = settings is not None
+        self.mastercontainer("php", "-r", SWITCH_OLLAMA, stdin=json.dumps({
+            "on": on, "nvidia": on and settings["gpu"] == "nvidia",
+            "memory": str(settings["memory_gib"] * 2 ** 30) if on else ""}), timeout=30 * 60)
+
+    def models(self):
+        """The models Ollama holds, each tag's digest as its registry names it; Unreachable while it does not
+        answer."""
+        listed = json.loads(self.execute(NEXTCLOUD, ("curl", "-fsS", "--max-time", "20", OLLAMA_API + "tags"),
+                                         failed=OLLAMA_FAILED.format("responder")))
+        return {model["name"]: f"sha256:{model['digest']}" for model in listed["models"]}
+
+    def pull(self, model):
+        """Ollama pulls the model's tag from its registry; it resumes a pull cut short."""
+        command = ("curl", "-fsS", "--max-time", str(PULL_WAIT), "--data-binary", "@-", OLLAMA_API + "pull")
+        self.execute(NEXTCLOUD, command, json.dumps({"model": model, "stream": False}),
+                     OLLAMA_FAILED.format(f"descargar el modelo {model}"), timeout=PULL_WAIT + 60)
+
     def switch(self, components):
         """Turn the given optional containers on and every other one off, with AIO's optional-containers form
         (php/templates/includes/optional-containers.twig): a switch it does not send is off, and the office suite is
@@ -650,6 +731,12 @@ class FakeSuite:
         self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
         self.answering = True  # whether the suite's reverse proxy answers at its name
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
+        self.found_gpu = None  # the GPU the server offers Ollama: "nvidia", "dri" (AMD or Intel) or None, the CPU
+        self.ollama = None  # the settings «IA local»'s container runs with, None while it is off
+        self.volumes = set()  # the Docker volumes «IA local» made, which outlive its container
+        self.registry = {}  # what Ollama's registry serves, each model's tag with its digest
+        self.pulled = {}  # the models Ollama holds in its volume, each tag with its digest
+        self.pulls = []  # each model Ollama was asked to pull, in turn
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.automatic_updates = None  # whether AIO's nightly update job is on, as the backups step sets it
@@ -727,6 +814,34 @@ class FakeSuite:
 
     def hardware(self):
         return dict(self.machine)
+
+    def gpu(self):
+        return self.found_gpu
+
+    def switch_ollama(self, settings):
+        """«IA local»'s container, as AIO creates and starts it with the settings, or stops and removes it, its volume
+        kept."""
+        self._outage_guard()
+        self.ollama = settings
+        if settings is None:
+            self.states.pop(OLLAMA, None)
+        else:
+            self.volumes.add("nextcloud_aio_ollama")
+            self.states[OLLAMA] = ("IA local (Ollama)", "running")
+
+    def _ollama_answers(self):
+        self._outage_guard("nextcloud")
+        if self.states.get(OLLAMA, (None, None))[1] != "running":
+            raise Unreachable(OLLAMA_FAILED.format("responder"))
+
+    def models(self):
+        self._ollama_answers()
+        return dict(self.pulled)
+
+    def pull(self, model):
+        self._ollama_answers()
+        self.pulls.append(model)
+        self.pulled[model] = self.registry[model]
 
     def switch(self, components):
         self._signed_in()

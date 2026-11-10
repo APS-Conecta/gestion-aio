@@ -360,6 +360,9 @@ readonly class ContainerDefinitionFetcher {
 
             $hideFromList = $entry['hide_from_list'] ?? false;
 
+            // APS: a container's memory cap
+            $memoryLimit = $entry['memory_limit'] ?? '';
+
             $containers[] = new Container(
                 $entry['container_name'],
                 $displayName,
@@ -387,7 +390,8 @@ readonly class ContainerDefinitionFetcher {
                 $aioVariables,
                 $documentation,
                 $hideFromList,
-                $this->container->get(DockerActionManager::class)
+                $this->container->get(DockerActionManager::class),
+                $memoryLimit
             );
         }
 
