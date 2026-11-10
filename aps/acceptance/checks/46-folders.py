@@ -55,10 +55,12 @@ def writes(user, folder):
 
 
 def units(user):
-    """The folders `user` sees in Unidades."""
-    status, body = as_person(user, password(user), "PROPFIND", url(user, "Unidades/"), headers={"Depth": "1"})
-    if status != 207:
-        sys.exit(f"{user} does not list Unidades: HTTP {status}")
+    """The folders `user` sees in Unidades, once they opened their files as «Archivos» does: Nextcloud makes the folder
+    that holds the unit folders in their files then."""
+    for path in ("", "Unidades/"):
+        status, body = as_person(user, password(user), "PROPFIND", url(user, path), headers={"Depth": "1"})
+        if status != 207:
+            sys.exit(f"{user} does not list {path or 'their files'}: HTTP {status}")
     paths = [unquote(href.text).rstrip("/") for href in ElementTree.fromstring(body).iter("{DAV:}href")]
     seen = {unicodedata.normalize("NFC", path.rsplit("/", 1)[-1]) for path in paths[1:]}
     print(f"{user} sees in Unidades: {sorted(seen)}")
