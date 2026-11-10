@@ -1362,6 +1362,31 @@ class Equipos(InstallTest):
             self.assertIn(f"  Usuario: {user}\n  Contraseña: {self.suite.users[user]['password']}\n", passwords)
         self.assertEqual(len({self.suite.users[user]["password"] for user in CARGO}), len(CARGO))
 
+    def test_instalar_makes_exactly_the_cargo_accounts_group_admins_of_all_staff_a_sector_added_on_equipos_too(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.teams(sectors=[*TEAMS["sectors"], "Oriente"], programs=TEAMS["programs"])
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.sub_admins, dict.fromkeys(CARGO | {"jefe.oriente"}, {"all-staff"}))
+
+    def test_the_end_of_install_check_finds_a_missing_and_an_extra_group_admin_and_reintentar_restores_the_set(self):
+        self.claim()
+        self.teams(**TEAMS)
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        del self.suite.sub_admins["jefe.norte"]
+        self.suite.sub_admins["director"].add("cat-clinicos")
+        self.suite.sub_admins["ana"] = {"all-staff"}
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))["Cuentas de cargo"]
+        self.assertEqual(status, "failed")
+        self.assertIn("ana, director, jefe.norte", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.sub_admins, dict.fromkeys(CARGO, {"all-staff"}))
+
     def test_every_staff_member_lands_on_the_welcome_page_which_names_the_establishment(self):
         self.claim()
         self.install()
