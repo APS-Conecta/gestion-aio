@@ -15,7 +15,7 @@ It writes one result file per model and machine, benchmark-<model>-<machine>.jso
 Ollama's version and context length, the hardware, each question's result, the right-call rate, p50 and p95 answer
 time and the verdict against the bar.
 
-Usage: python3 aps/benchmark/benchmark.py [--ollama http://127.0.0.1:11434] [--out .]   (Linux, Python 3.10+)
+Usage: python3 aps/benchmark/benchmark.py [--ollama http://127.0.0.1:11434]   (Linux, Python 3.10+)
 """
 
 import argparse
@@ -37,6 +37,7 @@ MODELS = {
     "gemma4:e2b": "sha256:b37049369adfe3d2b653af0ab301a062ca5cbe96ace6aa0d3f2559ee9b563fc2",
     "qwen3.5:2b": "sha256:0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a",
 }
+GPU_VENDORS = {"0x1002": "AMD", "0x8086": "Intel"}  # PCI vendor ids in /sys/class/drm/card*/device/vendor
 BAR = {"right_call_rate": 0.95, "p95_seconds": 15}
 TIMEOUT = 900  # seconds a request may take, the cold first one on a CPU included
 HERE = Path(__file__).resolve().parent
@@ -53,6 +54,14 @@ def api(base, path, body=None, timeout=TIMEOUT):
         raise RuntimeError(f"HTTP {error.code} from {path}: {error.read().decode(errors='replace').strip()}") from None
 
 
+def sysfs(path):
+    """A sysfs file's text, or None when the driver does not expose it."""
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return None
+
+
 def hardware():
     gpus = []
     try:
@@ -62,6 +71,12 @@ def hardware():
                 for name, mib in (line.rsplit(",", 1) for line in out.splitlines() if line.strip())]
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
+    if not gpus:  # an AMD or Intel GPU, which the Suite reaches through /dev/dri: one entry per device
+        devices = sorted({card.resolve() for card in Path("/sys/class/drm").glob("card*/device")
+                          if re.fullmatch(r"card\d+", card.parent.name)})
+        for device in devices:
+            vendor, vram = sysfs(device / "vendor"), sysfs(device / "mem_info_vram_total")
+            gpus.append({"name": GPU_VENDORS.get(vendor, vendor), "vram_mib": int(vram) // 1048576 if vram else None})
     ram = re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text())
     cpu = re.search(r"model name\s*:\s*(.+)", Path("/proc/cpuinfo").read_text())
     return {"gpus": gpus, "ram_gib": round(int(ram[1]) / 1048576, 1) if ram else None,
@@ -179,7 +194,6 @@ def measure(base, model, pin, questions, fixtures):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ollama", default="http://127.0.0.1:11434", help="the Ollama server's URL")
-    parser.add_argument("--out", default=".", help="the folder for the result files")
     args = parser.parse_args()
     base = args.ollama.rstrip("/")
     questions = json.loads((HERE / "questions.json").read_text(encoding="utf-8"))
@@ -198,7 +212,7 @@ def main():
             print(f"benchmark: {error}", flush=True)
             failed += 1
             continue
-        path = Path(args.out, f"benchmark-{model.replace(':', '-')}-{machine}.json")
+        path = Path(f"benchmark-{model.replace(':', '-')}-{machine}.json")
         path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"{model}: right calls {result['right_call_rate']:.0%}, p50 {result['p50_seconds']} s, "
               f"p95 {result['p95_seconds']} s, {'passes' if result['passed'] else 'fails'} the bar: {path}", flush=True)
