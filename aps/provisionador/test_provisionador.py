@@ -236,6 +236,10 @@ class Page(WizardTest):
         for font in fonts:
             self.assertEqual(browser.get(f"/{font}")[0], 200, font)
 
+    def test_the_wizard_serves_the_motto_its_header_shows(self):
+        status, state = self.operator().get("/api/state")
+        self.assertEqual((status, state["motto"]), (200, MOTTO))
+
 
 class CentroSearch(WizardTest):
     def codes(self, browser, **query):
@@ -594,6 +598,9 @@ class InstallTest(WizardTest):
         """The steps with that status."""
         return {name for name, (now, _) in self.steps(install).items() if now == status}
 
+    def member_of(self, user):
+        return {gid for gid, group in self.suite.groups.items() if user in group["members"]}
+
     @staticmethod
     def texts(install):
         """The install's log, by its lines' texts."""
@@ -839,6 +846,21 @@ class StepRunner(InstallTest):
         self.install()
         self.until("done")
         self.assertEqual(self.suite.apps["theming"]["url"], "https://apsconecta.cl")
+
+    def test_the_end_of_install_check_flags_a_slogan_that_is_not_the_motto_and_reintentar_sets_it_again(self):
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[THEME], ("green", None))
+        self.suite.apps["theming"]["slogan"] = "un hogar seguro para todos tus datos"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[THEME]
+        self.assertEqual(status, "failed")
+        self.assertIn("theming.slogan", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
 
 class Upgrade(InstallTest):
@@ -1188,6 +1210,53 @@ DECLARED = [
     {"id": "prog-salud-mental-adulto", "kind": "program", "name": "Programa Salud Mental-Adulto",
      "folder": "Programas/Salud Mental-Adulto"}]
 CARGO = {"director", "subdirector", "jefe.farmacia", "jefe.some", "jefe.norte", "jefe.sur"}
+# The 41 cargos by category, in order, as a SAPU names them: each cargo's group id and name.
+CARGOS = {
+    "cat-jefaturas": {
+        "role-director-cesfam": "Director/a de SAPU",
+        "role-subdirector-jefe-tecnico": "Subdirector/a Médico o Jefe Técnico",
+        "role-jefe-sector-mais": "Jefe/a de Sector (Gestión MAIS)",
+        "role-jefe-some": "Jefe/a de SOME",
+        "role-jefe-programa": "Jefe/a de Programa",
+        "role-medico-gestor": "Médico/a Gestor/a",
+        "role-jefe-apoyo-clinico": "Jefe/a de Apoyo Clínico",
+        "role-jefe-servicios-generales": "Jefe/a de Servicios Generales"},
+    "cat-clinicos": {
+        "role-medico": "Médico General / de Familia",
+        "role-dentista": "Cirujano Dentista",
+        "role-quimico-farmaceutico": "Químico Farmacéutico (Dir. Técnico Farmacia)",
+        "role-enfermeria": "Enfermera/o",
+        "role-matroneria": "Matrona/Matrón",
+        "role-kinesiologo": "Kinesiólogo/a",
+        "role-psicologo": "Psicólogo/a",
+        "role-trabajador-social": "Trabajador/a Social",
+        "role-nutricionista": "Nutricionista",
+        "role-terapeuta-ocupacional": "Terapeuta Ocupacional",
+        "role-fonoaudiologo": "Fonoaudiólogo/a",
+        "role-tecnologo-medico": "Tecnólogo/a Médico/a",
+        "role-educador-parvulos": "Educador/a de Párvulos",
+        "role-profesor-educacion-fisica": "Profesor/a de Educación Física",
+        "role-gestor-comunitario": "Gestor/a Comunitario/a",
+        "role-medico-oftalmologo": "Médico/a Oftalmólogo/a"},
+    "cat-tecnicos": {
+        "role-tens-procedimientos": "TENS – Procedimientos / Vacunatorio",
+        "role-tens-farmacia": "TENS – Farmacia / PNAC",
+        "role-tons": "TONS (Técnico en Odontología)",
+        "role-podologo": "Podólogo/a",
+        "role-tecnico-rehabilitacion": "Técnico/a en Rehabilitación",
+        "role-facilitador-intercultural": "Facilitador/a Intercultural",
+        "role-tecnico-salud": "Técnico/a de Salud"},
+    "cat-administrativos": {
+        "role-administrativo-some": "Administrativo SOME",
+        "role-oirs": "Encargado/a OIRS",
+        "role-estadistica-rem": "Encargado/a de Estadística (REM)",
+        "role-conductor": "Conductor (Ambulancia / Traslado)",
+        "role-auxiliar-servicio": "Auxiliar de Servicio",
+        "role-informatico": "Informático/a (Soporte TI)",
+        "role-recursos-humanos": "Recursos Humanos",
+        "role-abastecimiento-finanzas": "Abastecimiento y Finanzas",
+        "role-secretario-direccion": "Secretario/a de Dirección",
+        "role-guardia-seguridad": "Guardia de Seguridad"}}
 READ, READ_SHARE, EDIT, MANAGE = 1, 17, 7, 31  # Groupfolders' permission bits
 FOLDERS_STEP = "Carpetas de equipo y permisos"
 WELCOME_STEP = "Página de bienvenida"
@@ -1247,7 +1316,6 @@ class Equipos(InstallTest):
                               "role-director-cesfam": "Director/a de CESFAM", "role-oirs": "Encargado/a OIRS",
                               "sector-norte": "Sector Norte", "prog-salud-mental-adulto": "Programa Salud Mental-Adulto"
                               }.items(), groups.items())
-        self.assertEqual(len([gid for gid in groups if gid.startswith("role-")]), 23)
         folders = {mount: folder["groups"] for mount, folder in self.folders().items()}
         self.assertLessEqual({
             "Transversal": {"all-staff": READ, "cat-jefaturas": MANAGE},
@@ -1259,6 +1327,23 @@ class Equipos(InstallTest):
         self.assertEqual(len([m for m in folders if m.split("/")[0] in ("Sectores", "Programas", "Unidades")]), 10)
         self.assertEqual(self.folders()["Transversal"]["files"], dict.fromkeys(
             ["Protocolos", "Flujogramas", "Documentación", "Registro de redes", "Actas de reuniones"]))
+
+    def test_equipos_lists_the_41_cargos_instalar_makes_their_groups_and_a_person_with_a_cargo_joins_its_category(
+            self):
+        self.claim("999003")
+        self.teams(**TEAMS)
+        cargos = {role: name for roles in CARGOS.values() for role, name in roles.items()}
+        listed = self.browser.get("/api/state")[1]["groups"]
+        self.assertEqual([(gid, name) for gid, name in listed.items() if gid.startswith("role-")], list(cargos.items()))
+        status, body = self.browser.request("POST", "/api/people", {"spreadsheet": spreadsheet(
+            *(f"p{n};Persona;{n};;{role};{'sí' if n == 0 else ''}" for n, role in enumerate(cargos)))})
+        self.assertEqual((status, body["errors"], len(body["people"])), (200, [], 41))
+        self.install()
+        self.until("done")
+        self.assertEqual({gid: group["name"] for gid, group in self.suite.groups.items() if gid.startswith("role-")},
+                         cargos)
+        for n, (role, category) in enumerate((role, category) for category, roles in CARGOS.items() for role in roles):
+            self.assertEqual(self.member_of(f"p{n}") - {"admin"}, {"all-staff", category, role}, role)
 
     def test_the_cargo_accounts_join_their_groups_and_the_passwords_file_lists_each_first_password(self):
         self.claim()
@@ -1411,9 +1496,6 @@ class PeopleTest(InstallTest):
         status, body = self.upload(text)
         self.assertEqual((status, body["people"]), (200, []))
         return body["errors"]
-
-    def member_of(self, user):
-        return {gid for gid, group in self.suite.groups.items() if user in group["members"]}
 
 
 class People(PeopleTest):
@@ -2078,6 +2160,7 @@ class InstallLog(InstallTest):
 
 TOKENS = brand.tokens()
 SUITE = "APS Conecta Gestión"
+MOTTO = "La salud que compartimos es la que mejora"
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
 
 
@@ -2115,6 +2198,9 @@ class Branding(InstallTest):
         self.assertEqual([theming.get(f"{image}Mime") for image in ("logo", "logoheader", "favicon", "background")],
                          ["image/svg+xml"] * 3 + ["backgroundColor"])
         self.assertEqual((self.suite.system["enforce_theme"], theming["disable-user-theming"]), ("light", True))
+
+    def test_theming_takes_the_motto_as_its_slogan(self):
+        self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
     def test_nextclouds_announcements_slides_survey_support_help_signup_and_update_banners_are_off(self):
         self.assertEqual({app: self.suite.apps[app]["enabled"] for app in OFF}, dict.fromkeys(OFF, "no"))

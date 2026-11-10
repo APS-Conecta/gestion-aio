@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The one-time link the one command printed opens the wizard in a browser that trusts the wizard's certificate
-because its fingerprint is the printed one. The operator reaches «Centro». A test build's run chooses a centre there,
-picked so concurrent runs claim different names under the name service's CI deployment, and writes its DEIS code to
-$GITHUB_OUTPUT before the claim, so the run releases it. A release's run never holds a real establishment's production
-name: before the one command it claimed the name of the register's test establishment with APS's token
+"""The one-time link the one command printed opens the wizard in a browser that trusts the wizard's certificate because
+its fingerprint is the printed one. The operator reaches «Centro», under a header that shows the suite's motto, on a
+page in the brand fonts with no console error and no content-security-policy violation. A test build's run chooses a
+centre there, picked so concurrent runs claim different names under the name service's CI deployment, and writes its
+DEIS code to $GITHUB_OUTPUT before the claim, so the run releases it. A release's run never holds a real establishment's
+production name: before the one command it claimed the name of the register's test establishment with APS's token
 (aps-acceptance.yml). The check hands that claim to the machine root-only, where the suite port takes it instead of
 claiming, sends the test establishment, which «Centro» never lists, to the wizard's API, and the page resumes at
-«Dirección». «Dirección» shows the centre's name from the slug table, with nothing to edit, claims it by itself and
-says so. The claim's credential is stored root-only on the machine (run.sh masks it)."""
+«Dirección». «Dirección» shows the centre's name from the slug table, with nothing to edit, claims it by itself and says
+so. The claim's credential is stored root-only on the machine (run.sh masks it)."""
 
 import json
 import os
@@ -19,8 +20,9 @@ from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
+import brand  # noqa: E402
 import deis  # noqa: E402
-from browser import TEST_BUILD, chromium, machine, verified, wizard_link  # noqa: E402
+from browser import TEST_BUILD, chromium, faults, fonts, machine, verified, wizard_link  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 
 NAME_SERVICE = ("https://gestion-nombres-ci.apsconecta.workers.dev" if TEST_BUILD
@@ -51,8 +53,10 @@ CENTRE = """code => fetch('/api/centre', {method: 'POST', headers: {'Content-Typ
 
 with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     page = browser.new_page(viewport={"width": 1280, "height": 900})
+    found = faults(page)
     page.goto(link)
     expect(page.get_by_role("heading", name="Centro")).to_be_visible()
+    expect(page.get_by_role("banner").get_by_text(brand.MOTTO)).to_be_visible()
     if TEST_BUILD:
         page.select_option("#search [name=region]", row["region_codigo"])
         page.select_option("#search [name=comuna]", row["comuna_codigo"])
@@ -72,6 +76,13 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     expect(page.locator("#direccion input")).to_have_count(0)
     expect(page.locator("#address-status")).to_have_text(f"Dirección asignada: https://{name}", timeout=180_000)
     page.screenshot(path=evidence / "direccion.png")
+    loaded = fonts(page)
+
+print(f"the wizard loaded the fonts {loaded}; its console errors and policy violations: {found}")
+if found:
+    sys.exit(f"the wizard logged errors or content-security-policy violations: {found}")
+if not {"Fraunces", "Nunito Sans"} <= set(loaded):
+    sys.exit(f"the wizard did not load the brand fonts, only {loaded}")
 
 mode = machine("sudo stat -c '%U %a' /var/lib/aps-conecta/name-service.json").strip()
 if mode != "root 600":
