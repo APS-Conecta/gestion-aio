@@ -61,9 +61,9 @@ def run(context):
     intranet = listed(suite).get(MOUNT)
     if intranet is None:
         return reasons(suite, GRANTS)
-    grant(suite, intranet, teams.SHARED)
     suite.seed(intranet["id"], pages(context.centre))
-    suite.occ("intravox:reindex")
+    suite.occ("intravox:reindex")  # as Nextcloud's admin, who reads the folder while IntraVox's setup grants it
+    grant(suite, intranet, teams.SHARED)
     return check(context)
 
 

@@ -921,7 +921,14 @@ class FakeSuite:
             if mount not in mounts:
                 self._group_folder(mount, {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7,
                                            "IntraVox Users": 1})
-        elif (command, args) != ("intravox:reindex", ()):
+            else:  # a later run adds back each of its groups taken out, as Groupfolders adds one: with every permission
+                for group in ("admin", "IntraVox Admins", "IntraVox Editors", "IntraVox Users"):
+                    self.group_folders[mounts[mount]]["groups"].setdefault(group, 31)
+        elif (command, args) == ("intravox:reindex", ()):  # as Nextcloud's admin, whom the admin group's grant lets read
+            mount = self.apps[app].get("groupfolder_name", "IntraVox")
+            if not self.group_folders.get(mounts.get(mount), {}).get("groups", {}).get("admin", 0) & 1:
+                raise failed
+        else:
             raise AssertionError(f"the fake suite runs no occ {(command, *args)}")
         return ""
 
