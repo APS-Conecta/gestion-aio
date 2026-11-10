@@ -925,6 +925,25 @@ class Upgrade(InstallTest):
         self.assertEqual(self.until("done")["status"], "done")
         self.assertFalse(self.suite.users["ana"]["enabled"], "the upgrade re-enabled a person the Users page disabled")
 
+    def test_an_upgrade_loads_the_same_people_from_a_spreadsheet_an_earlier_release_kept_as_its_text(self):
+        self.installed()
+        before = provisionador.State(self.state).read()
+        with provisionador.State(self.state).change() as s:
+            s["spreadsheet"] = spreadsheet("ana;Ana;Rojas;;;sí")  # the one claim() uploads, kept as its text
+        self.assertEqual(self.upgrade(), None)
+        after = provisionador.State(self.state).read()
+        loaded = provisionador.plan(before)["people"]
+        self.assertEqual([person["user"] for person in loaded], ["ana"])
+        self.assertEqual((provisionador.plan(after)["people"], provisionador.plan(after)["errors"]), (loaded, []))
+        self.assertEqual(provisionador.declared(after), provisionador.declared(before))
+
+    def test_an_install_under_way_keeps_an_empty_spreadsheet_an_earlier_release_kept_as_no_spreadsheet(self):
+        self.browser.request("POST", "/api/centre", {"code": "999001"})
+        with provisionador.State(self.state).change() as s:
+            s["spreadsheet"] = ""  # an empty upload, kept as its text
+        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(provisionador.plan(provisionador.State(self.state).read())["errors"], [])
+
 
 class StoreApps(unittest.TestCase):
     """The nightly update of the store's apps (the host's timer runs `provisionador.py update-apps` after AIO's backup
@@ -1551,18 +1570,23 @@ class OpenedWorkbook:
         return [self.values(f"{name}!A{row}:{last}{row}") for row in range(1, max(int(row) for _, row in ends) + 1)]
 
     def frozen(self, name):
-        """The cell the sheet's frozen panes begin at, or None."""
+        """The cell the frozen panes begin at, below the rows and right of the columns they split off, or None."""
         pane = self.xml(self.sheets[name][0]).find("{*}sheetViews/{*}sheetView/{*}pane")
-        return pane.get("topLeftCell") if pane is not None and pane.get("state") == "frozen" else None
+        if pane is None or pane.get("state") != "frozen":
+            return None
+        columns, rows = (int(pane.get(split, "0")) for split in ("xSplit", "ySplit"))
+        return f"{chr(ord('A') + columns)}{rows + 1}" if columns or rows else None
 
     def validations(self, name):
-        """Each data validation of the sheet by the cells it covers: its type, its error style, its input message's
-        title and text when it shows one, and for a list read from a range, that range's sheet and values."""
+        """Each data validation of the sheet by the cells it covers: its type, its error style when it shows its error,
+        its input message's title and text when it shows one, and for a list read from a range, that range's sheet and
+        values."""
         found = {}
         for rule in self.xml(self.sheets[name][0]).iterfind(".//{*}dataValidation"):
             source = rule.findtext("{*}formula1") or ""
             found[rule.get("sqref")] = {
-                "type": rule.get("type", "none"), "style": rule.get("errorStyle", "stop"),
+                "type": rule.get("type", "none"), "style": rule.get("errorStyle", "stop")
+                if rule.get("showErrorMessage") in ("1", "true") else None,
                 "message": (rule.get("promptTitle"), rule.get("prompt"))
                 if rule.get("showInputMessage") in ("1", "true") else None,
                 "list": (source.replace("$", "").rsplit("!", 1)[0].strip("'"), self.values(source))

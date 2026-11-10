@@ -651,7 +651,14 @@ def upgrade(suite, state, version):
     while they do not run, and every install step but an owned one is set to run again, so the Provisionador the
     bootstrap restarts resumes the install by itself and «Listo» follows as at the first install. An install still
     under way — one the bootstrap cut short, or a wizard not yet closed — needs no reconcile: the resumed
-    Provisionador carries it on as it is. Returns None; a failure of the suite's services raises."""
+    Provisionador carries it on as it is. Either way, a people spreadsheet kept as its text, as earlier releases kept
+    it, is kept as its rows, an empty one as none. Returns None; a failure of the suite's services raises."""
+    with state.change() as s:
+        if isinstance(text := s.get("spreadsheet"), str):
+            if text:
+                s["spreadsheet"] = spreadsheet.rows(text.encode())
+            else:
+                s.pop("spreadsheet")
     data = state.read()
     install = data.get("install")
     if install and install.get("upgrade") and not install.get("listo"):
