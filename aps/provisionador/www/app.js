@@ -212,7 +212,7 @@ async function equipos() {
 
 function showTeams({teams: declared}) {
   $("teams").replaceChildren(...declared.map(
-    (team) => item(team.name, "", `Grupo ${team.id} · carpeta ${team.folder}`)));
+    (team) => item(team.name, "", `Carpeta ${team.folder}`)));
 }
 
 async function keepTeams() {
@@ -257,10 +257,10 @@ function ticked() {
   return [...$("people").querySelectorAll("input:checked:enabled")];
 }
 
-// «Retirar» asks first: the ticked people's accounts are disabled and leave every team, keeping their files and shares.
+// «Retirar» asks first: the ticked people's accounts are disabled and leave every group, keeping files and shares.
 function askRetire() {
   $("retire-question").textContent = `¿Retirar a ${ticked().map((box) => box.parentElement.textContent).join(", ")}? `
-    + "Su cuenta se desactivará y saldrá de todos los equipos; sus archivos y lo que compartió se conservan, y podrá "
+    + "Su cuenta se desactivará y saldrá de todos los grupos; sus archivos y lo que compartió se conservan, y podrá "
     + "reactivarse en «Cuentas», en APS Conecta Gestión.";
   $("retire-confirm").hidden = false;
 }
