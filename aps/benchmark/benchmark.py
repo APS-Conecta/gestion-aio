@@ -6,8 +6,8 @@ ships one, against the bar of at least 95 % right tool calls and a p95 answer ti
 
 Each model is pulled by its tag and measured only when the digest Ollama reports is its pin (Ollama refuses a pull by
 digest). One unscored request loads it and reads the tools. Then each question of questions.json goes alone through
-Ollama's OpenAI-compatible chat endpoint with the first slice's tools: tools.json, in the shape of the connector's
-tools/list (name, description, inputSchema). No tool runs, writes included. A question is right when the reply's first
+Ollama's OpenAI-compatible chat endpoint with the first slice's tools: tools.json, the connector main's own tools/list
+(name, description, inputSchema), which aps/benchmark/refresh-tools.sh takes again. No tool runs, writes included. A question is right when the reply's first
 tool call names its tool and every argument it expects holds the expected value once the tool's defaults are filled
 in; a reply without a tool call, or an error, is wrong. The time is the whole request.
 

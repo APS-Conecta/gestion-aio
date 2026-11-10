@@ -131,6 +131,82 @@
     }
   },
   {
+    "name": "calendar_update_event",
+    "description": "Change fields of one single event; omitted fields stay, a series is refused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "description": "Event id from calendar_list_events",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New title"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New start, format of calendar_create_event"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New end, together with start"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New place"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New longer text"
+        }
+      },
+      "required": [
+        "event_id"
+      ]
+    }
+  },
+  {
     "name": "search",
     "description": "Search the user's Nextcloud for files, notes, cards and events.",
     "inputSchema": {
@@ -273,6 +349,37 @@
         "board_id",
         "stack_id",
         "title"
+      ]
+    }
+  },
+  {
+    "name": "deck_update_card",
+    "description": "Change title, description or due date of a card; empty fields stay unchanged.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "card_id": {
+          "description": "Card id from deck_browse level=cards",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "description": "New title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "description": "New card text, Markdown",
+          "type": "string"
+        },
+        "duedate": {
+          "default": "",
+          "description": "New due date, ISO 8601",
+          "type": "string"
+        }
+      },
+      "required": [
+        "card_id"
       ]
     }
   },
@@ -485,7 +592,7 @@
   },
   {
     "name": "mail_browse",
-    "description": "List the mail accounts of this user, the mailboxes of one, or the messages of one.\n\n    Envelopes newest first; the full text of one is a fetch(\"mail:<id>\") away. Percent encode a\n    filter value with a space or colon (subject:Rechnung%20Mai). truncated: page cut;\n    preview_truncated: preview cut. Reads only: never sends, drafts, moves, flags or\n    deletes.",
+    "description": "List the mail accounts of this user, the mailboxes of one, or the messages of one.\n\nEnvelopes newest first; the full text of one is a fetch(\"mail:<id>\") away. Percent encode a\nfilter value with a space or colon (subject:Rechnung%20Mai). truncated: page cut;\npreview_truncated: preview cut. Reads only: never sends, drafts, moves, flags or\ndeletes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -602,6 +709,32 @@
     }
   },
   {
+    "name": "notes_update",
+    "description": "Replace a note's text if its etag still matches; refused when read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "note_id": {
+          "description": "Note id from notes_search",
+          "type": "string"
+        },
+        "content": {
+          "description": "Complete new note text",
+          "type": "string"
+        },
+        "etag": {
+          "description": "etag from notes_read",
+          "type": "string"
+        }
+      },
+      "required": [
+        "note_id",
+        "content",
+        "etag"
+      ]
+    }
+  },
+  {
     "name": "unified_search",
     "description": "Search the whole Nextcloud across all installed search providers. The note of every answer says whether file contents were matched.",
     "inputSchema": {
@@ -667,7 +800,7 @@
   },
   {
     "name": "tables_create_row",
-    "description": "Add one row to an existing table; never changes or deletes one.\n\n    A timeout does not mean nothing was written. Read back with tables_browse(level=rows)\n    instead of calling this twice.",
+    "description": "Add one row to an existing table; never changes or deletes one.\n\nA timeout does not mean nothing was written. Read back with tables_browse(level=rows)\ninstead of calling this twice.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -688,7 +821,7 @@
   },
   {
     "name": "talk_browse",
-    "description": "List the conversations of this account, or the history of one.\n\n    The messages level answers newest first; the next page runs further into the past.\n    truncated: page cut; message_truncated: message cut.",
+    "description": "List the conversations of this account, or the history of one.\n\nThe messages level answers newest first; the next page runs further into the past.\ntruncated: page cut; message_truncated: message cut.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -723,7 +856,7 @@
   },
   {
     "name": "talk_send",
-    "description": "Send one message into a conversation; never edits or deletes one.\n\n    A timeout does not mean nothing was sent. Read back with talk_browse(level=messages)\n    instead of calling this twice.",
+    "description": "Send one message into a conversation; never edits or deletes one.\n\nA timeout does not mean nothing was sent. Read back with talk_browse(level=messages)\ninstead of calling this twice.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -743,43 +876,7 @@
     }
   },
   {
-    "name": "estadistica_resumen",
-    "description": "The Resumen (docs/adr/0009): one card per meta of the newest metas, for the establishment. Each card is the meta's last month with a figure (mes, YYYY-MM): its numerador, denominador and %, the same as GET indicadores' local series for that month, and whether it cumple against its meta comprometida when one is typed, else the meta nacional. A manual meta (VIII) is its cumplimiento informado, with no mes. A month with no written number in any of the meta's cells has no figure, never 0. datos_al (YYYY-MM) is the establishment's own last month in the meta's serie, the fecha_corte_local GET indicadores serves for its fuente: a Serie P mes shows its latest corte, so the two can differ. None for a manual meta. estado says why a meta shows none: «esperando ruta oficial» while its seed marks a ruta \"oficial\": false, or «falta el denominador oficial de <año>» while its ages cut a PIV band and no denominador comprometido is typed. Only the establishment's own figures are asked: no country, no peers.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "establecimiento": {
-          "type": "string",
-          "nullable": true,
-          "default": null,
-          "description": "the six-digit DEIS code whose Resumen to build; this install's when omitted"
-        }
-      }
-    }
-  },
-  {
-    "name": "estadistica_indicadores",
-    "description": "The Metas Sanitarias of a year, month by month (a12). For each meta: this install's establishment's numerador, denominador and %, and the gaps to its meta comprometida and to the meta nacional (in points); beside them, the country's % and the peer group's, wherever the denominator is nationally computable: REM, or FONASA's inscritos when a corte serves the year and the meta's ages are whole bands. poblacion.falta_oficial marks a meta whose ages cut a band: no denominador until its denominador comprometido, which serves the local % only (docs/adr/0007). A Serie A month adds up to that month; a Serie P month is the latest corte up to it (June, December); a month past the data has no figure. A manual meta (VIII) is its typed cumplimiento. numerador and denominador are the meta's routes as its seed file writes them, with the REM dictionaries they cite (docs/adr/0008). Percentages are percentages: 90 is 90 %.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "anio": {
-          "type": "integer",
-          "format": "int64",
-          "nullable": true,
-          "default": null,
-          "description": "the metas' year; the newest with metas up to the current year when omitted"
-        },
-        "pares": {
-          "type": "string",
-          "default": "tipo",
-          "description": "what the peers share with this establishment, comma-separated: tipo, dependencia, nivel, servicio, region or comuna; empty for no peers"
-        }
-      }
-    }
-  },
-  {
-    "name": "estadistica_fuentes",
+    "name": "estadistica_api_fuentes",
     "description": "Every fuente this install holds: REM Serie A and P, year by year, the establishments, and FONASA's Población Inscrita Validada (piv). Each says where it comes from (origen: datos públicos DEIS, or FONASA), up to when (fecha_corte: YYYY-MM for REM, the newest corte's YYYY-MM-DD for the PIV), how many rows it holds, and whether it is whole (estado: ok, incompleto, sin datos). A REM year also says how many of its códigos no dictionary explains (sin_descripcion) and whose dictionary labels it (etiquetas_de).",
     "inputSchema": {
       "type": "object",
@@ -787,22 +884,22 @@
     }
   },
   {
-    "name": "estadistica_fuente",
+    "name": "estadistica_api_fuente",
     "description": "One fuente, with its catálogo. For rem-a and rem-p, one year's hojas, secciones, prestaciones (código and label) and columns (col01…col50 and label), from that year's DICCIONARIO CODIGOS or, for a year without one, from the nearest later year's (etiquetas_de). For establecimientos, the values a peer group is chosen from, each with how many establishments carry it. For piv, FONASA's cortes, newest first, each with how many establishments and inscritos it holds.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "id": {
-          "type": "string",
+          "description": "rem-a, rem-p, establecimientos or piv",
           "pattern": "^[a-z-]+$",
-          "description": "rem-a, rem-p, establecimientos or piv"
+          "type": "string"
         },
         "anio": {
-          "type": "integer",
+          "default": null,
+          "description": "for REM, the year whose catálogo to read; the newest loaded year when omitted",
           "format": "int64",
           "nullable": true,
-          "default": null,
-          "description": "for REM, the year whose catálogo to read; the newest loaded year when omitted"
+          "type": "integer"
         }
       },
       "required": [
@@ -811,23 +908,23 @@
     }
   },
   {
-    "name": "estadistica_consultas",
+    "name": "estadistica_api_consultas",
     "description": "Answers one consulta: the local establishment's series and, when the spec asks to compare, the national and the peer group's. Each is summed and grouped as the spec says, and comes with the labels of what was summed and the fuente it came from. The builder and the tableros ask through here, so the API returns the UI's numbers (a15). The metas' routes are the same specs, asked on the server for GET indicadores (docs/adr/0006 amendment).",
     "inputSchema": {
       "type": "object",
       "properties": {
         "consulta": {
-          "type": "object",
-          "description": "the spec: fuente, periodo, filtros, agrupar, metrica and comparar (docs/adr/0006)",
           "additionalProperties": {
             "type": "object"
-          }
+          },
+          "description": "the spec: fuente, periodo, filtros, agrupar, metrica and comparar (docs/adr/0006)",
+          "type": "object"
         },
         "establecimiento": {
-          "type": "string",
-          "nullable": true,
           "default": null,
-          "description": "the six-digit DEIS code of the local series; this install's when omitted"
+          "description": "the six-digit DEIS code of the local series; this install's when omitted",
+          "nullable": true,
+          "type": "string"
         }
       },
       "required": [
@@ -836,7 +933,7 @@
     }
   },
   {
-    "name": "estadistica_preguntas",
+    "name": "estadistica_api_preguntas",
     "description": "Every pregunta: a consulta saved under a title for everyone to read (D6), the most recently changed first. consulta is the spec as its author sent it, which POST consultas answers; tipo is how it is drawn (barra, linea or tabla). editable says whether the person asking may change it: its creator, or whoever administers Estadística.",
     "inputSchema": {
       "type": "object",
@@ -844,68 +941,26 @@
     }
   },
   {
-    "name": "estadistica_pregunta",
-    "description": "One pregunta.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "integer",
-          "format": "int64",
-          "description": "the pregunta's id, as the list served it"
-        }
-      },
-      "required": [
-        "id"
-      ]
-    }
-  },
-  {
-    "name": "estadistica_tableros",
-    "description": "Every tablero, the most recently changed first. tarjetas are its cards in order: each names a pregunta by id and spans 1, 2 or 3 of the tablero's columns (ancho). A card's pregunta may since have been deleted; the card then says so.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {}
-    }
-  },
-  {
-    "name": "estadistica_tablero",
-    "description": "One tablero.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "integer",
-          "format": "int64",
-          "description": "the tablero's id, as the list served it"
-        }
-      },
-      "required": [
-        "id"
-      ]
-    }
-  },
-  {
-    "name": "estadistica_crear_pregunta",
+    "name": "estadistica_api_crear_pregunta",
     "description": "Saves a consulta as a pregunta, visible to all the staff (D6). The consulta must be one POST consultas would answer, and is kept as sent.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "titulo": {
-          "type": "string",
-          "description": "what the staff see in the list, up to 200 characters"
+          "description": "what the staff see in the list, up to 200 characters",
+          "type": "string"
         },
         "consulta": {
-          "type": "object",
-          "description": "the spec, as POST consultas takes it (docs/adr/0006)",
           "additionalProperties": {
             "type": "object"
-          }
+          },
+          "description": "the spec, as POST consultas takes it (docs/adr/0006)",
+          "type": "object"
         },
         "tipo": {
-          "type": "string",
-          "default": "barra",
-          "description": "barra, linea or tabla"
+          "default": null,
+          "description": "barra, linea or tabla",
+          "type": "string"
         }
       },
       "required": [
@@ -915,36 +970,15 @@
     }
   },
   {
-    "name": "estadistica_editar_pregunta",
-    "description": "Changes a pregunta: what is left out stays as it was. Its creator or whoever administers Estadística may; anyone else gets a 403.",
+    "name": "estadistica_api_pregunta",
+    "description": "One pregunta, as GET preguntas serves it.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "id": {
-          "type": "integer",
+          "description": "the pregunta's id, as the list served it",
           "format": "int64",
-          "description": "the pregunta's id, as the list served it"
-        },
-        "titulo": {
-          "type": "string",
-          "nullable": true,
-          "default": null,
-          "description": "a new title"
-        },
-        "consulta": {
-          "type": "object",
-          "nullable": true,
-          "default": null,
-          "description": "a new spec, kept as sent",
-          "additionalProperties": {
-            "type": "object"
-          }
-        },
-        "tipo": {
-          "type": "string",
-          "nullable": true,
-          "default": null,
-          "description": "barra, linea or tabla"
+          "type": "integer"
         }
       },
       "required": [
@@ -953,35 +987,81 @@
     }
   },
   {
-    "name": "estadistica_crear_tablero",
+    "name": "estadistica_api_editar_pregunta",
+    "description": "Changes a pregunta: what is left out stays as it was. Its creator or whoever administers Estadística may; anyone else gets a 403.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "the pregunta's id, as the list served it",
+          "format": "int64",
+          "type": "integer"
+        },
+        "titulo": {
+          "default": null,
+          "description": "a new title",
+          "nullable": true,
+          "type": "string"
+        },
+        "consulta": {
+          "additionalProperties": {
+            "type": "object"
+          },
+          "default": null,
+          "description": "a new spec, kept as sent",
+          "nullable": true,
+          "type": "object"
+        },
+        "tipo": {
+          "default": null,
+          "description": "barra, linea or tabla",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  {
+    "name": "estadistica_api_tableros",
+    "description": "Every tablero, the most recently changed first. tarjetas are its cards in order: each names a pregunta by id and spans 1, 2 or 3 of the tablero's columns (ancho). A card's pregunta may since have been deleted; the card then says so.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "estadistica_api_crear_tablero",
     "description": "Saves a tablero, visible to all the staff (D6). Each card must name a pregunta that exists.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "titulo": {
-          "type": "string",
-          "description": "what the staff see in the list, up to 200 characters"
+          "description": "what the staff see in the list, up to 200 characters",
+          "type": "string"
         },
         "tarjetas": {
-          "type": "array",
-          "default": [],
+          "default": null,
           "description": "the cards in order; ancho is 1, 2 or 3 and 1 when left out",
           "items": {
-            "type": "object",
+            "properties": {
+              "pregunta": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "ancho": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
             "required": [
               "pregunta"
             ],
-            "properties": {
-              "pregunta": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "ancho": {
-                "type": "integer",
-                "format": "int64"
-              }
-            }
-          }
+            "type": "object"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -990,48 +1070,101 @@
     }
   },
   {
-    "name": "estadistica_editar_tablero",
-    "description": "Changes a tablero: what is left out stays as it was, and tarjetas replaces the whole list. A card it gains must name a pregunta that exists; one it keeps may name a deleted one. Its creator or whoever administers Estadística may; anyone else gets a 403.",
+    "name": "estadistica_api_tablero",
+    "description": "One tablero, as GET tableros serves it.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "id": {
-          "type": "integer",
+          "description": "the tablero's id, as the list served it",
           "format": "int64",
-          "description": "the tablero's id, as the list served it"
-        },
-        "titulo": {
-          "type": "string",
-          "nullable": true,
-          "default": null,
-          "description": "a new title"
-        },
-        "tarjetas": {
-          "type": "array",
-          "nullable": true,
-          "default": null,
-          "description": "the cards in their new order",
-          "items": {
-            "type": "object",
-            "required": [
-              "pregunta"
-            ],
-            "properties": {
-              "pregunta": {
-                "type": "integer",
-                "format": "int64"
-              },
-              "ancho": {
-                "type": "integer",
-                "format": "int64"
-              }
-            }
-          }
+          "type": "integer"
         }
       },
       "required": [
         "id"
       ]
+    }
+  },
+  {
+    "name": "estadistica_api_editar_tablero",
+    "description": "Changes a tablero: what is left out stays as it was, and tarjetas replaces the whole list. A card it gains must name a pregunta that exists; one it keeps may name a deleted one. Its creator or whoever administers Estadística may; anyone else gets a 403.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "the tablero's id, as the list served it",
+          "format": "int64",
+          "type": "integer"
+        },
+        "titulo": {
+          "default": null,
+          "description": "a new title",
+          "nullable": true,
+          "type": "string"
+        },
+        "tarjetas": {
+          "default": null,
+          "description": "the cards in their new order",
+          "items": {
+            "properties": {
+              "pregunta": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "ancho": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pregunta"
+            ],
+            "type": "object"
+          },
+          "nullable": true,
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  {
+    "name": "estadistica_api_indicadores",
+    "description": "The Metas Sanitarias of a year, month by month (a12). For each meta: this install's establishment's numerador, denominador and %, and the gaps to its meta comprometida and to the meta nacional (in points); beside them, the country's % and the peer group's, wherever the denominator is nationally computable: REM, or FONASA's inscritos when a corte serves the year and the meta's ages are whole bands. poblacion.falta_oficial marks a meta whose ages cut a band: no denominador until its denominador comprometido, which serves the local % only (docs/adr/0007). Percentages are percentages: 90 is 90 %.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "anio": {
+          "default": null,
+          "description": "the metas' year; the newest with metas up to the current year when omitted",
+          "format": "int64",
+          "nullable": true,
+          "type": "integer"
+        },
+        "pares": {
+          "default": null,
+          "description": "what the peers share with this establishment, comma-separated: tipo, dependencia, nivel, servicio, region or comuna; empty for no peers",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "estadistica_api_resumen",
+    "description": "The Resumen (docs/adr/0009): one card per meta of the newest metas, for the establishment. Each card is the meta's last month with a figure (mes, YYYY-MM): its numerador, denominador and %, the same as GET indicadores' local series for that month, and whether it cumple against its meta comprometida when one is typed, else the meta nacional. A manual meta (VIII) is its cumplimiento informado, with no mes. A month with no written number in any of the meta's cells has no figure, never 0. datos_al (YYYY-MM) is the establishment's own last month in the meta's serie, the fecha_corte_local GET indicadores serves for its fuente: a Serie P mes shows its latest corte, so the two can differ. None for a manual meta. estado says why a meta shows none: «esperando ruta oficial» while its seed marks a ruta \"oficial\": false, or «falta el denominador oficial de <año>» while its ages cut a PIV band and no denominador comprometido is typed. Only the establishment's own figures are asked: no country, no peers.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "establecimiento": {
+          "default": null,
+          "description": "the six-digit DEIS code whose Resumen to build; this install's when omitted",
+          "nullable": true,
+          "type": "string"
+        }
+      }
     }
   }
 ]
