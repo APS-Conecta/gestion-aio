@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The welcome page: every staff member lands on IntraVox («Inicio», a default fork app), whose home page names the
 establishment and says where its shared folders are. IntraVox keeps its pages in the group folder Intranet, which
-grants every staff member and no other group what teams.SHARED declares; IntraVox follows those grants, so every staff
-member edits the pages. A page that is already there stays as staff left it. The step ensures IntraVox and
-Groupfolders."""
+grants every staff member what teams.SHARED declares, and no other group but Nextcloud's administrators, as whom
+IntraVox's setup and occ reach the folder; IntraVox follows those grants, so every staff member edits the pages. A page
+that is already there stays as staff left it. The step ensures IntraVox and Groupfolders."""
 
 import json
 
 import teams
 from steps import apps, differences
 from steps.folders import grant, listed, reasons
+from steps.people import ADMINS
 
 NAME = "Página de bienvenida"
 NEEDS = ("groups",)
@@ -22,7 +23,7 @@ LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folde
          ("Calendario", "La agenda del equipo", "/apps/calendar/", "calendar"),
          ("Contactos", "Teléfonos y correos", "/apps/contacts/", "contacts"),
          ("Talk", "Mensajes y videollamadas", "/apps/spreed/", "chat"))
-GRANTS = {MOUNT: teams.SHARED}
+GRANTS = {MOUNT: {**teams.SHARED, ADMINS: teams.MANAGE}}
 
 
 def row(*widgets, **style):
@@ -61,9 +62,9 @@ def run(context):
     intranet = listed(suite).get(MOUNT)
     if intranet is None:
         return reasons(suite, GRANTS)
+    grant(suite, intranet, GRANTS[MOUNT])
     suite.seed(intranet["id"], pages(context.centre))
-    suite.occ("intravox:reindex")  # as Nextcloud's admin, who reads the folder while IntraVox's setup grants it
-    grant(suite, intranet, teams.SHARED)
+    suite.occ("intravox:reindex")
     return check(context)
 
 

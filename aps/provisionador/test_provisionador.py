@@ -1265,7 +1265,8 @@ DIRECTORATE = {"role-director-cesfam": MANAGE, "role-subdirector-jefe-tecnico": 
 FOLDERS = {"Sectores/Sector Norte": STAFF, "Sectores/Sector Sur": STAFF, "Programas/Atención Domiciliaria": STAFF,
            "Programas/Salud Mental-Adulto": STAFF, "Unidades/SOME": STAFF, "Unidades/Farmacia": STAFF,
            "Unidades/Dental": STAFF, "Unidades/OIRS": STAFF, "Unidades/Estadística-REM": STAFF,
-           "Unidades/Dirección": DIRECTORATE, "Unidades/Subdirección": DIRECTORATE, "Intranet": STAFF}
+           "Unidades/Dirección": DIRECTORATE, "Unidades/Subdirección": DIRECTORATE,
+           "Intranet": {**STAFF, "admin": MANAGE}}  # IntraVox reaches it as Nextcloud's admin
 FOLDERS_STEP = "Carpetas de equipo y permisos"
 WELCOME_STEP = "Página de bienvenida"
 
@@ -1390,7 +1391,7 @@ class Equipos(InstallTest):
         self.until("done")
         self.assertEqual(self.suite.system["defaultapp"], "intravox")
         intranet = self.folders()["Intranet"]
-        self.assertEqual(intranet["groups"], STAFF)
+        self.assertEqual(intranet["groups"], FOLDERS["Intranet"])
         home = json.loads(intranet["files"]["es/home.json"])
         self.assertEqual(home["title"], "Inicio")
         links = next(w for row in home["layout"]["rows"] for w in row["widgets"] if w["type"] == "links")
