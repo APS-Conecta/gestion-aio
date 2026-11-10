@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Equipos», «Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on
 to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the blank
-people spreadsheet, uploads it filled in as Excel saves it and sees the people the install will create, then to
+people spreadsheet, uploads it filled in as Excel saves it and sees the people the install will create with their
+cargos, on a page in the brand fonts with no console error and no content-security-policy violation, then to
 «Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the components and the
 backups; «Instalar» shows each step and, once AIO runs our components, each container's progress live, and below them
 «Registro de la instalación», which logs the suite's start as it runs. Meanwhile the
@@ -33,6 +34,7 @@ import spreadsheet  # noqa: E402
 import teams  # noqa: E402
 from browser import aio_config, aio_file, as_person, chromium, hardware, machine, suite_name, verified  # noqa: E402
 from browser import STORED, first_password, provisionador_file, provisionador_state, wizard_link  # noqa: E402
+from browser import faults, fonts  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.backups import BACKUP_FOLDER, BACKUP_TIME  # noqa: E402
 from steps.components import chosen  # noqa: E402
@@ -44,10 +46,10 @@ LISTO_WITHIN = 20  # minutes: the install's GitHub downloads alone can take seve
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
 # As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252. 47-people checks these people but the one retired.
-PEOPLE = ("usuario;nombre;apellidos;correo;grupos;primer_admin\r\n"
-          "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;sector-norte role-enfermeria;sí\r\n"
-          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;sector-sur prog-cardiovascular role-medico;no\r\n"
-          "luis.vera;Luis;Vera Soto;luis.vera@example.org;sector-norte role-tens-procedimientos;no\r\n")
+PEOPLE = ("Usuario;Nombre;Apellidos;Correo;Cargo;Primer administrador\r\n"
+          "ana.rojas;Ana María;Rojas Núñez;ana.rojas@example.org;Enfermera/o;sí\r\n"
+          "pedro.munoz;Pedro;Muñoz Tapia;pedro.munoz@example.org;medico general / de familia;no\r\n"
+          "luis.vera;Luis;Vera Soto;luis.vera@example.org;TENS – Procedimientos / Vacunatorio;no\r\n")
 RETIRED = "luis.vera"  # retired with «Retirar» while the install runs
 CHOSEN = list(chosen(hardware()).values())  # «Revisar» lists them, and the progress names their containers so
 SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnabled": True, "isClamavEnabled": True,
@@ -100,6 +102,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     context = browser.new_context(viewport={"width": 1280, "height": 900}, record_har_path=har,
                                   record_har_content="embed")
     page = context.new_page()
+    found = faults(page)
     page.goto(link)
     page.click("#continue")
     expect(page.get_by_role("heading", name="Equipos")).to_be_visible()
@@ -113,7 +116,11 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     page.set_input_files("#people-file", files=[{"name": spreadsheet.FILE, "mimeType": "text/csv",
                                                  "buffer": PEOPLE.encode("cp1252")}])
     expect(page.locator("#people li strong")).to_have_text([person["name"] for person in people])
+    expect(page.locator("#people li span")).to_contain_text(
+        [teams.ROLES[person["cargo"]][0].format(type=centre["type"]) for person in people])
     page.screenshot(path=evidence / "equipos.png")
+    if found or not {"Fraunces", "Nunito Sans"} <= set(fonts(page)):
+        sys.exit(f"«Equipos» logged {found} or did not load the brand fonts")
     page.click("#teams-continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
     expect(page.locator("#summary-address")).to_have_text(f"https://{name}")
