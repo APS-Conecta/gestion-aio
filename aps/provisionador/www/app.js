@@ -278,11 +278,13 @@ async function retire() {
   }
 }
 
+// The people workbook, built for the centre: the Provisionador sends its bytes in base64.
 async function template() {
   try {
-    const {file, text} = await api("GET", "/api/spreadsheet");
-    const link = Object.assign(document.createElement("a"), {download: file,
-      href: URL.createObjectURL(new Blob([text], {type: "text/csv;charset=utf-8"}))});
+    const {file, content} = await api("GET", "/api/spreadsheet");
+    const bytes = Uint8Array.from(atob(content), (char) => char.charCodeAt(0));
+    const link = Object.assign(document.createElement("a"), {download: file, href: URL.createObjectURL(
+      new Blob([bytes], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}))});
     link.click();
   } catch (e) {
     status("people-status", e.message, true);
