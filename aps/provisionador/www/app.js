@@ -231,11 +231,10 @@ async function keepTeams() {
   }
 }
 
-// The people the uploaded spreadsheet loads, each with the box «Retirar» takes, or each of its errors by line, and the
-// groups it may name. The first administrator is not retired; a person a corrected spreadsheet drops once the install
-// made their account is.
+// The people the uploaded spreadsheet loads, each with their cargo and the box «Retirar» takes, or each of its errors
+// by line. The first administrator is not retired; a person a corrected spreadsheet drops once the install made their
+// account is.
 function showPeople({groups, people, errors, retired, dropped}) {
-  $("people-groups").replaceChildren(...Object.entries(groups).map(([id, name]) => element("li", `${id}: ${name}`)));
   $("people-errors").replaceChildren(...errors.map((error) => element("li", error)));
   $("people").replaceChildren(...people.map((person) => {
     const gone = retired.includes(person.user);
@@ -246,7 +245,7 @@ function showPeople({groups, people, errors, retired, dropped}) {
     const node = element("li", "");
     node.dataset.state = gone ? "retired" : "";
     node.append(label, element("span", [gone && "Retirado/a", person.user, person.email,
-      person.groups.map((id) => groups[id]).join(", "), person.admin && ADMINISTRATOR].filter(Boolean).join(" · ")));
+      groups[person.cargo], person.admin && ADMINISTRATOR].filter(Boolean).join(" · ")));
     return node;
   }), ...dropped.map((person) => item(person.name, "retired", `${DROPPED} · ${person.user}`)));
   $("retire").disabled = true;
@@ -257,10 +256,11 @@ function ticked() {
   return [...$("people").querySelectorAll("input:checked:enabled")];
 }
 
-// «Retirar» asks first: the ticked people's accounts are disabled and leave every team, keeping their files and shares.
+// «Retirar» asks first: the ticked people's accounts are disabled and leave every group the install manages, keeping
+// their files and shares.
 function askRetire() {
   $("retire-question").textContent = `¿Retirar a ${ticked().map((box) => box.parentElement.textContent).join(", ")}? `
-    + "Su cuenta se desactivará y saldrá de todos los equipos; sus archivos y lo que compartió se conservan, y podrá "
+    + "Su cuenta se desactivará y saldrá de todos sus grupos; sus archivos y lo que compartió se conservan, y podrá "
     + "reactivarse en «Cuentas», en APS Conecta Gestión.";
   $("retire-confirm").hidden = false;
 }
@@ -287,20 +287,15 @@ async function template() {
   }
 }
 
-// The spreadsheet as Excel saves it: as UTF-8, or as Windows-1252 when saved as plain CSV.
+// The spreadsheet's bytes as the operator saved it, in base64: the Provisionador reads them.
 async function upload() {
   const file = $("people-file").files[0];
   if (!file) return;
-  const bytes = await file.arrayBuffer();
+  const bytes = new Uint8Array(await file.arrayBuffer());
   $("people-file").value = "";
-  let text;
   try {
-    text = new TextDecoder("utf-8", {fatal: true}).decode(bytes);
-  } catch {
-    text = new TextDecoder("windows-1252").decode(bytes);
-  }
-  try {
-    const plan = await api("POST", "/api/people", {spreadsheet: text});
+    const plan = await api("POST", "/api/people",
+      {file: file.name, content: btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""))});
     showPeople(plan);
     status("people-status", plan.errors.length ? "La planilla tiene errores: corríjalos y súbala de nuevo."
       : `Se cargó la planilla: ${plan.people.length} ${plan.people.length === 1 ? "persona" : "personas"}.`
