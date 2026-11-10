@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The welcome page: every staff member lands on IntraVox («Inicio», a default fork app), whose home page names the
-establishment and says where its shared folders are. IntraVox keeps its pages in the group folder Intranet, whose grants
-teams.INTRANET declares; a page that is already there stays as staff left it. The step ensures IntraVox and
+establishment and says where its shared folders are. IntraVox keeps its pages in the group folder Intranet, which
+grants every staff member and no other group what teams.SHARED declares; IntraVox follows those grants, so every staff
+member edits the pages. A page that is already there stays as staff left it. The step ensures IntraVox and
 Groupfolders."""
 
 import json
 
 import teams
 from steps import apps, differences
-from steps.folders import grant, listed
+from steps.folders import grant, listed, reasons
 
 NAME = "Página de bienvenida"
 NEEDS = ("groups",)
@@ -18,13 +19,10 @@ MOUNT = "Intranet"  # the group folder's name, as staff see it in Files
 SETTINGS = {"system": {"defaultapp": APP}, "apps": {APP: {"groupfolder_name": MOUNT}}}
 HOME = "page-aps-00000001-0000-4000-8000-000000000001"
 LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folder"),
-         (teams.TRANSVERSAL, "Lo que lee todo el personal", f"/apps/files/?dir=/{teams.TRANSVERSAL}",
-          "folder-multiple"),
          ("Calendario", "La agenda del equipo", "/apps/calendar/", "calendar"),
          ("Contactos", "Teléfonos y correos", "/apps/contacts/", "contacts"),
          ("Talk", "Mensajes y videollamadas", "/apps/spreed/", "chat"))
-UNREADABLE = ("El personal no puede leer la página de bienvenida en la carpeta {}. Presione «Reintentar»; si vuelve a "
-              "ocurrir, contacte a APS Conecta.").format(MOUNT)
+GRANTS = {MOUNT: teams.SHARED}
 
 
 def row(*widgets, **style):
@@ -34,10 +32,11 @@ def row(*widgets, **style):
 def pages(centre):
     """The home page and the menu, by their path in the Intranet folder."""
     *units, last = teams.UNITS
-    folders = (f"En «Archivos» están las carpetas del establecimiento: {teams.TRANSVERSAL}, que lee todo el personal "
-               "y ordenan las jefaturas; la de cada sector y cada programa, que gestionan su equipo y las jefaturas; y "
-               f"la de cada unidad: {', '.join(units)} y {last}. Las jefaturas editan esta página en la carpeta "
-               f"{MOUNT}.")
+    directorate = [teams.ROLES[role][0].format(type=centre["type"]) for role in teams.DIRECTORATE]
+    folders = ("Todo lo compartido es de todo el personal: en «Archivos», usted lee, escribe, borra y comparte en la "
+               f"carpeta de cada sector, de cada programa y de cada unidad ({', '.join(units)} y {last}), y en "
+               f"{MOUNT}, donde puede editar esta página. Las carpetas {' y '.join(teams.PRIVATE)} son del equipo "
+               f"directivo: solo las ven {', '.join(directorate[:-1])} y {directorate[-1]}.")
     home = {"uniqueId": HOME, "title": "Inicio", "language": "es", "layout": {"columns": 1, "sideColumns": [], "rows": [
         row({"type": "heading", "content": "Bienvenida", "level": 3},
             {"type": "heading", "content": centre["name"], "level": 1},
@@ -61,15 +60,12 @@ def run(context):
     suite.occ("intravox:setup", "--skip-demo")
     intranet = listed(suite).get(MOUNT)
     if intranet is None:
-        return [UNREADABLE]
-    grant(suite, intranet, teams.INTRANET)
+        return reasons(suite, GRANTS)
     suite.seed(intranet["id"], pages(context.centre))
-    suite.occ("intravox:reindex")
+    suite.occ("intravox:reindex")  # as Nextcloud's admin, who reads the folder while IntraVox's setup grants it
+    grant(suite, intranet, teams.SHARED)
     return check(context)
 
 
 def check(context):
-    intranet = listed(context.suite).get(MOUNT)
-    read = intranet and all(intranet["groups"].get(group) == teams.bits(words)
-                            for group, words in teams.INTRANET.items())
-    return differences(context.suite, SETTINGS) + ([] if read else [UNREADABLE])
+    return differences(context.suite, SETTINGS) + reasons(context.suite, GRANTS)
