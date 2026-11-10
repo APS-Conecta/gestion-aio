@@ -1,0 +1,35 @@
+{
+    "aio_services_v1": [
+        {
+            "container_name": "nextcloud-aio-ollama",
+            "display_name": "IA local (Ollama)",
+            "documentation": "https://github.com/APS-Conecta/gestion-aio/tree/main/community-containers/ollama",
+            "image": "ollama/ollama",
+            "image_tag": "sha256:910d0d8107b538fb0894e63163eb195de0cc7aefcbc666dc62d3b18f71124592",
+            "internal_port": "11434",
+            "restart": "unless-stopped",
+            "environment": [
+                "TZ=%TIMEZONE%",
+                "OLLAMA_HOST=0.0.0.0:11434",
+                "OLLAMA_NUM_PARALLEL=1",
+                "OLLAMA_MAX_LOADED_MODELS=1",
+                "OLLAMA_NO_CLOUD=1"
+            ],
+            "volumes": [
+                {
+                    "source": "nextcloud_aio_ollama",
+                    "destination": "/root/.ollama",
+                    "writeable": true
+                }
+            ],
+            "secrets": [
+                "OLLAMA_MEMORY_LIMIT"
+            ],
+            "memory_limit": "%OLLAMA_MEMORY_LIMIT%",
+            "devices": [
+                "/dev/dri"
+            ],
+            "enable_nvidia_gpu": true
+        }
+    ]
+}

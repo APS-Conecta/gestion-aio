@@ -398,6 +398,12 @@ readonly class DockerActionManager {
             $requestBody['HostConfig']['ShmSize'] = $shmSize;
         }
 
+        // APS: a memory_limit caps the container's memory, in bytes once its placeholder is resolved
+        $memoryLimit = $this->configurationManager->replaceEnvPlaceholders($container->memoryLimit);
+        if (ctype_digit($memoryLimit)) {
+            $requestBody['HostConfig']['Memory'] = (int) $memoryLimit;
+        }
+
         $tmpfs = [];
         foreach ($container->tmpfs as $tmp) {
             $mode = "";
