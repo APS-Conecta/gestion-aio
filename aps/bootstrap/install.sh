@@ -47,6 +47,7 @@ MIN_DISK_GB=27
 
 REPO_URL=https://github.com/APS-Conecta/gestion-aio
 INSTALL_DIR=/opt/aps-conecta/gestion
+DRI=/dev/dri  # the host's render devices, an AMD or Intel GPU's among them
 MASTERCONTAINER=ghcr.io/aps-conecta/gestion-mastercontainer
 WORK_DIR=""
 
@@ -168,8 +169,11 @@ unpack() {
 # installed server keeps everything AIO configured (a clean machine has none to keep, and one this run made and
 # failed to start goes too, or the rerun would refuse it as another installation's).
 start_mastercontainer() {
-  local keep="$1" pinned image="$MASTERCONTAINER:$RELEASE_TAG" trusted=()
+  local keep="$1" pinned image="$MASTERCONTAINER:$RELEASE_TAG" trusted=() devices=()
   [ ! -d "$INSTALL_DIR/trusted-cacerts" ] || trusted=(--env "NEXTCLOUD_TRUSTED_CACERTS_DIR=$INSTALL_DIR/trusted-cacerts")
+  # A host's render devices go to the mastercontainer, as upstream's readme says, so AIO passes them to the containers
+  # that use a GPU: «IA local»'s Ollama among them.
+  [ ! -d "$DRI" ] || devices=(--device "$DRI")
   pinned="$(grep -m 1 "^$MASTERCONTAINER@sha256:" "$INSTALL_DIR/images.lock")" \
     || die "el paquete no indica la imagen del contenedor maestro. Infórmelo a APS Conecta."
   say "Descargando el contenedor maestro..."
@@ -180,7 +184,7 @@ start_mastercontainer() {
   docker run --init --sig-proxy=false --name nextcloud-aio-mastercontainer --restart always --detach \
     --publish 80:80 --publish 8080:8080 --publish 8443:8443 \
     --volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config \
-    --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" \
+    --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" "${devices[@]}" \
     "$image" >/dev/null \
     || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
          [ "$keep" = keep ] || docker volume rm nextcloud_aio_mastercontainer >/dev/null 2>&1 || true

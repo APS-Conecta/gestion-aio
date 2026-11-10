@@ -28,7 +28,8 @@ The declaration of every path where this repo differs from upstream, each with a
 conformance gate enforces it.
 
 **Suite release**:
-A published version of this repo: bootstrap (carrying its bundle's checksum), our images, the pins of the official images, theme and data.
+A published version of this repo: bootstrap (carrying its bundle's checksum), our images, the pins of the official images, of
+Ollama's image and of the Model, theme and data.
 It contains no apps.
 
 **Release candidate** (candidata):
@@ -86,6 +87,15 @@ An optional AIO container the suite runs, switched on with AIO's own switch: Tal
 full-text search, and Talk recording on a server that passes the recording threshold. Every other optional container
 stays off.
 
+**IA local**:
+The Suite AI, an optional install step, off by default, that the operator turns on or off on «Revisar» while the wizard is
+open: our «ollama» community container beside Nextcloud, on the server's GPU when it has one, serves the Model, and
+Nextcloud's OpenAI-compatible connector points at it, so Nextcloud's apps have a text-generation provider. No data leaves
+the server.
+
+**Model** (modelo):
+The one language model «IA local» serves, which each Suite release pins by its tag and digest.
+
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
 
@@ -139,7 +149,7 @@ and fork app against it before unpacking it.
 
 **Suite manifest**:
 The only list of the apps the suite adds, and of the forks that replace a component's app; the other components' apps
-come with AIO's switches.
+come with AIO's switches, and «IA local»'s connector with its step.
 
 **Lock file**:
 The per-server record of the installed app tags.
