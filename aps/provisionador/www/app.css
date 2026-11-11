@@ -60,6 +60,10 @@ textarea { resize: vertical; }
 .progress label { flex-direction: row; align-items: baseline; gap: .5rem; }
 .progress li[data-state="retired"] { color: var(--aps-muted); }
 
+/* «Almacenamiento»: each disk, the one each part goes to marked, those that can't hold it muted. */
+.progress li[data-state="chosen"] span { color: var(--aps-violet-dark); font-weight: 700; }
+.progress li[data-state="refused"] { color: var(--aps-muted); }
+
 /* «Revisar»: the summary, then each step's progress, the failed and waiting ones in red with their reason, and each
    container's. */
 .summary { display: grid; grid-template-columns: max-content 1fr; gap: .5rem 1.5rem; max-width: 60rem; margin: 0; }
