@@ -99,7 +99,7 @@ the server.
 
 **Files disk** (disco de archivos):
 The disk the staff's files live on, chosen on «Almacenamiento» until «Instalar»: by default the one with the most free
-space that may hold them. The system disk, the one holding Docker's storage, always may, and keeps them in AIO's own
+space that may hold them, with room for the install's own files (and, on the system disk, the program's). The system disk, the one holding Docker's storage, always may, and keeps them in AIO's own
 volume; another disk needs ext4, xfs or btrfs, a USB disk never may, and the install mounts it for good and has AIO keep
 the files in its aps-conecta/archivos folder.
 

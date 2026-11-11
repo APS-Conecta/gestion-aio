@@ -14,6 +14,8 @@ const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completa
 const ADMINISTRATOR = "primer/a administrador/a de la suite";
 const APPLY = " Los cambios se aplican al presionar «Reintentar» en «Revisar».";
 const DROPPED = "Retirado/a: ya no está en la planilla";
+const NO_FILES_DISK = "Ningún disco del servidor tiene espacio suficiente para los archivos del personal. Libere "
+  + "espacio o conecte otro disco y vuelva a abrir «Almacenamiento».";
 const SAME_DISK = "La copia de seguridad queda en el mismo disco que los archivos del personal: si ese disco falla, "
   + "se pierden ambos. Para protegerlos, conecte otro disco al servidor.";
 const AI = "Un modelo de lenguaje en este servidor redacta textos para las aplicaciones, como la nota de Estadística, "
@@ -343,8 +345,9 @@ async function reach(name) {
 async function almacenamiento() {
   show("almacenamiento");
   try {
-    showStorage(await api("GET", "/api/storage"));
-    status("storage-status", "");
+    const storage = await api("GET", "/api/storage");
+    showStorage(storage);
+    status("storage-status", storage.files ? "" : NO_FILES_DISK, !storage.files);
   } catch (e) {
     status("storage-status", e.message, true);
   }
@@ -434,7 +437,7 @@ async function revisar() {
     follow(state, false);
     const storage = await api("GET", "/api/storage");
     const byId = (id) => storage.disks.find((disk) => disk.id === id);
-    $("summary-files").textContent = diskName(byId(storage.files));
+    $("summary-files").textContent = storage.files ? diskName(byId(storage.files)) : NO_FILES_DISK;
     const backups = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
       : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
         : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
