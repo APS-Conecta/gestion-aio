@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The APS Conecta theme and branding. The theme folder (aps/theme/apsconecta) goes into Nextcloud's themes folder,
 which upstream's updates keep, with the brand folder (the brand token file, its fonts and the favicon), its art rendered
-in the tokens' colours, the establishment's name in site.css and in the lost-password help page, and the text overrides.
+in the tokens' colours, the establishment's name in site.css, which the login page and the top bar show, and in the
+lost-password help page, and the text overrides.
 Theming then says «APS Conecta Gestión» with the token file's colours, the theme's logo and the dark violet as backdrop,
 light only. Nextcloud's own voice goes quiet: its announcements, first-login slides, usage survey and support apps, its
 help links, its «get your own free account» link, its update banners and its iOS app banner are off, and a new person's

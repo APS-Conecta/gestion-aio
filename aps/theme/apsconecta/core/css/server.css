@@ -2,8 +2,9 @@
    SPDX-License-Identifier: AGPL-3.0-or-later */
 
 /* The APS Conecta theme on every page Nextcloud renders: the brand token file's fonts, and the establishment's name,
-   which the install writes in site.css, over the login form. Theming's name, colours, logo and background, the custom
-   menu's colours and the text overrides come from the install step (aps/provisionador/steps/theme.py). */
+   which the install writes in site.css, over the login form and in the top bar. Theming's name, colours, logo and
+   background, the custom menu's colours and the text overrides come from the install step
+   (aps/provisionador/steps/theme.py). */
 @import url("../../brand/tokens.css");
 @import url("site.css");
 
@@ -16,6 +17,20 @@ h1, h2, h3 { font-family: var(--aps-font-display); }
   display: block;
   margin-block-end: 6px;
   font: 700 19px/1.25 var(--aps-font-display);
+}
+
+/* The top bar names the establishment after the logo, on every logged-in page from 601 px wide: a phone keeps the logo
+   alone. Nextcloud's logo link shrinks to the room the search and the menus leave, so a long name ends in «…». A
+   public share page's #nextcloud is no link and keeps its own header; Nextcloud draws the link's focus on ::after. */
+@media (min-width: 601px) {
+  a#nextcloud::before {
+    content: var(--aps-establishment);
+    padding-inline-end: calc(3 * var(--default-grid-baseline)); /* Nextcloud's spacing at the top bar's end */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--aps-paper);
+    font: 700 18px/1.25 var(--aps-font-display);
+  }
 }
 
 /* The custom menu's panel shows the header logo, which its own stylesheet hides. */

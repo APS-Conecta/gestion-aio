@@ -113,6 +113,13 @@ jobs:
         with:
           name: acceptance-evidence
           path: ${{ runner.temp }}/acceptance/evidence
+      - name: Attach the checks' screenshots, green or red, which the manual takes its pictures from
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: acceptance-screenshots${{ inputs.previous != '' && '-upgrade' || '' }}
+          path: ${{ runner.temp }}/acceptance/evidence/**/*.png
+          if-no-files-found: ignore
       - name: Attach the suite's hardware use, peaks.txt, which the bootstrap's floors come from
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

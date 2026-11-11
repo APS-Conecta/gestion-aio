@@ -56,6 +56,17 @@ SWITCHES = {"isTalkEnabled": True, "officeSuite": "eurooffice", "isImaginaryEnab
             "borg_backup_host_location": BACKUP_FOLDER, "borg_remote_repo": ""}
 
 
+def whole(page, path):
+    """A screenshot of the whole step: the window grown, for the shot alone, to the height of the wizard's content,
+    which scrolls inside its own pane, so the page never scrolls."""
+    window = page.viewport_size
+    grown = page.evaluate("() => { const c = document.querySelector('.app-content');"
+                          " return innerHeight + c.scrollHeight - c.clientHeight; }")
+    page.set_viewport_size({**window, "height": max(window["height"], grown)})
+    page.screenshot(path=path)
+    page.set_viewport_size(window)
+
+
 def red(page):
     """Each failed or waiting step on «Revisar», with its reason."""
     return page.eval_on_selector_all("#steps li[data-state=failed], #steps li[data-state=waiting]",
@@ -124,7 +135,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
         [f"{account['name']} ({account['user']})" for account in teams.cargo_accounts(DECLARED, centre["type"])])
     expect(page.locator("#summary-components li")).to_have_text(CHOSEN)
     expect(page.locator("#summary-backups")).to_contain_text(BACKUP_FOLDER)
-    page.screenshot(path=evidence / "revisar.png")
+    whole(page, evidence / "revisar.png")
 
     page.route(dropped, lambda route: route.abort("namenotresolved"))  # a resolver that drops the name's answer
     page.click("#install")
