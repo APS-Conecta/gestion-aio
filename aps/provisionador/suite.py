@@ -17,12 +17,15 @@ keeps on this server: its optional-containers form, its backup settings and its 
 Apache runs. The first time its page opens, AIO makes the backup's encryption password, which the Provisionador only
 reads. The passphrase and that password leave this process only in the passwords file. The containers' progress is AIO's
 own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording, are read
-here too, as are the GPU «IA local» can use and the disks «Almacenamiento» lists. Every later install step runs occ in the Nextcloud container; «IA local»
-switches our «ollama» community container on or off through AIO's own code in its mastercontainer, as AIO's start would,
-and asks Ollama, through Nextcloud's container, which models it holds and to pull one. The apps step downloads App
-releases from GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step
-places the theme folder in Nextcloud's themes folder, which upstream's updates keep, and the theme and apps steps have
-aps/images/nextcloud/browser-texts.php build the browser's texts.
+here too, as are the GPU «IA local» can use and the disks «Almacenamiento» lists. Before AIO's start, the
+«Almacenamiento» step has the port mount the files disk for good (an /etc/fstab entry, an immutable empty mount point,
+the mount) and start the mastercontainer again through the bundle's start, which hands AIO the staff's files folder.
+Every later install step runs occ in the Nextcloud container; «IA local» switches our «ollama» community container on or
+off through AIO's own code in its mastercontainer, as AIO's start would, and asks Ollama, through Nextcloud's container,
+which models it holds and to pull one. The apps step downloads App releases from GitHub, without a token, and unpacks
+the ones it verified into Nextcloud's custom_apps; the theme step places the theme folder in Nextcloud's themes folder,
+which upstream's updates keep, and the theme and apps steps have aps/images/nextcloud/browser-texts.php build the
+browser's texts.
 """
 
 import base64
@@ -711,17 +714,17 @@ class Suite:
 
     @staticmethod
     def mount(disk):
-        """The disk mounted for good under MOUNTS, at its filesystem's UUID: an /etc/fstab entry by that UUID, marked so
-        that a missing disk neither stops nor holds up the boot, and ordered before Docker, whose containers then find
-        it mounted, and the disk mounted there now. Before the first mount the empty mount point is made immutable, so
-        that while the disk is missing nothing, Docker included, can create folders in its place. Its mount point."""
+        """The disk mounted for good under MOUNTS, at its filesystem's UUID: unless it has a boot entry already, an
+        /etc/fstab entry by that UUID, marked so that a missing disk neither stops nor holds up the boot, and ordered
+        before Docker, whose containers then find it mounted; and the disk mounted there now. Before the first mount
+        the empty mount point is made immutable, so that while the disk is missing nothing, Docker included, can create
+        folders in its place. Its mount point."""
         point = f"{MOUNTS}/{disk['id']}"
         failed = MOUNT_FAILED.format(disk["device"], point)
         try:
             os.makedirs(point, exist_ok=True)
-            fstab = Path("/etc/fstab")
-            if f"UUID={disk['id']} " not in fstab.read_text(encoding="utf-8"):
-                with fstab.open("a", encoding="utf-8") as entries:
+            if not disk["at_boot"]:
+                with Path("/etc/fstab").open("a", encoding="utf-8") as entries:
                     entries.write(f"UUID={disk['id']} {point} {disk['filesystem']} "
                                   "defaults,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service 0 2\n")
                 host("systemctl", "daemon-reload", failed=failed)

@@ -17,11 +17,12 @@ into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
 address (`inside`), the folder the Provisionador keeps its files in (`folder`), whether the run is an upgrade's
 (`upgrade`), the ids of the steps a Provisionador restart cut short (`interrupted`) and of the optional apps the
-operator ticked on «Revisar» (`optional`), whether «IA local» is on (`ai`), and the teams declared on «Equipos»
-(`teams`, as teams.py names them), the people its spreadsheet loads (`people`, as spreadsheet.py reads them) and the
-usernames retired there (`retired`), as they were when «Instalar» or «Reintentar» was pressed; `declared()` answers
-those people and usernames as «Equipos» declares them now, and `log(text)` adds our own Spanish line, never a secret nor
-what occ or AIO printed, to the install's log. A new step is a new module: no other file lists the steps.
+operator ticked on «Revisar» (`optional`), whether «IA local» is on (`ai`), the files disk chosen on «Almacenamiento»,
+by its id, None when none was (`files`), and the teams declared on «Equipos» (`teams`, as teams.py names them), the
+people its spreadsheet loads (`people`, as spreadsheet.py reads them) and the usernames retired there (`retired`), as
+they were when «Instalar» or «Reintentar» was pressed; `declared()` answers those people and usernames as «Equipos»
+declares them now, and `log(text)` adds our own Spanish line, never a secret nor what occ or AIO printed, to the
+install's log. A new step is a new module: no other file lists the steps.
 A step that configures an app gets it through `steps.apps.ensure`
 rather than NEEDS "apps". A step that sets what administrators may change after «Listo» answers its check through
 `record`, which keeps what the step set once the check is clean, and asks `kept` what an upgrade leaves of the rest.

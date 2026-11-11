@@ -14,20 +14,18 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import as_person, machine, person, suite_name  # noqa: E402
+from browser import as_person, files_folder, machine, person, suite_name  # noqa: E402
 
 USER, FILE = "prueba.reinicio", "reinicio.txt"
 BODY = "Guardado antes de reiniciar el servidor.\n".encode()
 BACK = 15 * 60  # seconds the machine, then the suite, may take to answer again
+BOOT_ID = "/proc/sys/kernel/random/boot_id"  # new at every boot
 
 
-def files_disk():
+def data_folder():
     """AIO's data folder, the staff's files folder, with the disk and the mount point that hold it."""
-    env = machine("sudo docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "
-                  "nextcloud-aio-mastercontainer").splitlines()
-    folder = next((line.split("=", 1)[1] for line in env if line.startswith("NEXTCLOUD_DATADIR=")), None)
-    folder = folder or machine("sudo docker volume inspect --format '{{.Mountpoint}}' "
-                               "nextcloud_aio_nextcloud_data").strip()
+    folder = files_folder() or machine("sudo docker volume inspect --format '{{.Mountpoint}}' "
+                                       "nextcloud_aio_nextcloud_data").strip()
     return folder, machine(f"sudo findmnt --noheadings --output SOURCE,TARGET --target {folder}").split()
 
 
@@ -37,6 +35,13 @@ def stored():
         return as_person(USER, password, "GET", url) == (200, BODY)
     except OSError:
         return False
+
+
+def rebooted():
+    """Whether the machine runs a new boot, not the one before the reboot, and its Docker answers."""
+    answer = subprocess.run([os.environ["MACHINE"], f"cat {BOOT_ID} && sudo docker info > /dev/null"],
+                            capture_output=True, text=True, check=False)
+    return answer.returncode == 0 and answer.stdout.strip() != boot
 
 
 def until(answers, what):
@@ -53,15 +58,14 @@ password = person(USER, "Prueba Reinicio")
 status, _ = as_person(USER, password, "PUT", url, BODY)
 if status not in (201, 204):
     sys.exit(f"{USER} could not store {FILE} in their own files: HTTP {status}")
-folder, held = files_disk()
+folder, held = data_folder()
+boot = machine(f"cat {BOOT_ID}").strip()
 machine(f"sudo test -f {folder}/{USER}/files/{FILE}")
 print(f"{FILE} lies in AIO's data folder {folder}, on {held[0]} mounted at {held[1]}; rebooting")
 
 subprocess.run([os.environ["MACHINE"], "sudo systemctl reboot"], capture_output=True, check=False)
-time.sleep(30)
-until(lambda: subprocess.run([os.environ["MACHINE"], "sudo docker info > /dev/null"], capture_output=True,
-                             check=False).returncode == 0, "Docker on the machine")
-now = files_disk()
+until(rebooted, "The machine, rebooted, with Docker,")
+now = data_folder()
 if now != (folder, held):
     sys.exit(f"after the reboot AIO's data folder is {now[0]} on {now[1]}, not {folder} on {held}")
 until(stored, f"{FILE}, from the suite at {suite},")

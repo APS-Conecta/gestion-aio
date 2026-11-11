@@ -574,6 +574,10 @@ class InstallTest(WizardTest):
     def install(self, **body):
         return self.browser.request("POST", "/api/install", body)
 
+    def choose(self, files):
+        """«Almacenamiento»: the files disk, by its id."""
+        return self.browser.request("POST", "/api/storage", {"files": files})
+
     def progress(self):
         return self.browser.get("/api/state")[1]["install"]
 
@@ -658,9 +662,6 @@ class Almacenamiento(InstallTest):
 
     def add(self, disk_id, **facts):
         self.suite.found_disks.append(disk(disk_id, **facts))
-
-    def choose(self, files):
-        return self.browser.request("POST", "/api/storage", {"files": files})
 
     def test_a_bigger_data_disk_takes_the_files_and_the_backup_waits_for_the_operator(self):
         self.add("data")
@@ -751,6 +752,18 @@ class Almacenamiento(InstallTest):
         self.assertEqual(self.choose("data")[0], 200)
         self.assertEqual((self.storage()["files"], self.storage()["files_locked"]), ("data", True))
 
+    def test_a_server_installed_before_almacenamiento_may_post_the_system_disk_it_shows(self):
+        self.add("data")
+        self.claim()
+        self.install()
+        self.until("done")
+        with provisionador.State(self.state).change() as held:
+            held.pop("storage")
+        self.assertEqual(self.storage()["files"], FakeSuite.SYSTEM_DISK["id"])
+        status, body = self.choose(FakeSuite.SYSTEM_DISK["id"])
+        self.assertEqual((status, body.get("files")), (200, FakeSuite.SYSTEM_DISK["id"]), body)
+        self.assertEqual(self.choose("data")[0], 409)
+
     def test_the_first_instalar_keeps_the_files_disk_revisar_showed(self):
         self.add("data")
         self.claim()
@@ -769,11 +782,15 @@ class FilesDisk(InstallTest):
     FOLDER = "/mnt/aps-conecta/data/aps-conecta/archivos"
     STEP = "Almacenamiento"
 
-    def installed(self, files, *disks):
-        """The install run with these disks beside the system disk and that files disk chosen."""
+    def chosen(self, files, *disks):
+        """These disks beside the system disk, the centre claimed and that files disk chosen."""
         self.suite.found_disks += disks
         self.claim()
-        self.assertEqual(self.browser.request("POST", "/api/storage", {"files": files})[0], 200)
+        self.assertEqual(self.choose(files)[0], 200)
+
+    def installed(self, files, *disks):
+        """The install run with these disks beside the system disk and that files disk chosen."""
+        self.chosen(files, *disks)
         self.install()
         return self.until("done")
 
@@ -782,6 +799,11 @@ class FilesDisk(InstallTest):
         self.assertEqual(self.suite.mounts, [("data", "/mnt/aps-conecta/data")])
         self.assertEqual((self.suite.files_in, self.suite.files_at_start), (self.FOLDER, self.FOLDER))
         self.assertIn("Disco Disco de datos (/dev/data) montado en /mnt/aps-conecta/data.", self.texts(install))
+
+    def test_a_disk_with_its_boot_entry_but_not_mounted_is_mounted_before_aio_keeps_the_files_there(self):
+        self.installed("data", disk("data", at_boot=True))
+        self.assertEqual(self.suite.mounts, [("data", "/mnt/aps-conecta/data")])
+        self.assertEqual(self.suite.files_in, self.FOLDER)
 
     def test_a_disk_mounted_at_boot_keeps_its_mount_point(self):
         self.installed("srv", disk("srv", mounted="/srv", at_boot=True))
@@ -793,9 +815,7 @@ class FilesDisk(InstallTest):
         self.assertEqual((self.suite.mounts, self.suite.files_in, self.suite.restarts), ([], None, 0))
 
     def test_a_chosen_disk_gone_turns_the_step_red_until_it_is_back(self):
-        self.suite.found_disks.append(disk("data"))
-        self.claim()
-        self.browser.request("POST", "/api/storage", {"files": "data"})
+        self.chosen("data", disk("data"))
         self.suite.found_disks.pop()
         self.install()
         status, reason = self.steps(self.until("failed"))[self.STEP]
@@ -808,9 +828,7 @@ class FilesDisk(InstallTest):
         self.assertEqual(self.suite.files_in, self.FOLDER)
 
     def test_the_end_of_install_check_finds_the_disk_no_longer_mounted_for_good(self):
-        self.suite.found_disks.append(disk("data"))
-        self.claim()
-        self.browser.request("POST", "/api/storage", {"files": "data"})
+        self.chosen("data", disk("data"))
         self.suite.answering = False
         self.install()
         self.until_checked("Dirección de la suite")
@@ -821,9 +839,7 @@ class FilesDisk(InstallTest):
         self.assertIn("/mnt/aps-conecta/data", reason)
 
     def test_the_end_of_install_check_finds_aio_keeping_the_files_elsewhere(self):
-        self.suite.found_disks.append(disk("data"))
-        self.claim()
-        self.browser.request("POST", "/api/storage", {"files": "data"})
+        self.chosen("data", disk("data"))
         self.suite.answering = False
         self.install()
         self.until_checked("Dirección de la suite")

@@ -205,6 +205,11 @@ def certificate(directory, host):
     return context, fingerprint(crt.read_text(encoding="ascii"))
 
 
+def stored_files(state):
+    """The files disk the operator chose on «Almacenamiento», by its id, or None."""
+    return state.get("storage", {}).get("files")
+
+
 class Provisionador:
     def __init__(self, state_dir, register, suite):
         self.state = State(state_dir)
@@ -333,22 +338,24 @@ class Provisionador:
         /api/state's, which the progress polls: reading the free space of a disk that isn't mounted mounts it read-only
         for a moment."""
         state = self.state.read()
-        return 200, disks.shown(self.suite.disks(), state.get("storage", {}).get("files"), "install" in state)
+        return 200, disks.shown(self.suite.disks(), stored_files(state), "install" in state)
 
     def post_storage(self, query, body):
         """POST /api/storage {"files": id}: the files disk, one «Almacenamiento» offers for the staff's files. Once
-        «Instalar» was pressed it stays."""
-        files = body.get("files")
-        found = next((disk for disk in disks.shown(self.suite.disks())["disks"] if disk["id"] == files), None)
+        «Instalar» was pressed it stays: the one stored, or the system disk on a server installed before
+        «Almacenamiento». The answer is GET's, from the same reading of the disks."""
+        files, listed = body.get("files"), self.suite.disks()
+        found = next((disk for disk in disks.shown(listed)["disks"] if disk["id"] == files), None)
         if found is None:
             return 400, {"error": DISK_GONE}
         if not found["files"]:
             return 400, {"error": NOT_FOR_FILES.format(found["reason"])}
         with self.install_lock, self.state.change() as s:
-            if "install" in s and files != s.get("storage", {}).get("files"):
+            installed = "install" in s
+            if installed and files != disks.shown(listed, stored_files(s), True)["files"]:
                 return 409, {"error": FILES_KEPT}
             s["storage"] = {**s.get("storage", {}), "files": files}
-        return self.get_storage(query, body)
+        return 200, disks.shown(listed, files, installed)
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
@@ -443,7 +450,7 @@ class Provisionador:
                                   teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
                                   upgrade=bool(state.get("install", {}).get("upgrade")),
-                                  files=state.get("storage", {}).get("files"),
+                                  files=stored_files(state),
                                   log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()

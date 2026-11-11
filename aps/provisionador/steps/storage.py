@@ -14,8 +14,8 @@ FOLDER = "aps-conecta/archivos"  # the staff's files folder on the files disk
 GONE = ("El disco elegido para los archivos del personal ya no está en el servidor. Conéctelo y presione "
         "«Reintentar».")
 MOUNTED = "Disco {} montado en {}."
-NOT_MOUNTED = ("El disco de los archivos del personal ya no queda montado en {} en cada arranque del servidor. Presione "
-               "«Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
+NOT_MOUNTED = ("El disco de los archivos del personal ya no queda montado en {} en cada arranque del servidor. "
+               "Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 ELSEWHERE = ("AIO guarda los archivos del personal en {}, no en {}. Presione «Reintentar»; si vuelve a ocurrir, "
              "contacte a APS Conecta.")
 OWN_VOLUME = "su propio volumen"
@@ -32,7 +32,7 @@ def files_disk(context):
     return None if disk["system"] else disk
 
 
-def name(disk):
+def disk_name(disk):
     return f"{disk['model'] or 'Disco'} ({disk['device']})"
 
 
@@ -44,9 +44,9 @@ def run(context):
     if disk is None:
         return None
     point = disk["mounted"]
-    if not disk["at_boot"]:
+    if not (point and disk["at_boot"]):
         point = context.suite.mount(disk)
-        context.log(MOUNTED.format(name(disk), point))
+        context.log(MOUNTED.format(disk_name(disk), point))
     context.suite.place_files(f"{point}/{FOLDER}")
     return None
 

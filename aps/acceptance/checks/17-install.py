@@ -36,7 +36,8 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
 import teams  # noqa: E402
-from browser import aio_config, aio_file, as_person, chromium, hardware, machine, suite_name, verified  # noqa: E402
+from browser import aio_config, aio_file, as_person, chromium, files_folder, hardware, machine, suite_name  # noqa: E402
+from browser import verified  # noqa: E402
 from browser import STORED, first_password, provisionador_file, provisionador_state, wizard_link  # noqa: E402
 from browser import PEOPLE, XLSX, faults, fonts, people_workbook, upload_people  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
@@ -246,14 +247,13 @@ source = machine(f"findmnt --noheadings --output SOURCE --target {point}").strip
 entry = [line.split() for line in machine("cat /etc/fstab").splitlines() if line.startswith(f"UUID={data_id} ")]
 if source != data or not entry or entry[0][1] != point or "nofail" not in entry[0][3].split(","):
     sys.exit(f"{data} is not mounted for good at {point}: mounted from {source!r}, /etc/fstab holds {entry}")
-under = machine(f"sudo sh -c 'd=$(mktemp -d) && mount --bind {MOUNTS} $d && lsattr -d $d/{data_id}; umount $d; rmdir $d'")
+under = machine(f"sudo sh -c 'd=$(mktemp -d) && mount --bind {MOUNTS} $d && lsattr -d $d/{data_id}; "
+                "umount $d; rmdir $d'")
 if "i" not in under.split()[0]:
     sys.exit(f"the empty mount point under {point} is not immutable: {under.strip()}")
-env = machine("sudo docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "
-              "nextcloud-aio-mastercontainer").splitlines()
 ncdata = machine("sudo docker container inspect --format "
                  "'{{range .Mounts}}{{if eq .Destination \"/mnt/ncdata\"}}{{.Source}}{{end}}{{end}}' "
                  "nextcloud-aio-nextcloud").strip()
-if f"NEXTCLOUD_DATADIR={folder}" not in env or ncdata != folder:
+if files_folder() != folder or ncdata != folder:
     sys.exit(f"AIO does not keep the staff's files in {folder}: Nextcloud's data folder is {ncdata!r}")
 print(f"{data} is mounted for good at {point}, immutable underneath, and AIO keeps the staff's files in {folder}")

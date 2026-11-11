@@ -121,6 +121,13 @@ def occ(command, stdin=""):
     return machine(f"{NEXTCLOUD} php occ --no-ansi {command}", stdin)
 
 
+def files_folder():
+    """The folder AIO keeps the staff's files in: the mastercontainer's NEXTCLOUD_DATADIR, None for AIO's own volume."""
+    env = machine("sudo docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "
+                  "nextcloud-aio-mastercontainer").splitlines()
+    return next((line.split("=", 1)[1] for line in env if line.startswith("NEXTCLOUD_DATADIR=")), None)
+
+
 def suite_name():
     """The suite's name, which «Dirección» claimed: AIO's domain."""
     name = aio_config().get("domain")
