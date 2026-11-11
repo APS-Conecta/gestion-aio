@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The group folders, in Groupfolders (a default store app, which the step ensures): one folder per unit and one per
-team, each with the permissions teams.py declares for its groups and none for any other group."""
+team, each with the permissions teams.py declares for its groups and none for any other group; an upgrade keeps the
+grants administrators added after «Listo» (`steps.kept`)."""
 
 import json
 
+import steps
 import teams
 from steps import apps
 
@@ -13,6 +15,7 @@ NEEDS = ("groups",)
 MISSING = "Faltan estas carpetas de equipo: {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta."
 WRONG = ("Estas carpetas de equipo no tienen los permisos declarados: {}. Presione «Reintentar»; si vuelve a ocurrir, "
          "contacte a APS Conecta.")
+KIND = "folder_grants"  # in the record: the groups the step granted permissions in each folder, by its mount point
 
 
 def listed(suite):
@@ -22,35 +25,49 @@ def listed(suite):
             for f in (found.values() if isinstance(found, dict) else found)}
 
 
-def grant(suite, folder, declared):
-    """Give each declared group its permissions in the folder, where it holds others, and no other group any."""
-    for group, words in declared.items():
-        if folder["groups"].get(group) != teams.bits(words):
-            suite.occ("groupfolders:group", str(folder["id"]), group, *words)
-    for group in folder["groups"].keys() - declared.keys():
-        suite.occ("groupfolders:group", str(folder["id"]), group, "--delete")
+def wanted(context, kind, held, declared):
+    """Each declared folder's grants once the step is done, by mount point and group: each declared group's
+    permissions, and each other group's that an upgrade keeps (`steps.kept`, the step's record under `kind`) as `held`
+    (as `listed` answers it) has them."""
+    kept = steps.kept(context, kind, {mount: list(held[mount]["groups"]) for mount in declared if mount in held})
+    return {mount: {**{group: held[mount]["groups"][group] for group in kept.get(mount, [])},
+                    **{group: teams.bits(words) for group, words in grants.items()}}
+            for mount, grants in declared.items()}
 
 
-def reasons(suite, declared):
+def grant(context, kind, held, declared):
+    """Give each declared folder's groups, {mount point: {group: permissions}}, their permissions where `held` (as
+    `listed` answers it) has others, and no group the step does not want any."""
+    target = wanted(context, kind, held, declared)
+    for mount, grants in declared.items():
+        folder = held[mount]
+        for group, words in grants.items():
+            if folder["groups"].get(group) != teams.bits(words):
+                context.suite.occ("groupfolders:group", str(folder["id"]), group, *words)
+        for group in folder["groups"].keys() - target[mount].keys():
+            context.suite.occ("groupfolders:group", str(folder["id"]), group, "--delete")
+
+
+def reasons(context, kind, declared):
     """What differs between the declared folders, by mount point with each group's permissions, and Groupfolders: the
-    missing ones and those with other grants, as Spanish reasons."""
-    held = listed(suite)
+    missing ones and those with other grants than the step wants, as Spanish reasons."""
+    held = listed(context.suite)
+    target = wanted(context, kind, held, declared)
     missing = [mount for mount in declared if mount not in held]
-    wrong = [mount for mount, grants in declared.items() if mount in held
-             and held[mount]["groups"] != {group: teams.bits(words) for group, words in grants.items()}]
+    wrong = [mount for mount in declared if mount in held and held[mount]["groups"] != target[mount]]
     return [reason.format(", ".join(mounts)) for reason, mounts in ((MISSING, missing), (WRONG, wrong)) if mounts]
 
 
 def run(context):
     if failed := apps.ensure(context, "groupfolders"):
         return failed
-    suite, held = context.suite, listed(context.suite)
-    for mount, declared in teams.folders(context.teams).items():
+    suite, held, declared = context.suite, listed(context.suite), teams.folders(context.teams)
+    for mount in declared:
         if mount not in held:
             held[mount] = {"id": int(suite.occ("groupfolders:create", mount)), "groups": {}}
-        grant(suite, held[mount], declared)
-    return check(context)
+    grant(context, KIND, held, declared)
+    return steps.record(context, KIND, declared, check(context))
 
 
 def check(context):
-    return reasons(context.suite, teams.folders(context.teams))
+    return reasons(context, KIND, teams.folders(context.teams))

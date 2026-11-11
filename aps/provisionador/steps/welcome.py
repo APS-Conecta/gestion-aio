@@ -4,12 +4,13 @@
 establishment and says where its shared folders are. Nextcloud's Dashboard, a second home with Nextcloud's own widgets
 and voice, is off, so «Inicio» is the only one; without IntraVox, Nextcloud lands on Files. IntraVox keeps its pages in
 the group folder Intranet, which grants every staff member what teams.SHARED declares, and no other group but
-Nextcloud's administrators, as whom IntraVox's setup and occ reach the folder; IntraVox follows those grants, so every
-staff member edits the pages. A page that is already there stays as staff left it. The step ensures IntraVox and
-Groupfolders."""
+Nextcloud's administrators, as whom IntraVox's setup and occ reach the folder, and what an upgrade keeps of the grants
+administrators added after «Listo» (`steps.kept`); IntraVox follows those grants, so every staff member edits the
+pages. A page that is already there stays as staff left it. The step ensures IntraVox and Groupfolders."""
 
 import json
 
+import steps
 import teams
 from steps import apps, differences
 from steps.folders import grant, listed, reasons
@@ -29,6 +30,7 @@ LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folde
          ("Contactos", "Teléfonos y correos", "/apps/contacts/", "contacts"),
          ("Talk", "Mensajes y videollamadas", "/apps/spreed/", "chat"))
 GRANTS = {MOUNT: {**teams.SHARED, ADMINS: teams.MANAGE}}
+KIND = "intranet_grants"  # in the record: the groups the step granted permissions in the Intranet
 
 
 def row(*widgets, **style):
@@ -65,14 +67,14 @@ def run(context):
     suite.occ("config:import", stdin=json.dumps(IMPORTED))  # IntraVox names its folder before it makes it
     suite.occ("app:disable", DASHBOARD)
     suite.occ("intravox:setup", "--skip-demo")
-    intranet = listed(suite).get(MOUNT)
-    if intranet is None:
-        return reasons(suite, GRANTS)
-    grant(suite, intranet, GRANTS[MOUNT])
-    suite.seed(intranet["id"], pages(context.centre))
+    held = listed(suite)
+    if MOUNT not in held:
+        return reasons(context, KIND, GRANTS)
+    grant(context, KIND, held, GRANTS)
+    suite.seed(held[MOUNT]["id"], pages(context.centre))
     suite.occ("intravox:reindex")
-    return check(context)
+    return steps.record(context, KIND, GRANTS, check(context))
 
 
 def check(context):
-    return differences(context.suite, SETTINGS) + reasons(context.suite, GRANTS)
+    return differences(context.suite, SETTINGS) + reasons(context, KIND, GRANTS)
