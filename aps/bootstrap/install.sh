@@ -47,7 +47,6 @@ MIN_DISK_GB=27
 
 REPO_URL=https://github.com/APS-Conecta/gestion-aio
 INSTALL_DIR=/opt/aps-conecta/gestion
-DRI=/dev/dri  # the host's render devices, an AMD or Intel GPU's among them
 MASTERCONTAINER=ghcr.io/aps-conecta/gestion-mastercontainer
 WORK_DIR=""
 
@@ -163,32 +162,10 @@ unpack() {
   mv "$INSTALL_DIR.new" "$INSTALL_DIR"
 }
 
-# The pinned digest runs under the release tag: upstream takes its channel from the image's tag. A test build's bundle
-# carries Let's Encrypt's staging roots, which AIO's own folder of trusted CAs gives Nextcloud and Talk. The
-# mastercontainer this release replaces is removed first; its configuration volume stays, so an upgrade of an
-# installed server keeps everything AIO configured (a clean machine has none to keep, and one this run made and
-# failed to start goes too, or the rerun would refuse it as another installation's).
+# The mastercontainer starts through the unpacked bundle's start (bootstrap/mastercontainer.sh), which the Provisionador
+# also runs when the staff's files move to another disk: `fresh` on a clean machine, `keep` once it was installed.
 start_mastercontainer() {
-  local keep="$1" pinned image="$MASTERCONTAINER:$RELEASE_TAG" trusted=() devices=()
-  [ ! -d "$INSTALL_DIR/trusted-cacerts" ] || trusted=(--env "NEXTCLOUD_TRUSTED_CACERTS_DIR=$INSTALL_DIR/trusted-cacerts")
-  # A host's render devices go to the mastercontainer, as upstream's readme says, so AIO passes them to the containers
-  # that use a GPU: «IA local»'s Ollama among them.
-  [ ! -d "$DRI" ] || devices=(--device "$DRI")
-  pinned="$(grep -m 1 "^$MASTERCONTAINER@sha256:" "$INSTALL_DIR/images.lock")" \
-    || die "el paquete no indica la imagen del contenedor maestro. Infórmelo a APS Conecta."
-  say "Descargando el contenedor maestro..."
-  docker pull --quiet "$pinned" >/dev/null \
-    || die "no se pudo descargar el contenedor maestro. Revise la conexión a internet y vuelva a ejecutar el instalador."
-  docker tag "$pinned" "$image"
-  docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1 || true
-  docker run --init --sig-proxy=false --name nextcloud-aio-mastercontainer --restart always --detach \
-    --publish 80:80 --publish 8080:8080 --publish 8443:8443 \
-    --volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config \
-    --volume /var/run/docker.sock:/var/run/docker.sock:ro "${trusted[@]}" "${devices[@]}" \
-    "$image" >/dev/null \
-    || { docker rm -f nextcloud-aio-mastercontainer >/dev/null 2>&1
-         [ "$keep" = keep ] || docker volume rm nextcloud_aio_mastercontainer >/dev/null 2>&1 || true
-         die "no se pudo iniciar el contenedor maestro. Revise que los puertos 80, 8080 y 8443 estén libres y vuelva a ejecutar el instalador."; }
+  bash "$INSTALL_DIR/bootstrap/mastercontainer.sh" "$1" || exit 1
   say "APS Conecta Gestión $RELEASE_TAG está en marcha."
 }
 

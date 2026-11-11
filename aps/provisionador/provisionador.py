@@ -45,9 +45,9 @@ from urllib.parse import parse_qs
 
 import brand
 import deis
+import disks
 import runner
 import spreadsheet
-import storage
 import teams
 from steps import apps, components, local_ai, passwords, people
 from suite import Suite, Taken, Unreachable
@@ -78,6 +78,9 @@ IN_USE = ("La dirección {} ya está en uso por otra instalación. Si este estab
 CENTRE_KEPT = "El centro ya no puede cambiarse: su dirección, {}, ya se obtuvo."
 NO_ADDRESS = "Obtenga primero la dirección del centro en «Dirección»."
 TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
+DISK_GONE = "Ese disco ya no está en el servidor. Vuelva a abrir «Almacenamiento» para ver sus discos de ahora."
+NOT_FOR_FILES = "Ese disco no puede guardar los archivos del personal: {}."
+FILES_KEPT = "El disco de los archivos del personal ya no puede cambiarse: se presionó «Instalar»."
 NOT_SPREADSHEET = ("Suba la planilla del personal como libro de Excel (.xlsx), con su hoja «Personal», o como CSV "
                    "delimitado por «;».")
 PEOPLE_KEPT = "La instalación terminó: el personal se administra ahora en «Cuentas», en APS Conecta Gestión."
@@ -200,6 +203,11 @@ def certificate(directory, host):
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(crt, key)
     return context, fingerprint(crt.read_text(encoding="ascii"))
+
+
+def stored_files(state):
+    """The files disk the operator chose on «Almacenamiento», by its id, or None."""
+    return state.get("storage", {}).get("files")
 
 
 class Provisionador:
@@ -326,9 +334,28 @@ class Provisionador:
 
     def get_storage(self, query, body):
         """GET /api/storage, «Almacenamiento»: the server's disks as the suite port reads them now, each with what it
-        may hold or why it can't, and the defaults. It is its own answer, not GET /api/state's, which the progress
-        polls: reading the free space of a disk that isn't mounted mounts it read-only for a moment."""
-        return 200, storage.shown(self.suite.disks())
+        may hold or why it can't, the files disk and the backup destination. It is its own answer, not GET
+        /api/state's, which the progress polls: reading the free space of a disk that isn't mounted mounts it read-only
+        for a moment."""
+        state = self.state.read()
+        return 200, disks.shown(self.suite.disks(), stored_files(state), "install" in state)
+
+    def post_storage(self, query, body):
+        """POST /api/storage {"files": id}: the files disk, one «Almacenamiento» offers for the staff's files. Once
+        «Instalar» was pressed it stays: the one stored, or the system disk on a server installed before
+        «Almacenamiento». The answer is GET's, from the same reading of the disks."""
+        files, listed = body.get("files"), self.suite.disks()
+        found = next((disk for disk in disks.shown(listed)["disks"] if disk["id"] == files), None)
+        if found is None:
+            return 400, {"error": DISK_GONE}
+        if not found["files"]:
+            return 400, {"error": NOT_FOR_FILES.format(found["reason"])}
+        with self.install_lock, self.state.change() as s:
+            installed = "install" in s
+            if installed and files != disks.shown(listed, stored_files(s), True)["files"]:
+                return 409, {"error": FILES_KEPT}
+            s["storage"] = {**s.get("storage", {}), "files": files}
+        return 200, disks.shown(listed, files, installed)
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
@@ -423,6 +450,7 @@ class Provisionador:
                                   teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
                                   upgrade=bool(state.get("install", {}).get("upgrade")),
+                                  files=stored_files(state),
                                   log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
@@ -445,6 +473,7 @@ class Provisionador:
                 if not state.get("install"):
                     with self.state.change() as s:
                         s["optional"] = sorted(set(optional))
+                        s.setdefault("storage", {}).setdefault("files", disks.shown(self.suite.disks())["files"])
                 runner.begin(self.state)
                 self.run_install()
         return 202, {"install": self.progress(*self.snapshot())}
@@ -491,6 +520,7 @@ class Provisionador:
         ("POST", "/api/centre"): post_centre,
         ("POST", "/api/address"): post_address,
         ("GET", "/api/storage"): get_storage,
+        ("POST", "/api/storage"): post_storage,
         ("POST", "/api/teams"): post_teams,
         ("GET", "/api/spreadsheet"): get_spreadsheet,
         ("POST", "/api/people"): post_people,
