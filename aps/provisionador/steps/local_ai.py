@@ -95,6 +95,8 @@ def run(context):
         return [SILENT]
     if not pinned(models):
         context.log(PULLING.format(MODEL["model"]))
+        # Ollama pulls by tag alone (it refuses a digest): once it re-tags the model, a fresh install pulls another
+        # digest and stops here, MOVED, until a release moves the pin.
         suite.pull(MODEL["model"])
         if not pinned(suite.models()):
             return [MOVED.format(MODEL["model"])]
