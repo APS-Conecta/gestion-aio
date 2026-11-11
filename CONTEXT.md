@@ -99,13 +99,14 @@ the server.
 
 **Files disk** (disco de archivos):
 The disk the staff's files live on, chosen on «Almacenamiento» until «Instalar»: by default the one with the most free
-space that may hold them. The system disk, the one holding Docker's storage, always may, and keeps them in AIO's own
-volume; another disk needs ext4, xfs or btrfs, a USB disk never may, and the install mounts it for good and has AIO keep
-the files in its aps-conecta/archivos folder.
+space that may hold them. The system disk may hold them with room for the suite's and the install's own files', and for
+a first backup's too when the backup has nowhere else to go; it keeps them in AIO's own volume. Another disk needs ext4,
+xfs or btrfs and room for the install's own files, a USB disk never may, and the install mounts it for good and has AIO
+keep the files in its aps-conecta/archivos folder.
 
 **Backup destination** (destino de las copias):
 The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento». On a server where no other disk
-may hold it, the backup folder, chosen already.
+may hold it, the backup folder, chosen already when the system disk has room for it.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.

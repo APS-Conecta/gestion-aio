@@ -480,6 +480,7 @@ class ReleaseBundle(unittest.TestCase):
         self.assertEqual({name.split("/")[0] for name in files},
                          {"VERSION", "images.lock", "services.json", "bootstrap", "provisionador", "deis", "brand",
                           "theme"})
+        self.assertLessEqual({"bootstrap/install.sh", "bootstrap/mastercontainer.sh"}, set(files))
         self.assertFalse([r for r in self.ROOTS for t in files.values() if r in t])
         self.assertEqual(json.loads(files["services.json"]), {
             "url": "https://gestion-nombres.apsconecta.workers.dev", "suffix": "gestion.apsconecta.cl",
@@ -590,8 +591,8 @@ class BootstrapRefusals(unittest.TestCase):
     """aps/bootstrap/install.sh, as a release fills it in, as root on a server with Docker: another installation, or
     the configuration one left, is refused before anything changes; an older release of ours is upgraded, and an
     upgrade the bootstrap cut short is retaken. `docker`, `id`, `curl`, `python3`, `systemctl` and `qrencode` are fakes
-    first on PATH; each answers only the calls the case names and fails loudly on any other, and every call is
-    recorded. A `@DIR@` in a call's name stands for the test's own directory."""
+    first on PATH, and so is `df` when the case answers it; each answers only the calls the case names and fails loudly
+    on any other, and every call is recorded. A `@DIR@` in a call's name stands for the test's own directory."""
 
     TAG = "v1.0.1"
     IMAGE = "ghcr.io/aps-conecta/gestion-mastercontainer"
@@ -639,7 +640,9 @@ class BootstrapRefusals(unittest.TestCase):
                  for call, (code, out) in {"id -u": (0, "0"), **answers}.items()]
         fake += ['  *) echo "fake: unexpected call: ${0##*/} $*" >&2; exit 99 ;;', "esac", ""]
         (tmp / "bin").mkdir()
-        for name in ("docker", "id", "curl", "python3", "systemctl", "qrencode"):
+        faked = ("docker", "id", "curl", "python3", "systemctl", "qrencode") + (("df",) if any(
+            call.startswith("df ") for call in answers) else ())  # the host's own df, unless the case answers it
+        for name in faked:
             (tmp / "bin" / name).write_text("\n".join(fake), encoding="utf-8")
             (tmp / "bin" / name).chmod(0o755)
         (tmp / "calls").touch()
@@ -733,6 +736,25 @@ class BootstrapRefusals(unittest.TestCase):
     def test_with_no_stored_folder_aio_keeps_the_staff_files_in_its_own_volume(self):
         runs, run, out = self.started()
         self.assertEqual(runs, [self.RUN], out)
+
+    def checked(self, free_gb):
+        """What a fresh install printed on a server whose system disk has that many GB free; nothing past the host's
+        check answers, so a host the check passes fails loudly at the download."""
+        avail = f"Avail\n{free_gb * 10 ** 9}\n"
+        answers = {self.INSPECT: (1, ""), self.VOLUME: (1, ""),
+                   **{f"df --output=avail -B 1 {folder}": (0, avail) for folder in ("/var/lib/docker", "/var/lib")}}
+        return self.bootstrap(answers)[1]
+
+    def test_the_one_command_checks_the_system_disk_for_the_program_alone(self):
+        script = (REPO / "aps/bootstrap/install.sh").read_text()
+        floors = {name: int(re.search(rf"^{name}=(\d+)$", script, re.M)[1])
+                  for name in ("MIN_PROGRAM_GB", "MIN_FILES_GB", "MIN_BACKUP_GB")}
+        floor, everything = floors["MIN_PROGRAM_GB"], sum(floors.values())  # the program's; the files' and backup's too
+        self.assertLess(floor, everything)
+        for free in (floor, everything - 1):
+            self.assertNotIn("GB libres", self.checked(free), free)
+        self.assertIn(f"tiene {floor - 1} GB libres en ", self.checked(floor - 1))
+        self.assertIn(f"se requieren al menos {floor} GB", self.checked(floor - 1))
 
     def test_a_volume_another_installation_left_is_refused_on_a_fresh_install(self):
         code, out, calls, made = self.bootstrap({self.INSPECT: (1, ""), self.VOLUME: (0, "[]")})

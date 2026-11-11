@@ -635,6 +635,14 @@ class InstallTest(WizardTest):
         return install
 
 
+def bootstrap_floors(**variables):
+    """The floors the bootstrap requires, as aps/bootstrap/install.sh alone sets them, each by its key: `variables` names
+    their variables there; by default the cores and the memory in GiB."""
+    script = (HERE.parent / "bootstrap" / "install.sh").read_text()
+    return {key: int(re.search(rf"^{variable}=(\d+)$", script, re.M)[1])
+            for key, variable in (variables or {"cpus": "MIN_CPUS", "memory_gib": "MIN_MEMORY_GIB"}).items()}
+
+
 def disk(disk_id, **facts):
     """A disk beside the fake's system disk: by default an ext4 data disk of 1 TB, nearly empty and not mounted."""
     return {"id": disk_id, "device": f"/dev/{disk_id}", "model": "Disco de datos", "size": 10 ** 12,
@@ -718,6 +726,84 @@ class Almacenamiento(InstallTest):
         self.assertEqual(len(self.storage()["disks"]), 1)
         self.add("usb", usb=True)
         self.assertEqual([d["id"] for d in self.storage()["disks"]], [FakeSuite.SYSTEM_DISK["id"], "usb"])
+
+    FLOORS = {role: room * 10 ** 9  # in bytes, as the disks' free space
+              for role, room in bootstrap_floors(program="MIN_PROGRAM_GB", files="MIN_FILES_GB",
+                                                 backup="MIN_BACKUP_GB").items()}
+    ROOM = "sin espacio suficiente"
+
+    def roles(self):
+        """Each disk beside the system disk: (may hold the files, may hold the backup, its reason)."""
+        return {d["id"]: (d["files"], d["backups"], d["reason"]) for d in self.storage()["disks"][1:]}
+
+    def system(self, free):
+        """The system disk with that much free space, and what it may hold: (the files, the backup, its reason)."""
+        self.suite.found_disks[0]["free"] = free
+        found = self.storage()["disks"][0]
+        return found["files"], found["backups"], found["reason"]
+
+    def test_a_disk_without_room_for_the_install_s_own_files_holds_nothing_and_is_refused(self):
+        self.add("full", free=self.FLOORS["files"] - 1)
+        self.add("files", free=self.FLOORS["files"])
+        self.assertEqual(self.roles(), {"full": (False, False, self.ROOM), "files": (True, False, self.ROOM)})
+        status, body = self.choose("full")
+        self.assertEqual(status, 400)
+        self.assertIn(self.ROOM, body["error"])
+        self.assertEqual(self.choose("files")[0], 200)
+
+    def test_a_disk_holds_the_backup_once_it_has_room_for_a_first_one(self):
+        self.add("short", free=self.FLOORS["backup"] - 1)
+        self.add("room", free=self.FLOORS["backup"])
+        self.assertEqual(self.roles(), {"short": (True, False, self.ROOM), "room": (True, True, None)})
+
+    def test_beside_a_disk_for_the_backup_the_system_disk_holds_the_files_with_room_for_the_program_and_them(self):
+        self.add("backups", usb=True, free=self.FLOORS["backup"])
+        need = self.FLOORS["program"] + self.FLOORS["files"]
+        self.assertEqual(self.system(need)[0], True)
+        self.assertEqual(self.choose(FakeSuite.SYSTEM_DISK["id"])[0], 200)
+        self.assertEqual(self.system(need - 1), (False, False, self.ROOM))
+        status, body = self.choose(FakeSuite.SYSTEM_DISK["id"])
+        self.assertEqual(status, 400)
+        self.assertIn(self.ROOM, body["error"])
+
+    def test_beside_the_files_disk_the_system_disk_holds_the_backup_with_room_for_the_program_and_it(self):
+        self.add("data")
+        need = self.FLOORS["program"] + self.FLOORS["backup"]
+        self.assertEqual(self.storage()["files"], "data")
+        self.assertEqual(self.system(need)[1], True)
+        self.assertEqual(self.system(need - 1)[1], False)
+
+    def test_holding_the_files_the_system_disk_holds_the_backup_only_with_room_for_the_files_too(self):
+        self.add("backups", usb=True, free=self.FLOORS["backup"])
+        need = self.FLOORS["program"] + self.FLOORS["files"] + self.FLOORS["backup"]
+        self.assertEqual(self.system(need - 1)[:2], (True, False))
+        self.assertEqual(self.storage()["files"], FakeSuite.SYSTEM_DISK["id"])
+        self.assertEqual(self.system(need)[:2], (True, True))
+
+    def test_alone_the_system_disk_holds_both_with_room_for_the_program_the_files_and_the_backup(self):
+        need = self.FLOORS["program"] + self.FLOORS["files"] + self.FLOORS["backup"]
+        self.assertEqual(self.system(need), (True, True, None))
+        self.assertEqual((self.storage()["files"], self.storage()["backups"]), (FakeSuite.SYSTEM_DISK["id"], {"folder": True}))
+        self.assertEqual(self.system(need - 1)[0], False)
+        self.assertEqual(self.storage()["files"], None)
+
+    def test_once_instalar_was_pressed_the_floors_no_longer_apply_for_the_suite_already_takes_its_room(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.suite.found_disks[0]["free"] = self.FLOORS["backup"]
+        storage = self.storage()
+        self.assertEqual((storage["files"], storage["backups"], storage["disks"][0]["files"]),
+                         (FakeSuite.SYSTEM_DISK["id"], {"folder": True}, True))
+        self.assertEqual(self.choose(FakeSuite.SYSTEM_DISK["id"])[0], 200)
+
+    def test_with_no_disk_with_room_for_the_files_instalar_is_refused(self):
+        self.suite.found_disks[0]["free"] = self.FLOORS["program"]
+        self.claim()
+        status, body = self.install()
+        self.assertEqual(status, 409)
+        self.assertIn("espacio", body["error"])
+        self.assertEqual(self.suite.starts, 0)
 
     def test_the_progress_never_reads_the_disks(self):
         self.suite.disks = mock.Mock(side_effect=AssertionError("GET /api/state read the disks"))
@@ -2563,13 +2649,6 @@ class PeopleChanges(PeopleTest):
             self.assertIn("«Cuentas»", body["error"])
         state = self.browser.get("/api/state")[1]
         self.assertEqual((state["people"], state["retired"]), (PEOPLE, []))
-
-
-def bootstrap_floors():
-    """The cores and the memory in GiB the bootstrap requires, as aps/bootstrap/install.sh alone sets them."""
-    script = (HERE.parent / "bootstrap" / "install.sh").read_text()
-    return {key: int(re.search(rf"^{variable}=(\d+)$", script, re.M)[1])
-            for key, variable in (("cpus", "MIN_CPUS"), ("memory_gib", "MIN_MEMORY_GIB"))}
 
 
 class Recording(InstallTest):

@@ -34,16 +34,28 @@ BUNDLE_SHA256=""
 # measure again. Release run 41927261032 (4 cores, MemTotal 5.80 GiB) measured:
 #   memory  4.50 GiB: 4.50 × 1.25 = 5.6, so 6 GiB.
 #   cores   0.58 after «Listo», too thin a measure to go below the 2 the install keeps busy (1.97), so 2.
-#   disk    17.1 GB, plus AIO's first nightly backup to the backup folder on the same disk: at most the 1.8 GB all the
-#           suite's volumes hold after an install (docker system df, run 41907427126), and the 2 GB borg keeps free
-#           (additional_free_space, Containers/borgbackup/backupscript.sh): (17.1 + 1.8 + 2) × 1.25 = 26.1, so 27 GB.
+# The disk floors are per role, as «Almacenamiento» places the staff's files and the backup (aps/provisionador/disks.py
+# reads them here; the bundle carries this file for it): the one command checks the program's room on the system disk
+# alone, and «Almacenamiento» the room of each disk it offers, the system disk's adding the program's. Release run
+# 41927261032 measured 17.1 GB on the system disk with everything on it; test-build run 43099802107, with the staff's
+# files on the second disk, measured:
+#   program 16.5 GB on the system disk: 16.5 × 1.25 = 20.6, so 21 GB.
+#   files   the install's own: the 0.1 GB the system disk held more with them (16.6 GB in test-build run 43039454247):
+#           0.1 × 1.25 = 0.1, so 1 GB.
+#   backup  AIO's first nightly backup: at most the 1.8 GB all the suite's volumes hold after an install (docker system
+#           df, run 41907427126), and the 2 GB borg keeps free (additional_free_space,
+#           Containers/borgbackup/backupscript.sh): (1.8 + 2) × 1.25 = 4.75, so 5 GB.
+# Everything on the system disk thus needs 27 GB free at «Almacenamiento», after the 0.9 GB the one command used (the
+# 15-wizard stage in both runs); about 28 GB before it.
 # Talk recording's threshold is these plus one recording (aps/provisionador/steps/components.py).
 # Memory is MemTotal rounded up to a whole GiB, here as in the Provisionador and the acceptance checks: the kernel keeps
 # part of the memory for itself (a 6 GiB machine reports about 5.8 GiB, about 5.35 GiB when kdump reserves 512 MiB), so
 # a machine passes when it reports more than the floor less 1 GiB, and a 5 GiB machine is refused.
 MIN_MEMORY_GIB=6
 MIN_CPUS=2
-MIN_DISK_GB=27
+MIN_PROGRAM_GB=21
+MIN_FILES_GB=1
+MIN_BACKUP_GB=5
 
 REPO_URL=https://github.com/APS-Conecta/gestion-aio
 INSTALL_DIR=/opt/aps-conecta/gestion
@@ -72,8 +84,8 @@ check_host() {
   disk_dir=/var/lib/docker
   [ -d "$disk_dir" ] || disk_dir=/var/lib
   disk_gb="$(df --output=avail -B 1 "$disk_dir" | awk 'NR == 2 {print int($1 / 1e9)}')"
-  [ "${disk_gb:-0}" -ge "$MIN_DISK_GB" ] \
-    || gaps+=("tiene ${disk_gb:-0} GB libres en $disk_dir; se requieren al menos $MIN_DISK_GB GB")
+  [ "${disk_gb:-0}" -ge "$MIN_PROGRAM_GB" ] \
+    || gaps+=("tiene ${disk_gb:-0} GB libres en $disk_dir; se requieren al menos $MIN_PROGRAM_GB GB")
   if ! command -v docker >/dev/null 2>&1 && [ -z "$(docker_repo)" ]; then
     # shellcheck source=/dev/null
     system="$(. "${OS_RELEASE:-/etc/os-release}" && echo "${PRETTY_NAME:-otro sistema}")"

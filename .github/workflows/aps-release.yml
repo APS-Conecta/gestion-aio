@@ -357,7 +357,7 @@ jobs:
           grep -q 'la arquitectura del procesador es aarch64; se requiere x86_64' refused.log
           grep -q "tiene 2 GiB de memoria; se requieren al menos $(floor MIN_MEMORY_GIB) GiB$" refused.log
           grep -q "tiene 1 núcleo(s) de CPU; se requieren al menos $(floor MIN_CPUS)$" refused.log
-          grep -q "GB libres en /var/lib; se requieren al menos $(floor MIN_DISK_GB) GB$" refused.log
+          grep -q "GB libres en /var/lib; se requieren al menos $(floor MIN_PROGRAM_GB) GB$" refused.log
       - name: Memory rounds up, so the floor's machine passes with kdump's 512 MiB reserved, and 1 GiB less does not
         run: |
           floor="$(sed -n 's/^MIN_MEMORY_GIB=\([0-9][0-9]*\)$/\1/p' install.sh)"
