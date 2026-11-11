@@ -38,8 +38,9 @@ def step_states(page):
 
 
 def reload_people(page, state):
-    """«Equipos» after the upgrade, then back to «Revisar»: where it rejects the people spreadsheet the previous release
-    kept, the workbook the upgraded wizard offers, filled with the install's people, uploaded; whether it had to."""
+    """«Equipos» after the upgrade, then on through «Almacenamiento» to «Revisar»: where it rejects the people
+    spreadsheet the previous release kept, the workbook the upgraded wizard offers, filled with the install's people,
+    uploaded; whether it had to."""
     page.click(".step-link[data-step=equipos]")
     expect(page.get_by_role("heading", name="Equipos")).to_be_visible()
     rejected = page.locator("#people-errors li").all_inner_texts()
@@ -51,6 +52,8 @@ def reload_people(page, state):
                       spreadsheet.read(spreadsheet.rows(workbook), state.get("teams", []), state["centre"]["type"])[0])
         page.screenshot(path=evidence / "equipos.png")
     page.click("#teams-continue")
+    expect(page.get_by_role("heading", name="Almacenamiento")).to_be_visible()
+    page.click("#storage-continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
     return bool(rejected)
 

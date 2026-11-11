@@ -26,8 +26,9 @@
       <li aria-current="step"><button type="button" class="step-link" data-step="centro"><span class="step">1</span>Centro</button></li>
       <li><button type="button" class="step-link" data-step="direccion" disabled><span class="step">2</span>Dirección</button></li>
       <li><button type="button" class="step-link" data-step="equipos" disabled><span class="step">3</span>Equipos</button></li>
-      <li><button type="button" class="step-link" data-step="revisar" disabled><span class="step">4</span>Revisar</button></li>
-      <li><button type="button" class="step-link" data-step="listo" disabled><span class="step">5</span>Listo</button></li>
+      <li><button type="button" class="step-link" data-step="almacenamiento" disabled><span class="step">4</span>Almacenamiento</button></li>
+      <li><button type="button" class="step-link" data-step="revisar" disabled><span class="step">5</span>Revisar</button></li>
+      <li><button type="button" class="step-link" data-step="listo" disabled><span class="step">6</span>Listo</button></li>
     </ol>
     <p class="fingerprint" id="fingerprint" hidden>Huella SHA-256 del certificado<code></code></p>
   </nav>
@@ -115,6 +116,19 @@
       <div class="actions"><button type="button" class="primary" id="teams-continue">Continuar</button></div>
     </section>
 
+    <section id="almacenamiento" hidden>
+      <h1>Almacenamiento</h1>
+      <p class="lead">Estos son los discos del servidor y lo que puede guardar cada uno: los archivos del personal y la
+        copia de seguridad de cada noche. La instalación no formatea ni borra ningún disco.</p>
+      <h2>Archivos del personal</h2>
+      <ul class="progress" id="storage-files" aria-label="Discos para los archivos del personal"></ul>
+      <h2>Copias de seguridad</h2>
+      <ul class="progress" id="storage-backups" aria-label="Destinos de la copia de seguridad"></ul>
+      <p class="message error" id="storage-warning" hidden></p>
+      <p class="message" id="storage-status" role="status"></p>
+      <div class="actions"><button type="button" class="primary" id="storage-continue">Continuar</button></div>
+    </section>
+
     <section id="revisar" hidden>
       <h1>Revisar</h1>
       <p class="lead">Revise lo que se instalará, marque las aplicaciones opcionales que usará el establecimiento y
@@ -130,6 +144,7 @@
         <dt>Aplicaciones opcionales</dt><dd><ul class="choices" id="optional-apps"
           aria-label="Marque las que usará el establecimiento"></ul></dd>
         <dt>IA local</dt><dd><ul class="choices" id="ai" aria-label="Marque si el establecimiento la usará"></ul></dd>
+        <dt>Archivos del personal</dt><dd id="summary-files"></dd>
         <dt>Copias de seguridad</dt><dd id="summary-backups"></dd>
       </dl>
       <div class="actions"><button type="button" class="primary" id="install" hidden>Instalar</button></div>

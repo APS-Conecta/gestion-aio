@@ -1,18 +1,21 @@
 // SPDX-FileCopyrightText: 2026 APS Conecta
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Provisionador's page: it exchanges the link's secret (the URL fragment, never sent in a request
-// line) for a session, then drives «Centro», «Dirección», «Equipos», «Revisar» and «Listo» through the HTTP API.
+// line) for a session, then drives «Centro», «Dirección», «Equipos», «Almacenamiento», «Revisar» and «Listo» through
+// the HTTP API.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const CHILE = [-35.7, -71.5];
-const STEPS = ["centro", "direccion", "equipos", "revisar", "listo"];
+const STEPS = ["centro", "direccion", "equipos", "almacenamiento", "revisar", "listo"];
 const STATES = {stopped: "En espera", starting: "Iniciando", running: "En ejecución"};
 const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completado", failed: "No se completó",
   waiting: "En espera"};
 const ADMINISTRATOR = "primer/a administrador/a de la suite";
 const APPLY = " Los cambios se aplican al presionar «Reintentar» en «Revisar».";
 const DROPPED = "Retirado/a: ya no está en la planilla";
+const SAME_DISK = "La copia de seguridad queda en el mismo disco que los archivos del personal: si ese disco falla, "
+  + "se pierden ambos. Para protegerlos, conecte otro disco al servidor.";
 const AI = "Un modelo de lenguaje en este servidor redacta textos para las aplicaciones, como la nota de Estadística, "
   + "sin enviar datos fuera de él. Puede activarla o desactivarla aquí más adelante.";
 let register = null;
@@ -334,6 +337,51 @@ async function reach(name) {
   polling = setTimeout(() => reach(name), 15000);
 }
 
+// «Almacenamiento»: every disk of the server, as GET /api/storage reads it now, with what it may hold or why it can't,
+// where the staff's files go and, once chosen, the nightly backup; the backup folder on the system disk stands for that
+// disk.
+async function almacenamiento() {
+  show("almacenamiento");
+  try {
+    const storage = await api("GET", "/api/storage");
+    const others = storage.disks.filter((disk) => !disk.system);
+    $("storage-files").replaceChildren(...storage.disks.map(
+      (disk) => diskItem(disk, disk.files, storage.files === disk.id)));
+    const folder = {...storage.disks.find((disk) => disk.system), name: folderName(storage)};
+    $("storage-backups").replaceChildren(diskItem(folder, true, Boolean(storage.backups?.folder)),
+      ...others.map((disk) => diskItem(disk, disk.backups, storage.backups?.disk === disk.id)));
+    $("storage-warning").textContent = SAME_DISK;
+    $("storage-warning").hidden = !storage.same_disk;
+    status("storage-status", "");
+  } catch (e) {
+    status("storage-status", e.message, true);
+  }
+}
+
+function gigabytes(bytes) {
+  return `${Math.round(bytes / 1e9).toLocaleString("es-CL")} GB`;
+}
+
+function diskName(disk) {
+  if (disk.system) return "Disco del sistema";
+  return `${disk.model || "Disco"} (${disk.device}${disk.usb ? ", USB" : ""})`;
+}
+
+function folderName(storage) {
+  return `Carpeta de copias de este servidor, ${storage.folder}`;
+}
+
+// A disk on «Almacenamiento»: «Se usará» where its part goes, else whether it may hold it, its size and free space,
+// and, where it can't hold it, why.
+function diskItem(disk, offered, chosen) {
+  const facts = [gigabytes(disk.size), disk.free === null ? null : `${gigabytes(disk.free)} libres`,
+    offered ? null : disk.reason].filter(Boolean).join(" · ");
+  const node = item(disk.name || diskName(disk), chosen ? "chosen" : offered ? "" : "refused",
+    chosen ? "Se usará" : offered ? "Disponible" : "No disponible", facts);
+  node.dataset.id = disk.id;
+  return node;
+}
+
 // «Revisar»: one summary of what will be installed, then «Instalar»; the progress follows each step and, once AIO runs
 // our components, each container as AIO reports it, until «Listo».
 async function revisar() {
@@ -359,8 +407,14 @@ async function revisar() {
     $("optional-apps").replaceChildren(...state.optional_apps.map(choice));
     $("ai").replaceChildren(choice({id: "ai", name: "IA local", summary: `${AI} ${state.ai.gpu}`,
       chosen: state.ai.chosen}));
-    $("summary-backups").textContent = `Cada noche, en la carpeta ${state.backup_folder} del servidor.`;
     follow(state, false);
+    const storage = await api("GET", "/api/storage");
+    const byId = (id) => storage.disks.find((disk) => disk.id === id);
+    $("summary-files").textContent = diskName(byId(storage.files));
+    const backups = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
+      : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
+        : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
+    $("summary-backups").textContent = storage.same_disk ? `${backups} ${SAME_DISK}` : backups;
   } catch (e) {
     status("install-status", e.message, true);
   }
@@ -509,7 +563,7 @@ async function start() {
   fillFilters();
   startMap();
   const open = {
-    centro: () => show("centro"), direccion, equipos, revisar,
+    centro: () => show("centro"), direccion, equipos, almacenamiento, revisar,
     listo: () => api("GET", "/api/state").then((now) => listo(now.address.name), (e) => say(e.message, true)),
   };
   for (const link of document.querySelectorAll(".step-link")) {
@@ -534,7 +588,8 @@ async function start() {
   $("retire-no").addEventListener("click", () => {
     $("retire-confirm").hidden = true;
   });
-  $("teams-continue").addEventListener("click", async () => (await keepTeams()) && revisar());
+  $("teams-continue").addEventListener("click", async () => (await keepTeams()) && almacenamiento());
+  $("storage-continue").addEventListener("click", revisar);
   $("install").addEventListener("click", install);
   $("ai").addEventListener("change", chooseAi);
   $("log").addEventListener("scroll", () => {

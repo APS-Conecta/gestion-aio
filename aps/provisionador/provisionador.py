@@ -47,8 +47,9 @@ import brand
 import deis
 import runner
 import spreadsheet
+import storage
 import teams
-from steps import apps, backups, components, local_ai, passwords, people
+from steps import apps, components, local_ai, passwords, people
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -271,7 +272,6 @@ class Provisionador:
         return 200, {"fingerprint": self.fingerprint, "motto": brand.MOTTO,
                      "centre": state.get("centre"), "address": self.address(state),
                      "components": list(components.chosen(self.suite.hardware()).values()),
-                     "backup_folder": backups.BACKUP_FOLDER,
                      "apps": [app["name"] for app in apps.MANIFEST if app["id"] not in apps.OPTIONAL],
                      "optional_apps": [{"id": app["id"], "name": app["name"], "summary": app["summary"],
                                         "chosen": app["id"] in state.get("optional", ())}
@@ -323,6 +323,12 @@ class Provisionador:
                 self.suite.publish(lan_ip())
                 s["address"] = {"name": claimed}
         return 200, {"address": self.address(self.state.read())}
+
+    def get_storage(self, query, body):
+        """GET /api/storage, «Almacenamiento»: the server's disks as the suite port reads them now, each with what it
+        may hold or why it can't, and the defaults. It is its own answer, not GET /api/state's, which the progress
+        polls: reading the free space of a disk that isn't mounted mounts it read-only for a moment."""
+        return 200, storage.shown(self.suite.disks())
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
@@ -484,6 +490,7 @@ class Provisionador:
         ("GET", "/api/establishments"): get_establishments,
         ("POST", "/api/centre"): post_centre,
         ("POST", "/api/address"): post_address,
+        ("GET", "/api/storage"): get_storage,
         ("POST", "/api/teams"): post_teams,
         ("GET", "/api/spreadsheet"): get_spreadsheet,
         ("POST", "/api/people"): post_people,
