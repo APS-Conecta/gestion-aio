@@ -1065,6 +1065,14 @@ class Upgrade(InstallTest):
         self.assertEqual(self.grants()["Unidades/Dirección"], {**DIRECTORATE, "role-jefe-some": 1})
         self.assertEqual(self.suite.sub_admins["jefe.some"], {"staff-recovery", "cat-administrativos"})
 
+    def test_an_upgrade_leaves_the_welcome_page_as_staff_left_it(self):
+        self.installed()
+        intranet = next(f for f in self.suite.group_folders.values() if f["mount"] == "Intranet")
+        edited = '{"uniqueId": "page-aps-00000001-0000-4000-8000-000000000001", "title": "Inicio", "layout": {}}\n'
+        intranet["files"]["es/home.json"] = edited  # staff edited «Inicio» in IntraVox after «Listo»
+        self.upgraded()
+        self.assertEqual(intranet["files"]["es/home.json"], edited)
+
     def test_an_install_still_under_way_is_left_to_resume_not_reconciled(self):
         self.claim()
         self.suite.release.clear()  # the install never reaches «Listo»
@@ -1609,8 +1617,12 @@ class Equipos(InstallTest):
         home = json.loads(intranet["files"]["es/home.json"])
         self.assertEqual(home["title"], "Inicio")
         links = next(w for row in home["layout"]["rows"] for w in row["widgets"] if w["type"] == "links")
-        self.assertEqual([link["url"] for link in links["items"]],
-                         ["/apps/files/", "/apps/calendar/", "/apps/contacts/", "/apps/spreed/"])
+        self.assertEqual(links.get("layout"), "tiles")  # IntraVox shows a link's title above its text only as tiles
+        self.assertEqual([(link["title"], link["text"], link["url"]) for link in links["items"]],
+                         [("Archivos", "Las carpetas del establecimiento", "/apps/files/"),
+                          ("Calendario", "La agenda del equipo", "/apps/calendar/"),
+                          ("Contactos", "Teléfonos y correos", "/apps/contacts/"),
+                          ("Talk", "Mensajes y videollamadas", "/apps/spreed/")])
         self.assertIn("Centro de Salud Familiar Los Castaños", json.dumps(home, ensure_ascii=False))
         self.assertEqual(json.loads(intranet["files"]["es/navigation.json"])["items"][0]["uniqueId"], home["uniqueId"])
 

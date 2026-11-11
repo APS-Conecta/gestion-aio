@@ -51,7 +51,7 @@ def pages(centre):
             {"type": "text", "content": f"{centre['comuna']} · {centre['health_service']}"},
             backgroundColor="var(--color-primary-element)"),
         row({"type": "text", "content": folders}),
-        row({"type": "links", "title": "", "columns": len(LINKS), "items": [
+        row({"type": "links", "title": "", "layout": "tiles", "columns": len(LINKS), "items": [
             {"title": title, "text": text, "url": url, "icon": icon, "target": "_self"}
             for title, text, url, icon in LINKS]})]}}
     menu = {"type": "megamenu", "items": [{"id": "nav_inicio", "title": "Inicio", "uniqueId": HOME, "url": None,
