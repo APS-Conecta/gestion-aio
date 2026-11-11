@@ -338,7 +338,8 @@ async function reach(name) {
 }
 
 // «Almacenamiento»: every disk of the server, as GET /api/storage reads it now, with what it may hold or why it can't,
-// and where the staff's files and the nightly backup go; the backup folder on the system disk stands for that disk.
+// where the staff's files go and, once chosen, the nightly backup; the backup folder on the system disk stands for that
+// disk.
 async function almacenamiento() {
   show("almacenamiento");
   try {
@@ -347,8 +348,8 @@ async function almacenamiento() {
     $("storage-files").replaceChildren(...storage.disks.map(
       (disk) => diskItem(disk, disk.files, storage.files === disk.id)));
     const folder = {...storage.disks.find((disk) => disk.system), name: folderName(storage)};
-    $("storage-backups").replaceChildren(diskItem(folder, true, "folder" in storage.backups),
-      ...others.map((disk) => diskItem(disk, disk.backups, storage.backups.disk === disk.id)));
+    $("storage-backups").replaceChildren(diskItem(folder, true, Boolean(storage.backups?.folder)),
+      ...others.map((disk) => diskItem(disk, disk.backups, storage.backups?.disk === disk.id)));
     $("storage-warning").textContent = SAME_DISK;
     $("storage-warning").hidden = !storage.same_disk;
     status("storage-status", "");
@@ -406,13 +407,14 @@ async function revisar() {
     $("optional-apps").replaceChildren(...state.optional_apps.map(choice));
     $("ai").replaceChildren(choice({id: "ai", name: "IA local", summary: `${AI} ${state.ai.gpu}`,
       chosen: state.ai.chosen}));
+    follow(state, false);
     const storage = await api("GET", "/api/storage");
     const byId = (id) => storage.disks.find((disk) => disk.id === id);
     $("summary-files").textContent = diskName(byId(storage.files));
-    const backups = "folder" in storage.backups ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
-      : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
+    const backups = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
+      : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
+        : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
     $("summary-backups").textContent = storage.same_disk ? `${backups} ${SAME_DISK}` : backups;
-    follow(state, false);
   } catch (e) {
     status("install-status", e.message, true);
   }

@@ -17,7 +17,7 @@ keeps on this server: its optional-containers form, its backup settings and its 
 Apache runs. The first time its page opens, AIO makes the backup's encryption password, which the Provisionador only
 reads. The passphrase and that password leave this process only in the passwords file. The containers' progress is AIO's
 own reading of their state, as its page lists them. The server's cores and memory, which decide Talk recording, are read
-here too, as is the GPU «IA local» can use. Every later install step runs occ in the Nextcloud container; «IA local»
+here too, as are the GPU «IA local» can use and the disks «Almacenamiento» lists. Every later install step runs occ in the Nextcloud container; «IA local»
 switches our «ollama» community container on or off through AIO's own code in its mastercontainer, as AIO's start would,
 and asks Ollama, through Nextcloud's container, which models it holds and to pull one. The apps step downloads App
 releases from GitHub, without a token, and unpacks the ones it verified into Nextcloud's custom_apps; the theme step
@@ -345,10 +345,12 @@ def space(folder):
 
 def unmounted_free(device, filesystem):
     """The free space of a Linux filesystem nobody has mounted, through a read-only mount that replays no journal, in a
-    temporary folder, unmounted at once; None for any other filesystem, or when the mount fails."""
+    temporary folder, unmounted at once; None for any other filesystem, or when the mount fails. The folder goes only
+    once it is empty again: rmdir never reaches into a disk still mounted there."""
     if filesystem not in READ_ONLY:
         return None
-    with tempfile.TemporaryDirectory(prefix="aps-disk-") as folder:
+    folder = tempfile.mkdtemp(prefix="aps-disk-")
+    try:
         mount = subprocess.run(["mount", "-t", filesystem, "-o", READ_ONLY[filesystem], device, folder],
                                capture_output=True, text=True, timeout=60, check=False)
         if mount.returncode != 0:
@@ -356,7 +358,9 @@ def unmounted_free(device, filesystem):
         try:
             return space(folder)["free"]
         finally:
-            subprocess.run(["umount", folder], capture_output=True, timeout=60, check=False)
+            subprocess.run(["umount", folder], capture_output=True, timeout=60, check=True)
+    finally:
+        os.rmdir(folder)
 
 
 def write_root_only(path, text):
@@ -647,8 +651,11 @@ class Suite:
         listed = json.loads(subprocess.run(["lsblk", "--json", "--bytes", "--output",
                                             "NAME,PATH,TYPE,SIZE,FSTYPE,UUID,MODEL,TRAN,RM,MOUNTPOINT"],
                                            capture_output=True, text=True, timeout=30, check=True).stdout)
-        boot = Path("/etc/fstab").read_text(encoding="utf-8").splitlines() if Path("/etc/fstab").exists() else []
-        boot = [line.split() for line in boot if line.strip() and not line.lstrip().startswith("#")]
+        # What /etc/fstab mounts at boot, each entry's UUID=, LABEL= or other name resolved to its device.
+        fstab = subprocess.run(["findmnt", "--fstab", "--evaluate", "--json", "--output", "SOURCE,TARGET,OPTIONS"],
+                               capture_output=True, text=True, timeout=30, check=False).stdout
+        boot = [entry for entry in json.loads(fstab or '{"filesystems": []}')["filesystems"]
+                if "noauto" not in (entry.get("options") or "").split(",")]
         found = {source: {"id": system.get("uuid") or source, "device": source, "model": "", **space(system["target"]),
                           "filesystem": system.get("fstype"), "system": True, "usb": False, "mounted": system["target"],
                           "at_boot": True}}
@@ -662,12 +669,14 @@ class Suite:
                 path, filesystem, uuid = device["path"], device.get("fstype"), device.get("uuid")
                 mounted = device.get("mountpoint")
                 size = int(device.get("size") or 0)
+                if path == source:  # the system disk, read through Docker's storage, gets lsblk's model and transport
+                    found[source].update(model=named, usb=on_usb)
+                    continue
                 if (path in found or device["type"] in ("loop", "rom", "ram") or path.startswith("/dev/zram")
                         or filesystem in NOT_FILESYSTEMS or mounted in BOOT or size < SMALLEST_DISK
                         or (children and not filesystem)):
                     continue
-                at_boot = any(entry[0] in (f"UUID={uuid}", path) or (mounted and entry[1:2] == [mounted])
-                              for entry in boot if len(entry) > 1)
+                at_boot = any(entry["source"] == path or (mounted and entry["target"] == mounted) for entry in boot)
                 free = (space(mounted)["free"] if mounted else unmounted_free(path, filesystem))
                 found[path] = {"id": uuid or path, "device": path, "model": named, "size": size,
                                "free": free, "filesystem": filesystem, "system": False, "usb": on_usb,

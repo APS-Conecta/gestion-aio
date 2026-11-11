@@ -102,8 +102,8 @@ hold them. The system disk, the one holding Docker's storage, always may; anothe
 USB disk never may.
 
 **Backup destination** (destino de las copias):
-The one place AIO's nightly backup goes, chosen on «Almacenamiento»: by default another disk than the files disk, the
-backup folder when that is the system disk or there is none.
+The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento». On a server where no other disk
+may hold it, the backup folder, chosen already.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
