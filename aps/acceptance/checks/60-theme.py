@@ -8,10 +8,11 @@ content-security-policy violation. Its «¿Contraseña olvidada?» link opens th
 the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
 no content-security-policy violation, and links back to the login page; Nextcloud's email reset is refused, so no screen
 says a message was sent. A staff member who logs in lands on «Inicio», the welcome page, the only home: Nextcloud's
-Dashboard is off, and its address does not open it. They see no «Nextcloud» and no link to nextcloud.com on the login
-page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. The custom
-menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of Nextcloud's container,
-and the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme overrides texts of, after
+Dashboard is off, and its address does not open it. No staff member sees «Nextcloud» or a link to nextcloud.com on the
+login page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. From
+601 px wide, the top bar names the establishment right of the logo; a narrower window shows the logo alone. The custom
+menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of Nextcloud's container, and
+the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme overrides texts of, after
 upstream's start updated them: Talk's, left stale before the restart, is its own Spanish as Nextcloud holds it with the
 theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh browser."""
 
@@ -33,6 +34,8 @@ from steps.welcome import APP, DASHBOARD, GREETING  # noqa: E402
 
 PERSON = "tema-prueba"
 WINDOW = {"viewport": {"width": 1280, "height": 900}, "locale": "es-CL"}
+NAMED_FROM = 601  # px: the narrowest window whose top bar names the establishment
+NOTHING = (None, "none", "normal", '""')  # a pseudo-element's content when it shows nothing
 SOURCE = "https://github.com/APS-Conecta/gestion-aio"
 # Each page by its label: its address and what shows once it is ready. «Inicio» is ready once its seeded first heading
 # shows, matched exactly: IntraVox's own Spanish has «bienvenida» in other texts.
@@ -49,6 +52,15 @@ THEMED = """() => {
     establishment: headline ? getComputedStyle(headline, '::before').content : null,
   };
 }""" % THEME
+# What the top bar shows after the logo: the logo link's generated content, and the room the link gives it right of
+# the logo, which sits in the link's start padding. A public share page's #nextcloud is no link.
+TOP_BAR = """() => {
+  const link = document.querySelector('a#nextcloud');
+  if (!link) return {name: null, room: 0};
+  const padding = getComputedStyle(link);
+  return {name: getComputedStyle(link, '::before').content,
+          room: link.clientWidth - parseFloat(padding.paddingInlineStart) - parseFloat(padding.paddingInlineEnd)};
+}"""
 # In-page requests, so they go through Chromium's own TLS (which trusts the suite's roots) and the page's session.
 TEXT = "url => fetch(url, {cache: 'no-store'}).then(r => r.text())"
 STATUS = "url => fetch(url, {cache: 'no-store'}).then(r => r.ok ? r.json() : {})"
@@ -91,9 +103,25 @@ def themed(page, label):
         wrong.append(f"{label}'s colours are not the brand token file's")
     if "Nunito Sans" not in fonts(page):
         wrong.append(f"{label} did not load Nunito Sans")
-    if label.startswith("login") and found["establishment"] in (None, "none", "normal", '""'):
+    if label.startswith("login") and found["establishment"] in NOTHING:
         wrong.append(f"{label} does not name the establishment")
     return wrong
+
+
+def names_the_establishment(page, label):
+    """In this window and in the narrowest that names it, the top bar names the establishment in room right of the
+    logo; a narrower window shows the logo alone."""
+    shown = {}
+    for width in (WINDOW["viewport"]["width"], NAMED_FROM, NAMED_FROM - 1):
+        page.set_viewport_size({**WINDOW["viewport"], "width": width})
+        shown[width] = page.evaluate(TOP_BAR)
+    page.set_viewport_size(WINDOW["viewport"])
+    print(f"{label}: the top bar shows, by window width, {shown}")
+    wrong = [f"{label}'s top bar does not name {establishment} in room right of the logo at {width} px"
+             for width, top_bar in shown.items() if width >= NAMED_FROM
+             and (top_bar["name"] != f'"{establishment}"' or top_bar["room"] <= 0)]
+    return wrong + ([] if shown[NAMED_FROM - 1]["name"] in NOTHING else
+                    [f"{label}'s top bar names the establishment at {NAMED_FROM - 1} px"])
 
 
 def says_the_motto(page, label):
@@ -207,7 +235,9 @@ with chromium() as browser:
     problems += inicio_is_the_only_home(page)
     for label in PAGES:
         open_page(page, label)
-        problems += (themed(page, label) if label == "inicio" else []) + shows(page, label)
+        if label == "inicio":
+            problems += themed(page, label) + names_the_establishment(page, label)
+        problems += shows(page, label)
     if not page.locator(f'a[href="{SOURCE}"]').is_visible():
         problems.append("the personal settings do not link the source code")
     if not page.locator('a[href="https://www.gnu.org/licenses/agpl-3.0.html"]').is_visible():
