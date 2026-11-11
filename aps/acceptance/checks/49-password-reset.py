@@ -4,10 +4,10 @@
 """A temporary password, in the installed suite: a sector's jefatura, signed in with the first password the passwords
 file lists, sets one for a staff member of the recovery group through Nextcloud's provisioning API, which «Cuentas» also
 uses. The person logs in with it at the suite's name, in a browser that trusts the suite's roots alone, and replaces it
-in «Configuración personal → Seguridad»; their own client then signs in with the new one. Nextcloud's audit log holds
-the change with the jefatura as the acting account. The jefatura is refused when setting the password of an
-administrator or of the directorate, its people and its cargo accounts, and the audit log holds no such change. Every
-password stays in this process's memory and in request bodies: never printed, never on a command line."""
+in «Ajustes → Seguridad»; their own client then signs in with the new one. Nextcloud's audit log holds the change with
+the jefatura as the acting account. The jefatura is refused when setting the password of an administrator or of the
+directorate, its people and its cargo accounts, and the audit log holds no such change. Every password stays in this
+process's memory and in request bodies: never printed, never on a command line."""
 
 import json
 import os
@@ -69,7 +69,7 @@ with chromium() as browser:
         sys.exit(f"{person} does not log in with the temporary password and replace it: "
                  f"{error.message.splitlines()[0]}")
     page.screenshot(path=evidence / "security.png")
-print(f"{person} logs in with it and replaces it in «Configuración personal → Seguridad»: {changed}")
+print(f"{person} logs in with it and replaces it in «Ajustes → Seguridad»: {changed}")
 if changed.get("status") != "success":
     sys.exit(f"{person} cannot replace the temporary password")
 if as_person(person, replaced, "GET", f"{suite}/ocs/v2.php/cloud/user?format=json")[0] != 200:

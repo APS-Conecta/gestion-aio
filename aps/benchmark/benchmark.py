@@ -14,7 +14,8 @@ in; a reply without a tool call, or an error, is wrong. The time is the whole re
 
 It writes one result file per machine, benchmark-<model>-<machine>.json: the model and its digest,
 Ollama's version and context length, the hardware, each question's result, the right-call rate, p50 and p95 answer
-time and the verdict against the bar.
+time and the verdict against the bar, which judges the 6 GB machine alone (a GPU with the bar's VRAM, #91): on any
+other machine the verdict is null, and the summary names the machine.
 
 Usage: python3 aps/benchmark/benchmark.py [--ollama http://127.0.0.1:11434]   (Linux, Python 3.10+)
 """
@@ -37,7 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 MODEL = json.loads((HERE.parent / "provisionador" / "model.json").read_text(encoding="utf-8"))  # the Model: tag, digest
 GPU_VENDORS = {"0x1002": "AMD", "0x8086": "Intel"}  # PCI vendor ids in /sys/class/drm/card*/device/vendor
-BAR = {"right_call_rate": 0.95, "p95_seconds": 15}
+BAR = {"right_call_rate": 0.95, "p95_seconds": 15, "vram_gib": 6}  # it judges only a machine whose GPU has vram_gib
 TIMEOUT = 900  # seconds a request may take, the cold first one on a CPU included
 
 
@@ -80,6 +81,11 @@ def hardware():
     cpu = re.search(r"model name\s*:\s*(.+)", Path("/proc/cpuinfo").read_text())
     return {"gpus": gpus, "ram_gib": round(int(ram[1]) / 1048576, 1) if ram else None,
             "cpu": cpu[1].strip() if cpu else platform.machine(), "cores": os.cpu_count()}
+
+
+def is_bar_machine(machine_hardware):
+    """Whether the bar judges the machine: its GPU has the bar's VRAM."""
+    return any(round((gpu["vram_mib"] or 0) / 1024) == BAR["vram_gib"] for gpu in machine_hardware["gpus"])
 
 
 def canonical(value):
@@ -186,7 +192,6 @@ def measure(base, model, pin, questions, fixtures):
         "model_bytes": loaded.get("size"), "model_bytes_in_vram": loaded.get("size_vram"),
         "warmup_seconds": warmup, "questions": results,
         "right_call_rate": round(rate, 4), "p50_seconds": p50, "p95_seconds": p95, "bar": BAR,
-        "passed": rate >= BAR["right_call_rate"] and p95 <= BAR["p95_seconds"],
     }
 
 
@@ -209,10 +214,14 @@ def main():
     except (OSError, RuntimeError, ValueError) as error:
         print(f"benchmark: {error}", flush=True)
         return 1
+    met = result["right_call_rate"] >= BAR["right_call_rate"] and result["p95_seconds"] <= BAR["p95_seconds"]
+    result["passed"] = met if is_bar_machine(machine_hardware) else None
     path = Path(f"benchmark-{model.replace(':', '-')}-{machine}.json")
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"{model}: right calls {result['right_call_rate']:.0%}, p50 {result['p50_seconds']} s, "
-          f"p95 {result['p95_seconds']} s, {'passes' if result['passed'] else 'fails'} the bar: {path}", flush=True)
+    verdict = {True: "passes the bar", False: "fails the bar",
+               None: f"the bar judges only the {BAR['vram_gib']} GB machine"}[result["passed"]]
+    print(f"{model} on {machine}: right calls {result['right_call_rate']:.0%}, p50 {result['p50_seconds']} s, "
+          f"p95 {result['p95_seconds']} s, {verdict}: {path}", flush=True)
     return 0
 
 
