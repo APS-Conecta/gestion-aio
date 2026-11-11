@@ -66,6 +66,7 @@ jobs:
           df -h /
       - name: Install the VM tools, DNS and NSS tools and the browser driver (Playwright with Chromium)
         run: |
+          aps/release/ubuntu-mirrors.sh
           sudo apt-get -qq update
           sudo apt-get -qq install -y qemu-system-x86 qemu-utils cloud-image-utils dnsmasq-base python3-venv \
             bind9-dnsutils libnss3-tools > /dev/null

@@ -213,6 +213,13 @@ jobs:
             /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache
           [ -z "$(command -v docker)" ]
           df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: aps/release/ubuntu-mirrors.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: The one command's apt takes the runner's Ubuntu mirrors whose names resolve
+        run: aps/release/ubuntu-mirrors.sh
       - name: A tampered bundle is refused before anything is unpacked
         run: |
           mkdir mirror
