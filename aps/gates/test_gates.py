@@ -498,7 +498,7 @@ class ReleaseWorkflowGate(unittest.TestCase):
     only once every check of that candidate passed, and creates every release as a pre-release kept from «Latest»."""
 
     WORKFLOW = REPO / ".github" / "workflows" / "aps-release.yml"
-    PUBLISH = "needs: [images, release, bootstrap, host-checks]\n    if: inputs.version != ''\n"
+    PUBLISH = "needs: [images, release, bootstrap, host-checks, acceptance, acceptance-upgrade]\n    if: inputs.version != ''\n"
 
     def gate(self, old="", new=""):
         """The gate's exit code and output on the committed workflow with `old` replaced by `new`."""
@@ -517,10 +517,10 @@ class ReleaseWorkflowGate(unittest.TestCase):
         code, out = self.gate()
         self.assertEqual(code, 0, out)
 
-    def test_latest_before_the_host_checks_passed_fails_naming_them(self):
-        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace(", host-checks]", "]"))
+    def test_latest_before_the_acceptance_run_passed_fails_naming_it(self):
+        code, out = self.gate(self.PUBLISH, self.PUBLISH.replace(", acceptance-upgrade]", "]"))
         self.assertEqual(code, 1, out)
-        self.assertIn("publish makes a release «Latest» without waiting for host-checks", out)
+        self.assertIn("publish makes a release «Latest» without waiting for acceptance-upgrade", out)
 
     def test_latest_whatever_the_checks_did_fails(self):
         code, out = self.gate(self.PUBLISH, self.PUBLISH.replace("if: ", "if: always() && "))
