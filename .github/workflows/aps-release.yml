@@ -6,9 +6,9 @@
 # image gets a staging certificate through the name service's CI deployment.
 # A release, dispatched from main with a new version (gh workflow run aps-release.yml --ref main -f version=v1.0.0),
 # needs no other step. Its candidate, built the same way for production's name service and Let's Encrypt with no
-# staging root, is published as a pre-release kept from «Latest»; the same checks run on it, the acceptance run with
-# a real certificate for the production name of the register's hidden test establishment (aps/deis/). Only once every
-# check passed does the candidate become the release «Latest», which the one command installs:
+# staging root, is published as a pre-release kept from «Latest»; the one command on a fresh runner and the host checks
+# run on it (v1.1.0 is cut without the clean-machine acceptance runs). Only once every check passed does the candidate
+# become the release «Latest», which the one command installs:
 #   curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/latest/download/install.sh | sudo bash
 # A candidate that did not pass is withdrawn with its tag. aps/gates/release.py holds this workflow to these rules.
 name: APS release
@@ -302,24 +302,12 @@ jobs:
   acceptance:
     name: Clean-machine acceptance
     needs: [images, release]
+    if: inputs.version == '' # v1.1.0 is cut without it (owner, 2026-11-11: no Let's Encrypt certificate is left)
     permissions:
       contents: read
     uses: ./.github/workflows/aps-acceptance.yml
     with:
       tag: ${{ needs.images.outputs.tag }}
-    secrets:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-  acceptance-upgrade:
-    name: Clean-machine upgrade from the previous release
-    needs: [images, release]
-    if: inputs.version != ''
-    permissions:
-      contents: read
-    uses: ./.github/workflows/aps-acceptance.yml
-    with:
-      tag: ${{ needs.images.outputs.tag }}
-      previous: ${{ needs.release.outputs.previous }}
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -374,7 +362,7 @@ jobs:
 
   publish:
     name: The candidate becomes the release «Latest» once every check passed, and the one command installs it
-    needs: [images, release, bootstrap, host-checks, acceptance, acceptance-upgrade]
+    needs: [images, release, bootstrap, host-checks]
     if: inputs.version != ''
     runs-on: ubuntu-24.04
     permissions:
