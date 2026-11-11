@@ -22,7 +22,7 @@ from steps.components import named
 from suite import NOT_STARTED, Unreachable
 
 NAME = "Inicio de la suite"
-NEEDS = ("components", "backups")
+NEEDS = ("components", "backups", "storage")
 APACHE = "nextcloud-aio-apache"
 WAIT = 15 * 60  # seconds: as long as AIO's start may take
 HEARTBEAT = 2 * 60  # seconds the log may stay silent while a container does not run

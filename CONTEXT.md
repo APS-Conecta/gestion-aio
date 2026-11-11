@@ -58,7 +58,8 @@ The link the bootstrap prints. Its secret opens a Provisionador session until th
 
 **Suite port**:
 The one adapter through which the Provisionador talks to AIO, the name service and Nextcloud's command
-line, and reads the server's cores, memory and disks. It has a real implementation and a fake one for tests.
+line, reads the server's cores, memory and disks, and mounts the files disk for good. It has a real implementation and
+a fake one for tests.
 
 **Name service** (servicio de nombres):
 APS's Cloudflare Worker at `gestion-nombres.apsconecta.workers.dev`. Installs never hold APS's Cloudflare
@@ -97,9 +98,10 @@ the server.
 `gemma4:e2b`, the one language model «IA local» serves, which each Suite release pins by its tag and digest.
 
 **Files disk** (disco de archivos):
-The disk the staff's files live on, chosen on «Almacenamiento»: by default the one with the most free space that may
-hold them. The system disk, the one holding Docker's storage, always may; another disk needs ext4, xfs or btrfs, and a
-USB disk never may.
+The disk the staff's files live on, chosen on «Almacenamiento» until «Instalar»: by default the one with the most free
+space that may hold them. The system disk, the one holding Docker's storage, always may, and keeps them in AIO's own
+volume; another disk needs ext4, xfs or btrfs, a USB disk never may, and the install mounts it for good and has AIO keep
+the files in its aps-conecta/archivos folder.
 
 **Backup destination** (destino de las copias):
 The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento». On a server where no other disk
