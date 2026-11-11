@@ -8,7 +8,8 @@ content-security-policy violation. Its «¿Contraseña olvidada?» link opens th
 the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
 no content-security-policy violation, and links back to the login page; Nextcloud's email reset is refused, so no screen
 says a message was sent. A staff member who logs in lands on «Inicio», the welcome page, the only home: Nextcloud's
-Dashboard is off, and its address does not open it. No staff member sees «Nextcloud» or a link to nextcloud.com on the
+Dashboard is off, and its address does not open it. «Inicio» speaks IntraVox's own Spanish: its edit button says
+«Editar página», never «Edit page». No staff member sees «Nextcloud» or a link to nextcloud.com on the
 login page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. From
 601 px wide, the top bar names the establishment right of the logo; a narrower window shows the logo alone. The custom
 menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of Nextcloud's container, and
@@ -78,7 +79,7 @@ help_link = f"{suite}/themes/{THEME}/{HELP}"
 establishment = provisionador_state()["centre"]["short_name"]
 core = json.loads(machine(f"{NEXTCLOUD} cat /var/www/html/core/l10n/es.json"))["translations"]
 password = person(PERSON, "Persona de prueba")
-occ(f"group:adduser {teams.STAFF} {PERSON}")  # staff, as the people step makes them: «Inicio» is theirs to read
+occ(f"group:adduser {teams.STAFF} {PERSON}")  # staff, as the people step makes them: «Inicio» is theirs to edit
 
 
 def shows(page, label):
@@ -203,6 +204,20 @@ def inicio_is_the_only_home(page):
         ["the Dashboard's address still opens it"] if opened else [])
 
 
+def inicio_in_spanish(page):
+    """«Inicio» speaks IntraVox's own Spanish: the edit button a staff member sees says «Editar página», and no
+    «Edit page» shows."""
+    try:
+        page.get_by_text("Editar página", exact=True).first.wait_for(state="visible", timeout=30_000)
+        shown = True
+    except Error:
+        shown = False
+    english = page.get_by_text("Edit page", exact=True).count()
+    print(f"«Inicio» shows «Editar página»: {'yes' if shown else 'no'}; «Edit page»: {english}")
+    return ([] if shown else ["«Inicio» does not show IntraVox's «Editar página»"]) + (
+        ["«Inicio» shows IntraVox's English «Edit page»"] if english else [])
+
+
 def open_page(page, label):
     path, ready = PAGES[label]
     page.goto(f"{suite}{path}")
@@ -236,7 +251,7 @@ with chromium() as browser:
     for label in PAGES:
         open_page(page, label)
         if label == "inicio":
-            problems += themed(page, label) + names_the_establishment(page, label)
+            problems += themed(page, label) + names_the_establishment(page, label) + inicio_in_spanish(page)
         problems += shows(page, label)
     if not page.locator(f'a[href="{SOURCE}"]').is_visible():
         problems.append("the personal settings do not link the source code")
