@@ -22,6 +22,7 @@
 #   ADDRESS   the VM's address on the shared network, where the runner's browser reaches it
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
 #   TEST_PASSWORD  the password of each staff account a check makes for itself, masked in the log already
+#   DATA_LABEL     the label of the VM's second disk: ext4, not mounted, with more free space than the system disk
 # A check never prints a secret, not even to mask it: run.sh masks the ones it knows before the checks run.
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
@@ -43,7 +44,7 @@ previous="${2:-}"
 cd "$(git rev-parse --show-toplevel)"
 work="$RUNNER_TEMP/acceptance"
 mkdir -p "$work/evidence"
-export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt"
+export TAG="$1" ADDRESS=192.168.77.10 MACHINE="$work/machine" CONSOLE="$work/console.txt" DATA_LABEL=datos
 export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sudo bash"
 one_command() { # <tag>: the one command of that release, as the manual prints it
   export COMMAND="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$1/install.sh | sudo bash"
@@ -134,6 +135,10 @@ curl -fsSL --retry 5 -o "$work/debian.qcow2" "https://cloud.debian.org/images/cl
 echo "0464b5d4ae3aa4f658468d88da83af7857b71548b30d46dcb6282770955a747fb95a983476db90d25afd0653af607224c7ebd05122ab71faa106fd712aaad652  $work/debian.qcow2" \
   | sha512sum --check --quiet
 qemu-img create -q -f qcow2 -F qcow2 -b "$work/debian.qcow2" "$work/disk.qcow2" 60G
+# A server's second disk, as many establishments have one: «Almacenamiento» offers it and puts the staff's files on it,
+# for it has the most free space. Sparse, and its inode tables and journal left for the guest to zero when it mounts it.
+truncate -s 80G "$work/data.img"
+mkfs.ext4 -q -F -L "$DATA_LABEL" -E lazy_itable_init=1,lazy_journal_init=1 "$work/data.img"
 
 # The shared network: a tap device, DHCP and DNS from dnsmasq, NAT to the internet. For a test build its DNS has no
 # answer for Let's Encrypt's production service: the suite gets its certificate from the staging one; a release's
@@ -159,6 +164,7 @@ memory="$(sed -n 's/^MIN_MEMORY_GIB=\([0-9][0-9]*\)$/\1/p' aps/bootstrap/install
 : > "$work/evidence/serial.log" # the runner's own file, so the evidence upload can read it
 sudo qemu-system-x86_64 -accel kvm -cpu host -smp 4 -m "${memory}G" \
   -drive "file=$work/disk.qcow2,if=virtio,format=qcow2" -drive "file=$work/seed.img,if=virtio,format=raw" \
+  -drive "file=$work/data.img,if=virtio,format=raw" \
   -netdev tap,id=lan,ifname=aps0,script=no,downscript=no -device virtio-net-pci,netdev=lan \
   -display none -serial "file:$work/evidence/serial.log" -daemonize
 

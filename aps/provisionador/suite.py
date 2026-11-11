@@ -37,6 +37,7 @@ import ssl
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import urllib.error
@@ -88,6 +89,18 @@ OLLAMA_API = "http://nextcloud-aio-ollama:11434/api/"  # Ollama's API, as Nextcl
 OLLAMA_FAILED = ("La IA local no pudo {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 PULL_WAIT = 2 * 60 * 60  # seconds a model's pull may take
 VENDORS = {"0x1002", "0x8086"}  # the PCI vendors of AMD and Intel, whose GPUs Ollama reaches through the DRI devices
+# The folder whose filesystem is the system disk: Docker's storage, or /var/lib before Docker exists, as the bootstrap's
+# disk check reads it.
+DOCKER_STORAGE = ("/var/lib/docker", "/var/lib")
+# A disk below this size is a boot, BIOS or extended partition rather than one to keep data on.
+SMALLEST_DISK = 10 ** 9
+BOOT = {"/boot", "/boot/efi", "/efi"}
+# What lsblk lists that holds no filesystem of its own: swap, and the members its LVM volumes, software RAID, encrypted
+# volumes and ZFS pools are made of, which lsblk lists in turn.
+NOT_FILESYSTEMS = {"swap", "LVM2_member", "linux_raid_member", "crypto_LUKS", "zfs_member"}
+# The read-only mount, replaying no journal, that reads the free space of a Linux filesystem nobody has mounted: nothing
+# is written to the disk.
+READ_ONLY = {"ext4": "ro,noload", "xfs": "ro,norecovery", "btrfs": "ro,nologreplay"}
 HIDDEN = "***REMOVED SENSITIVE VALUE***"  # what occ config:list shows of a value Nextcloud counts as sensitive
 # How AIO's start answer ends once every container started (DockerController::getStreamingResponseHtmlEnd); when one
 # fails, it stops short or Slim's error page follows.
@@ -321,6 +334,29 @@ def downloads(listed, downloading):
         told = len(found)
 
     return read
+
+
+def space(folder):
+    """The size and free space, in bytes, of the filesystem a folder is on, as the bootstrap's disk check counts it:
+    what anyone but root may still use."""
+    stat = os.statvfs(folder)
+    return {"size": stat.f_blocks * stat.f_frsize, "free": stat.f_bavail * stat.f_frsize}
+
+
+def unmounted_free(device, filesystem):
+    """The free space of a Linux filesystem nobody has mounted, through a read-only mount that replays no journal, in a
+    temporary folder, unmounted at once; None for any other filesystem, or when the mount fails."""
+    if filesystem not in READ_ONLY:
+        return None
+    with tempfile.TemporaryDirectory(prefix="aps-disk-") as folder:
+        mount = subprocess.run(["mount", "-t", filesystem, "-o", READ_ONLY[filesystem], device, folder],
+                               capture_output=True, text=True, timeout=60, check=False)
+        if mount.returncode != 0:
+            return None
+        try:
+            return space(folder)["free"]
+        finally:
+            subprocess.run(["umount", folder], capture_output=True, timeout=60, check=False)
 
 
 def write_root_only(path, text):
@@ -593,6 +629,53 @@ class Suite:
         devices = Path("/sys/class/drm").glob("renderD*/device/vendor")
         return "dri" if {path.read_text(encoding="ascii").strip() for path in devices} & VENDORS else None
 
+    @staticmethod
+    def disks():
+        """Each filesystem of this server's disks: whole disks, partitions, LVM volumes and software RAID, skipping
+        loop, RAM and optical devices, swap, the boot partitions and anything under 1 GB; a disk or partition with no
+        filesystem is listed too, unformatted. Each with its filesystem's UUID as its id (its device when it has none),
+        its device, model, size and free space in bytes, its filesystem, whether it is the system disk, whether it hangs
+        off USB or is removable, where it is mounted and whether that mount comes back at boot. The system disk comes
+        first. The free space of a Linux filesystem nobody has mounted is read through a read-only mount in a temporary
+        folder, unmounted at once; None when that mount fails."""
+        target = next(path for path in DOCKER_STORAGE if os.path.isdir(path))
+        system = json.loads(subprocess.run(["findmnt", "--json", "--output", "SOURCE,TARGET,FSTYPE,UUID", "--target",
+                                            target], capture_output=True, text=True, timeout=30, check=True).stdout)
+        system = system["filesystems"][0]
+        source = system["source"].split("[", 1)[0]  # a btrfs subvolume's source names it in brackets
+        # The NAME column makes lsblk nest each partition, volume and array under what it is made of.
+        listed = json.loads(subprocess.run(["lsblk", "--json", "--bytes", "--output",
+                                            "NAME,PATH,TYPE,SIZE,FSTYPE,UUID,MODEL,TRAN,RM,MOUNTPOINT"],
+                                           capture_output=True, text=True, timeout=30, check=True).stdout)
+        boot = Path("/etc/fstab").read_text(encoding="utf-8").splitlines() if Path("/etc/fstab").exists() else []
+        boot = [line.split() for line in boot if line.strip() and not line.lstrip().startswith("#")]
+        found = {source: {"id": system.get("uuid") or source, "device": source, "model": "", **space(system["target"]),
+                          "filesystem": system.get("fstype"), "system": True, "usb": False, "mounted": system["target"],
+                          "at_boot": True}}
+
+        def walk(devices, usb, model):
+            for device in devices:
+                on_usb = usb or device.get("tran") == "usb" or device.get("rm") in (True, "1")
+                named = (device.get("model") or model or "").strip()
+                children = device.get("children") or []
+                walk(children, on_usb, named)
+                path, filesystem, uuid = device["path"], device.get("fstype"), device.get("uuid")
+                mounted = device.get("mountpoint")
+                size = int(device.get("size") or 0)
+                if (path in found or device["type"] in ("loop", "rom", "ram") or path.startswith("/dev/zram")
+                        or filesystem in NOT_FILESYSTEMS or mounted in BOOT or size < SMALLEST_DISK
+                        or (children and not filesystem)):
+                    continue
+                at_boot = any(entry[0] in (f"UUID={uuid}", path) or (mounted and entry[1:2] == [mounted])
+                              for entry in boot if len(entry) > 1)
+                free = (space(mounted)["free"] if mounted else unmounted_free(path, filesystem))
+                found[path] = {"id": uuid or path, "device": path, "model": named, "size": size,
+                               "free": free, "filesystem": filesystem, "system": False, "usb": on_usb,
+                               "mounted": mounted, "at_boot": at_boot}
+
+        walk(listed["blockdevices"], False, "")
+        return list(found.values())
+
     def switch_ollama(self, settings):
         """«IA local»'s container on, with these settings, the GPU found ("gpu") and the memory cap ("memory_gib"),
         or, with None, off: it stops and AIO no longer runs it, and its volume, with the models, stays. AIO's own code
@@ -703,6 +786,10 @@ class FakeSuite:
     SENSITIVE = {"theming": ("imprintUrl", "privacyUrl", "slogan", "url")}
     BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
+    # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
+    SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "model": "", "size": 60 * 10 ** 9,
+                   "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True, "usb": False, "mounted": "/",
+                   "at_boot": True}
 
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
@@ -723,6 +810,7 @@ class FakeSuite:
         self.answering = True  # whether the suite's reverse proxy answers at its name
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
         self.found_gpu = None  # the GPU the server offers Ollama: "nvidia", "dri" (AMD or Intel) or None, the CPU
+        self.found_disks = [dict(self.SYSTEM_DISK)]  # the server's disks, as the suite port reads them
         self.ollama = None  # the settings «IA local»'s container runs with, None while it is off
         self.volumes = set()  # the Docker volumes «IA local» made, which outlive its container
         self.registry = {}  # what Ollama's registry serves, each model's tag with its digest
@@ -808,6 +896,9 @@ class FakeSuite:
 
     def gpu(self):
         return self.found_gpu
+
+    def disks(self):
+        return [dict(disk) for disk in self.found_disks]
 
     def switch_ollama(self, settings):
         """«IA local»'s container, as AIO creates and starts it with the settings, or stops and removes it, its volume

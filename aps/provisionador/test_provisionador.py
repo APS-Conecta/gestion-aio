@@ -631,6 +631,90 @@ class InstallTest(WizardTest):
         return install
 
 
+class Almacenamiento(InstallTest):
+    """«Almacenamiento», between «Equipos» and «Revisar»: every disk of the server, with what it may hold or why it
+    can't, and where the staff's files and the nightly backup go unless the operator chooses otherwise. The fake's
+    server has one disk, the system disk, until a test adds others."""
+
+    def storage(self):
+        status, body = self.browser.get("/api/storage")
+        self.assertEqual(status, 200, body)
+        return body
+
+    def test_a_one_disk_server_keeps_the_files_and_the_backup_folder_on_the_system_disk(self):
+        storage = self.storage()
+        self.assertEqual([(d["id"], d["system"], d["files"], d["backups"], d["reason"]) for d in storage["disks"]],
+                         [(FakeSuite.SYSTEM_DISK["id"], True, True, True, None)])
+        self.assertEqual((storage["files"], storage["backups"], storage["folder"], storage["same_disk"]),
+                         (FakeSuite.SYSTEM_DISK["id"], {"folder": True}, "/var/backups/aps-conecta", True))
+
+    def add(self, disk_id, **facts):
+        """A disk beside the system disk: by default an ext4 data disk of 1 TB, nearly empty and not mounted."""
+        self.suite.found_disks.append({"id": disk_id, "device": f"/dev/{disk_id}", "model": "Disco de datos",
+                                       "size": 10 ** 12, "free": 990 * 10 ** 9, "filesystem": "ext4", "system": False,
+                                       "usb": False, "mounted": None, "at_boot": False, **facts})
+
+    def test_a_bigger_data_disk_takes_the_files_and_the_backup_stays_in_the_backup_folder(self):
+        self.add("data")
+        storage = self.storage()
+        self.assertEqual([(d["id"], d["files"], d["backups"], d["reason"]) for d in storage["disks"]],
+                         [(FakeSuite.SYSTEM_DISK["id"], True, True, None), ("data", True, True, None)])
+        self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]), ("data", {"folder": True}, False))
+
+    def test_a_smaller_data_disk_takes_the_backup_and_the_files_stay_on_the_system_disk(self):
+        self.add("data", size=32 * 10 ** 9, free=31 * 10 ** 9)
+        storage = self.storage()
+        self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]),
+                         (FakeSuite.SYSTEM_DISK["id"], {"disk": "data"}, False))
+
+    def test_a_disk_without_a_linux_filesystem_is_listed_with_its_reason_and_offered_for_nothing(self):
+        self.add("blank", filesystem=None, free=None)
+        self.add("windows", filesystem="ntfs")
+        self.add("camera", filesystem="exfat")
+        self.add("mac", filesystem="hfsplus")
+        self.add("unread", free=None)
+        storage = self.storage()
+        self.assertEqual({d["id"]: (d["files"], d["backups"], d["reason"]) for d in storage["disks"][1:]}, {
+            "blank": (False, False, "sin formato"),
+            "windows": (False, False, "formato de Windows"),
+            "camera": (False, False, "formato de Windows"),
+            "mac": (False, False, "formato hfsplus, no compatible"),
+            "unread": (False, False, "no se pudo leer su espacio libre")})
+        self.assertEqual((storage["files"], storage["backups"]), (FakeSuite.SYSTEM_DISK["id"], {"folder": True}))
+
+    def test_xfs_and_btrfs_disks_are_offered_as_ext4_ones_are(self):
+        self.add("xfs", filesystem="xfs")
+        self.add("btrfs", filesystem="btrfs", free=995 * 10 ** 9)
+        storage = self.storage()
+        self.assertEqual([(d["files"], d["backups"], d["reason"]) for d in storage["disks"][1:]],
+                         [(True, True, None), (True, True, None)])
+        self.assertEqual((storage["files"], storage["backups"]), ("btrfs", {"disk": "xfs"}))
+
+    def test_a_usb_disk_is_offered_for_backups_only_and_takes_the_backup_however_big(self):
+        self.add("usb", usb=True, size=4 * 10 ** 12, free=4 * 10 ** 12)
+        storage = self.storage()
+        self.assertEqual([(d["files"], d["backups"], d["reason"]) for d in storage["disks"][1:]],
+                         [(False, True, "disco USB: solo para copias")])
+        self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]),
+                         (FakeSuite.SYSTEM_DISK["id"], {"disk": "usb"}, False))
+
+    def test_with_a_data_disk_and_a_usb_disk_the_files_take_the_data_disk_and_the_backup_the_usb_disk(self):
+        self.add("data")
+        self.add("usb", usb=True, size=2 * 10 ** 12, free=2 * 10 ** 12)
+        storage = self.storage()
+        self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]), ("data", {"disk": "usb"}, False))
+
+    def test_it_reads_the_disks_again_each_time_so_a_disk_plugged_in_meanwhile_shows(self):
+        self.assertEqual(len(self.storage()["disks"]), 1)
+        self.add("usb", usb=True)
+        self.assertEqual([d["id"] for d in self.storage()["disks"]], [FakeSuite.SYSTEM_DISK["id"], "usb"])
+
+    def test_the_progress_never_reads_the_disks(self):
+        self.suite.disks = mock.Mock(side_effect=AssertionError("GET /api/state read the disks"))
+        self.assertEqual(self.browser.get("/api/state")[0], 200)
+        self.assertNotIn("backup_folder", self.browser.get("/api/state")[1])
+
+
 class Instalar(InstallTest):
     """«Revisar» and «Instalar»: one summary, then the install's steps, each once the steps it needs are green; the
     progress shows them and, once AIO runs only our components, each container as AIO reports it. «Listo» needs every
@@ -643,7 +727,7 @@ class Instalar(InstallTest):
                          ("Centro de Salud Familiar Los Castaños", NAME, None))
         self.assertEqual(state["components"], [
             "Talk", "Euro-Office", "Imaginary", "ClamAV (antivirus)", "Búsqueda de texto completo"])
-        self.assertEqual(state["backup_folder"], "/var/backups/aps-conecta")
+        self.assertEqual(self.browser.get("/api/storage")[1]["folder"], "/var/backups/aps-conecta")
 
     def test_there_is_no_install_before_the_address_is_claimed(self):
         self.browser.request("POST", "/api/centre", {"code": "999001"})

@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""«Equipos», «Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard: «Dirección» goes on
-to «Equipos», where the operator types the sectors and programs and sees the team each becomes, downloads the people
-workbook, uploads the people as Excel saves a CSV, then in a workbook made from the downloaded one, and each time sees
-the people the install will create with their cargos, on a page in the brand fonts with no console error and no
-content-security-policy violation, then to
-«Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the components and the
-backups; «Instalar» shows each step and, once AIO runs our components, each container's progress live, and below them
-«Registro de la instalación», which logs the suite's start as it runs. Meanwhile the
-operator goes back to «Equipos», ticks a person who left and presses «Retirar», then confirms: the install applies the
-people as they were at «Instalar», so that person can still store a file in their own files, and stops with the people
-step red until «Reintentar» applies «Retirar» (48-retire checks the person). Then «Listo» shows the suite's address.
-There the wizard hands over the passwords file, the same as the root-only copy on the machine, with the administrator's
-first password, AIO's passphrase and the backup's encryption password AIO made (its own copy of it unchanged), and
-closes; the page then still tells, behind a resolver that drops the name's answer, the router change, and otherwise that
-this computer opens the suite (no check goes back to «Dirección» after «Instalar»). AIO reports our components on, every
-other optional one off (Talk recording follows the hardware: 70-talk checks it) and nightly backups to the backup
-folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root reads the file AIO
-keeps it in."""
+"""«Equipos», «Almacenamiento», «Revisar» and «Instalar», from a fresh link as an operator who comes back to the wizard:
+«Dirección» goes on to «Equipos», where the operator types the sectors and programs and sees the team each becomes,
+downloads the people workbook, uploads the people as Excel saves a CSV, then in a workbook made from the downloaded one,
+and each time sees the people the install will create with their cargos, on a page in the brand fonts with no console
+error and no content-security-policy violation, then to «Almacenamiento», which lists the system disk and the machine's
+second disk, ext4 and not mounted: the staff's files go to the second disk, which has the most free space, and the
+backup stays in the backup folder, with no warning, then to «Revisar», which summarises the centre's address, the teams,
+the people, the cargo accounts, the components, where the staff's files go and the backups; «Instalar» shows each step
+and, once AIO runs our components, each container's progress live, and below them «Registro de la instalación», which
+logs the suite's start as it runs. Meanwhile the operator goes back to «Equipos», ticks a person who left and presses
+«Retirar», then confirms: the install applies the people as they were at «Instalar», so that person can still store a
+file in their own files, and stops with the people step red until «Reintentar» applies «Retirar» (48-retire checks the
+person). Then «Listo» shows the suite's address. There the wizard hands over the passwords file, the same as the
+root-only copy on the machine, with the administrator's first password, AIO's passphrase and the backup's encryption
+password AIO made (its own copy of it unchanged), and closes; the page then still tells, behind a resolver that drops
+the name's answer, the router change, and otherwise that this computer opens the suite (no check goes back to
+«Dirección» after «Instalar»). AIO reports our components on, every other optional one off (Talk recording follows the
+hardware: 70-talk checks it) and nightly backups to the backup folder. AIO's passphrase reaches the browser only in the
+passwords file, and on the machine only root reads the file AIO keeps it in."""
 
 import json
 import os
@@ -127,7 +128,18 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     if found or not {"Fraunces", "Nunito Sans"} <= set(fonts(page)):
         sys.exit(f"«Equipos» logged {found} or did not load the brand fonts")
     page.click("#teams-continue")
+    expect(page.get_by_role("heading", name="Almacenamiento")).to_be_visible()
+    data = machine(f"sudo blkid --label {os.environ['DATA_LABEL']}").strip()
+    data_id = machine(f"sudo blkid --match-tag UUID --output value {data}").strip()
+    expect(page.locator("#storage-files li")).to_have_count(2)
+    expect(page.locator(f'#storage-files li[data-id="{data_id}"] span')).to_have_text("Se usará")
+    expect(page.locator("#storage-backups li").first.locator("strong")).to_contain_text(BACKUP_FOLDER)
+    expect(page.locator("#storage-backups li").first.locator("span")).to_have_text("Se usará")
+    expect(page.locator("#storage-warning")).to_be_hidden()
+    whole(page, evidence / "almacenamiento.png")
+    page.click("#storage-continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
+    expect(page.locator("#summary-files")).to_contain_text(data)
     expect(page.locator("#summary-address")).to_have_text(f"https://{name}")
     expect(page.locator("#summary-teams li")).to_have_text([team["name"] for team in DECLARED])
     expect(page.locator("#summary-people li")).to_contain_text([f"{p['name']} ({p['user']})" for p in people])
@@ -149,6 +161,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     expect(page.locator("#people li[data-state=retired] strong")).to_have_text([leaving])
     page.screenshot(path=evidence / "retirar.png")
     page.click("#teams-continue")
+    page.click("#storage-continue")
     seen = {}  # each container's states, in the order the page showed them
     deadline, stored = time.monotonic() + LISTO_WITHIN * 60, False
     while not page.locator("#listo").is_visible():
