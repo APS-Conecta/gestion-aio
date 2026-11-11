@@ -17,9 +17,11 @@ below them «Registro de la instalación», which logs the suite's start as it r
 hands over the passwords file, the same as the root-only copy on the machine, with the administrator's first password,
 AIO's passphrase and the backup's encryption password AIO made (its own copy of it unchanged), and closes; the page then
 still tells, behind a resolver that drops the name's answer, the router change, and otherwise that this computer opens
-the suite (no check goes back to «Dirección» after «Instalar»). AIO reports our components on, every other optional one
-off (Talk recording follows the hardware: 70-talk checks it) and nightly backups to the backup folder. AIO's passphrase
-reaches the browser only in the passwords file, and on the machine only root reads the file AIO keeps it in."""
+the suite (no check goes back to «Dirección» after «Instalar»). The second disk is mounted for good by its UUID, its
+empty mount point immutable underneath, and AIO keeps the staff's files on it, as «Listo» says. AIO reports our
+components on, every other optional one off (Talk recording follows the hardware: 70-talk checks it) and nightly backups
+to the backup folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root
+reads the file AIO keeps it in."""
 
 import json
 import os
@@ -43,6 +45,8 @@ from steps.components import chosen  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
 from steps.people import CHANGED, NAME as ACCOUNTS  # noqa: E402
 from steps.start import NAME as START  # noqa: E402
+from steps.storage import FOLDER as FILES_FOLDER  # noqa: E402
+from suite import MOUNTS  # noqa: E402
 
 LISTO_WITHIN = 20  # minutes: the install's GitHub downloads alone can take several on a slow day
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
@@ -199,6 +203,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     print(f"router: {page.inner_text('#reach')}")
     page.unroute(dropped)
     expect(page.locator("#reach")).to_have_text(f"Este equipo abre {suite} correctamente.", timeout=180_000)
+    expect(page.locator("#files-place")).to_contain_text(data)
     page.screenshot(path=evidence / "listo.png")
     print(f"reach: {page.inner_text('#reach')}")
     context.close()
@@ -235,3 +240,20 @@ store = machine("sudo docker volume inspect --format '{{.Mountpoint}}' nextcloud
 machine(f"sudo test -s {store}/data/configuration.json && ! test -r {store}/data/configuration.json")
 print(f"«Listo» shows {suite} and hands over the passwords file; AIO keeps its passphrase in "
       f"{store}/data/configuration.json, which only root reads, and only the passwords file carried it to the browser")
+
+point, folder = f"{MOUNTS}/{data_id}", f"{MOUNTS}/{data_id}/{FILES_FOLDER}"
+source = machine(f"findmnt --noheadings --output SOURCE --target {point}").strip()
+entry = [line.split() for line in machine("cat /etc/fstab").splitlines() if line.startswith(f"UUID={data_id} ")]
+if source != data or not entry or entry[0][1] != point or "nofail" not in entry[0][3].split(","):
+    sys.exit(f"{data} is not mounted for good at {point}: mounted from {source!r}, /etc/fstab holds {entry}")
+under = machine(f"sudo sh -c 'd=$(mktemp -d) && mount --bind {MOUNTS} $d && lsattr -d $d/{data_id}; umount $d; rmdir $d'")
+if "i" not in under.split()[0]:
+    sys.exit(f"the empty mount point under {point} is not immutable: {under.strip()}")
+env = machine("sudo docker container inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "
+              "nextcloud-aio-mastercontainer").splitlines()
+ncdata = machine("sudo docker container inspect --format "
+                 "'{{range .Mounts}}{{if eq .Destination \"/mnt/ncdata\"}}{{.Source}}{{end}}{{end}}' "
+                 "nextcloud-aio-nextcloud").strip()
+if f"NEXTCLOUD_DATADIR={folder}" not in env or ncdata != folder:
+    sys.exit(f"AIO does not keep the staff's files in {folder}: Nextcloud's data folder is {ncdata!r}")
+print(f"{data} is mounted for good at {point}, immutable underneath, and AIO keeps the staff's files in {folder}")

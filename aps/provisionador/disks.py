@@ -43,12 +43,17 @@ def most_free(disks):
     return max(disks, key=lambda disk: disk["free"], default=None)
 
 
-def shown(disks):
-    """«Almacenamiento» as GET /api/storage answers it: each disk with its roles, then the files disk, the one with the
-    most free space that may hold them, and the backup destination: the backup folder when no other disk may hold the
-    backup, otherwise None, for the operator to choose."""
+def shown(disks, files=None, installed=False):
+    """«Almacenamiento» as GET /api/storage answers it: each disk with its roles, then the files disk and the backup
+    destination. The files disk is the one the operator chose, by its id; with none chosen, the system disk once
+    «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files are, and before it,
+    the disk with the most free space that may hold them. The backup destination is the backup folder when no other
+    disk may hold the backup, otherwise None, for the operator to choose."""
     listed = [{**disk, **dict(zip(("files", "backups", "reason"), roles(disk)))} for disk in disks]
-    files = most_free([disk for disk in listed if disk["files"]])
+    if not files:
+        files = (next(disk for disk in listed if disk["system"]) if installed
+                 else most_free([disk for disk in listed if disk["files"]]))["id"]
+    on_system = any(disk["id"] == files and disk["system"] for disk in listed)
     alone = not any(disk["backups"] for disk in listed if not disk["system"])
-    return {"disks": listed, "files": files["id"], "backups": {"folder": True} if alone else None,
-            "folder": BACKUP_FOLDER, "same_disk": alone and files["system"]}
+    return {"disks": listed, "files": files, "files_locked": installed, "backups": {"folder": True} if alone else None,
+            "folder": BACKUP_FOLDER, "same_disk": alone and on_system}
