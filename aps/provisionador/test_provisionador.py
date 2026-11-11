@@ -635,13 +635,12 @@ class InstallTest(WizardTest):
         return install
 
 
-def disk_floors():
-    """The room in GB the bootstrap requires on a disk, as aps/bootstrap/install.sh alone sets it: the program's on the
-    system disk, the install's own files' and a first backup's."""
+def bootstrap_floors(**variables):
+    """The floors the bootstrap requires, as aps/bootstrap/install.sh alone sets them, each by its key: `variables` names
+    their variables there; by default the cores and the memory in GiB."""
     script = (HERE.parent / "bootstrap" / "install.sh").read_text()
     return {key: int(re.search(rf"^{variable}=(\d+)$", script, re.M)[1])
-            for key, variable in (("program", "MIN_PROGRAM_GB"), ("files", "MIN_FILES_GB"),
-                                  ("backup", "MIN_BACKUP_GB"))}
+            for key, variable in (variables or {"cpus": "MIN_CPUS", "memory_gib": "MIN_MEMORY_GIB"}).items()}
 
 
 def disk(disk_id, **facts):
@@ -728,7 +727,9 @@ class Almacenamiento(InstallTest):
         self.add("usb", usb=True)
         self.assertEqual([d["id"] for d in self.storage()["disks"]], [FakeSuite.SYSTEM_DISK["id"], "usb"])
 
-    FLOORS = {role: room * 10 ** 9 for role, room in disk_floors().items()}  # in bytes, as the disks' free space
+    FLOORS = {role: room * 10 ** 9  # in bytes, as the disks' free space
+              for role, room in bootstrap_floors(program="MIN_PROGRAM_GB", files="MIN_FILES_GB",
+                                                 backup="MIN_BACKUP_GB").items()}
     ROOM = "sin espacio suficiente"
 
     def roles(self):
@@ -759,7 +760,11 @@ class Almacenamiento(InstallTest):
         self.add("backups", usb=True, free=self.FLOORS["backup"])
         need = self.FLOORS["program"] + self.FLOORS["files"]
         self.assertEqual(self.system(need)[0], True)
+        self.assertEqual(self.choose(FakeSuite.SYSTEM_DISK["id"])[0], 200)
         self.assertEqual(self.system(need - 1), (False, False, self.ROOM))
+        status, body = self.choose(FakeSuite.SYSTEM_DISK["id"])
+        self.assertEqual(status, 400)
+        self.assertIn(self.ROOM, body["error"])
 
     def test_beside_the_files_disk_the_system_disk_holds_the_backup_with_room_for_the_program_and_it(self):
         self.add("data")
@@ -781,6 +786,16 @@ class Almacenamiento(InstallTest):
         self.assertEqual((self.storage()["files"], self.storage()["backups"]), (FakeSuite.SYSTEM_DISK["id"], {"folder": True}))
         self.assertEqual(self.system(need - 1)[0], False)
         self.assertEqual(self.storage()["files"], None)
+
+    def test_once_instalar_was_pressed_the_floors_no_longer_apply_for_the_suite_already_takes_its_room(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        self.suite.found_disks[0]["free"] = self.FLOORS["backup"]
+        storage = self.storage()
+        self.assertEqual((storage["files"], storage["backups"], storage["disks"][0]["files"]),
+                         (FakeSuite.SYSTEM_DISK["id"], {"folder": True}, True))
+        self.assertEqual(self.choose(FakeSuite.SYSTEM_DISK["id"])[0], 200)
 
     def test_with_no_disk_with_room_for_the_files_instalar_is_refused(self):
         self.suite.found_disks[0]["free"] = self.FLOORS["program"]
@@ -2634,13 +2649,6 @@ class PeopleChanges(PeopleTest):
             self.assertIn("«Cuentas»", body["error"])
         state = self.browser.get("/api/state")[1]
         self.assertEqual((state["people"], state["retired"]), (PEOPLE, []))
-
-
-def bootstrap_floors():
-    """The cores and the memory in GiB the bootstrap requires, as aps/bootstrap/install.sh alone sets them."""
-    script = (HERE.parent / "bootstrap" / "install.sh").read_text()
-    return {key: int(re.search(rf"^{variable}=(\d+)$", script, re.M)[1])
-            for key, variable in (("cpus", "MIN_CPUS"), ("memory_gib", "MIN_MEMORY_GIB"))}
 
 
 class Recording(InstallTest):

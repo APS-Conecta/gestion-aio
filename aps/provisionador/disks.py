@@ -73,23 +73,26 @@ def most_free(disks):
 
 def shown(disks, files=None, installed=False):
     """«Almacenamiento» as GET /api/storage answers it: each disk with its roles, then the files disk and the backup
-    destination. The files disk is the one the operator chose, by its id; with none chosen, the system disk once
-    «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files are, and before it,
-    the disk with the most free space that may hold them. The backup destination is the backup folder when no other
-    disk may hold the backup, otherwise None, for the operator to choose."""
+    destination. Until «Instalar», each disk holds a role only with room for it; from then on the suite already takes
+    its room, and the floors no longer apply. The files disk is the one the operator chose, by its id; with none chosen,
+    the system disk once «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files
+    are, and before it, the disk with the most free space that may hold them, or None when no disk has room for them.
+    The backup destination is the backup folder when no other disk may hold the backup and the system disk may,
+    otherwise None, for the operator to choose."""
     listed = [{**disk, **dict(zip(("files", "backups", "reason"), roles(disk)))} for disk in disks]
     system = next(disk for disk in listed if disk["system"])
+    floors = dict.fromkeys(FLOORS, 0) if installed else FLOORS
     for disk in listed:
         if disk is not system:
-            limit(disk, "files", FLOORS["files"])
-            limit(disk, "backups", FLOORS["backup"])
+            limit(disk, "files", floors["files"])
+            limit(disk, "backups", floors["backup"])
     alone = not any(disk["backups"] for disk in listed if disk is not system)
-    limit(system, "files", FLOORS["program"] + FLOORS["files"] + (FLOORS["backup"] if alone else 0))
+    limit(system, "files", floors["program"] + floors["files"] + (floors["backup"] if alone else 0))
     if not files:
         found = system if installed else most_free([disk for disk in listed if disk["files"]])
         files = found and found["id"]
     on_system = files == system["id"]
-    limit(system, "backups", FLOORS["program"] + FLOORS["backup"] + (FLOORS["files"] if on_system else 0))
+    limit(system, "backups", floors["program"] + floors["backup"] + (floors["files"] if on_system else 0))
     backups = {"folder": True} if alone and system["backups"] else None
     return {"disks": listed, "files": files, "files_locked": installed, "backups": backups, "folder": BACKUP_FOLDER,
             "same_disk": bool(backups) and on_system}

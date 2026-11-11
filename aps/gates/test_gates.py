@@ -746,9 +746,12 @@ class BootstrapRefusals(unittest.TestCase):
         return self.bootstrap(answers)[1]
 
     def test_the_one_command_checks_the_system_disk_for_the_program_alone(self):
-        floor = int(re.search(r"^MIN_PROGRAM_GB=(\d+)$", (REPO / "aps/bootstrap/install.sh").read_text(), re.M)[1])
-        self.assertLess(floor, 27)
-        for free in (floor, 26):
+        script = (REPO / "aps/bootstrap/install.sh").read_text()
+        floors = {name: int(re.search(rf"^{name}=(\d+)$", script, re.M)[1])
+                  for name in ("MIN_PROGRAM_GB", "MIN_FILES_GB", "MIN_BACKUP_GB")}
+        floor, everything = floors["MIN_PROGRAM_GB"], sum(floors.values())  # the program's; the files' and backup's too
+        self.assertLess(floor, everything)
+        for free in (floor, everything - 1):
             self.assertNotIn("GB libres", self.checked(free), free)
         self.assertIn(f"tiene {floor - 1} GB libres en ", self.checked(floor - 1))
         self.assertIn(f"se requieren al menos {floor} GB", self.checked(floor - 1))

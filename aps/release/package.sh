@@ -4,8 +4,8 @@
 # Assembles a release's assets in <out-dir>:
 #   gestion-aio-<tag>.tar.gz          the bundle: VERSION, images.lock (every image the release runs, by digest),
 #                                     services.json, the mastercontainer's start, the bootstrap's committed copy (the
-#                                     Provisionador reads the disk floors there; it refuses to run), the Provisionador,
-#                                     the DEIS register, the brand and the theme;
+#                                     Provisionador reads the disk floors there and won't start without it), the
+#                                     Provisionador, the DEIS register, the brand and the theme;
 #                                     a test build's also trusted-cacerts/, Let's Encrypt's staging roots, one per file
 #   install.sh                        the stable-name bootstrap, with the tag and bundle checksum filled in
 #   gestion-aio-<tag>-install.sh      the same bootstrap under its versioned name

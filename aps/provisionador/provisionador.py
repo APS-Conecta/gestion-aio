@@ -82,7 +82,7 @@ DISK_GONE = "Ese disco ya no está en el servidor. Vuelva a abrir «Almacenamien
 NOT_FOR_FILES = "Ese disco no puede guardar los archivos del personal: {}."
 FILES_KEPT = "El disco de los archivos del personal ya no puede cambiarse: se presionó «Instalar»."
 NO_FILES_DISK = ("Ningún disco del servidor tiene espacio suficiente para los archivos del personal. Libere espacio o "
-                 "conecte otro disco y vuelva a «Almacenamiento».")
+                 "conecte otro disco y vuelva a abrir «Almacenamiento».")
 NOT_SPREADSHEET = ("Suba la planilla del personal como libro de Excel (.xlsx), con su hoja «Personal», o como CSV "
                    "delimitado por «;».")
 PEOPLE_KEPT = "La instalación terminó: el personal se administra ahora en «Cuentas», en APS Conecta Gestión."
@@ -346,8 +346,8 @@ class Provisionador:
         """POST /api/storage {"files": id}: the files disk, one «Almacenamiento» offers for the staff's files. Once
         «Instalar» was pressed it stays: the one stored, or the system disk on a server installed before
         «Almacenamiento». The answer is GET's, from the same reading of the disks."""
-        files, listed = body.get("files"), self.suite.disks()
-        found = next((disk for disk in disks.shown(listed)["disks"] if disk["id"] == files), None)
+        files, listed, installed = body.get("files"), self.suite.disks(), "install" in self.state.read()
+        found = next((disk for disk in disks.shown(listed, installed=installed)["disks"] if disk["id"] == files), None)
         if found is None:
             return 400, {"error": DISK_GONE}
         if not found["files"]:

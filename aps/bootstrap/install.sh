@@ -45,7 +45,8 @@ BUNDLE_SHA256=""
 #   backup  AIO's first nightly backup: at most the 1.8 GB all the suite's volumes hold after an install (docker system
 #           df, run 41907427126), and the 2 GB borg keeps free (additional_free_space,
 #           Containers/borgbackup/backupscript.sh): (1.8 + 2) × 1.25 = 4.75, so 5 GB.
-# Everything on the system disk thus needs 27 GB there, as it did before «Almacenamiento».
+# Everything on the system disk thus needs 27 GB free at «Almacenamiento», after the 0.9 GB the one command used (the
+# 15-wizard stage in both runs); about 28 GB before it.
 # Talk recording's threshold is these plus one recording (aps/provisionador/steps/components.py).
 # Memory is MemTotal rounded up to a whole GiB, here as in the Provisionador and the acceptance checks: the kernel keeps
 # part of the memory for itself (a 6 GiB machine reports about 5.8 GiB, about 5.35 GiB when kdump reserves 512 MiB), so
