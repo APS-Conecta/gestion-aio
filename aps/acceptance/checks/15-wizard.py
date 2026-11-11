@@ -57,6 +57,8 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     page.goto(link)
     expect(page.get_by_role("heading", name="Centro")).to_be_visible()
     expect(page.get_by_role("banner").get_by_text(brand.MOTTO)).to_be_visible()
+    page.wait_for_timeout(3000)  # the map draws its tiles
+    page.screenshot(path=evidence / "centro.png")
     if TEST_BUILD:
         page.select_option("#search [name=region]", row["region_codigo"])
         page.select_option("#search [name=comuna]", row["comuna_codigo"])
