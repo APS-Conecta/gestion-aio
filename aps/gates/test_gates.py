@@ -478,7 +478,8 @@ class ReleaseBundle(unittest.TestCase):
     def test_a_release_carries_no_staging_root_and_names_production_alone(self):
         files = self.bundle("v1.0.0")
         self.assertEqual({name.split("/")[0] for name in files},
-                         {"VERSION", "images.lock", "services.json", "provisionador", "deis", "brand", "theme"})
+                         {"VERSION", "images.lock", "services.json", "bootstrap", "provisionador", "deis", "brand",
+                          "theme"})
         self.assertFalse([r for r in self.ROOTS for t in files.values() if r in t])
         self.assertEqual(json.loads(files["services.json"]), {
             "url": "https://gestion-nombres.apsconecta.workers.dev", "suffix": "gestion.apsconecta.cl",
@@ -602,22 +603,32 @@ class BootstrapRefusals(unittest.TestCase):
            "--volume nextcloud_aio_mastercontainer:/mnt/docker-aio-config "
            f"--volume /var/run/docker.sock:/var/run/docker.sock:ro {IMAGE}:{TAG}")
 
-    def bootstrap(self, answers, holds=(), dri=False):
+    def bootstrap(self, answers, holds=(), dri=False, files=None, command=("install.sh",)):
         """The exit code, the output and the calls made of the release's install.sh, with `answers` as
         {call: (exit code, output)} (nothing answers a call that fails loudly); `holds` names files the server already
-        holds, with their text, under the install folder; `dri`, whether the server has render devices; and what that
-        folder's parent holds afterwards besides the test's own files."""
+        holds, with their text, under the install folder, where the bundle's mastercontainer start always is; `dri`,
+        whether the server has render devices; `files`, the staff's files folder the Provisionador stored; `command`,
+        what runs, relative to the test's own directory; and what that folder's parent holds afterwards besides the
+        test's own files."""
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if dri:
             (tmp / "dri").mkdir()
-        text = (REPO / "aps" / "bootstrap" / "install.sh").read_text(encoding="utf-8")
-        for old, new in (('\nRELEASE_TAG=""\n', f'\nRELEASE_TAG="{self.TAG}"\n'),
-                         ('\nBUNDLE_SHA256=""\n', f'\nBUNDLE_SHA256="{"0" * 64}"\n'),
-                         ("\nINSTALL_DIR=/opt/aps-conecta/gestion\n", f"\nINSTALL_DIR={tmp}/gestion\n"),
-                         ("\nDRI=/dev/dri ", f"\nDRI={tmp}/dri ")):
-            self.assertEqual(text.count(old), 1, old)
-            text = text.replace(old, new)
-        (tmp / "install.sh").write_text(text, encoding="utf-8")
+        if files:
+            (tmp / "files-folder").write_text(f"{files}\n", encoding="utf-8")
+        for source, target, replaced in (
+                ("install.sh", tmp / "install.sh",
+                 (('\nRELEASE_TAG=""\n', f'\nRELEASE_TAG="{self.TAG}"\n'),
+                  ('\nBUNDLE_SHA256=""\n', f'\nBUNDLE_SHA256="{"0" * 64}"\n'),
+                  ("\nINSTALL_DIR=/opt/aps-conecta/gestion\n", f"\nINSTALL_DIR={tmp}/gestion\n"))),
+                ("mastercontainer.sh", tmp / "gestion" / "bootstrap" / "mastercontainer.sh",
+                 (("\nDRI=/dev/dri ", f"\nDRI={tmp}/dri "),
+                  ("\nFILES=/var/lib/aps-conecta/files-folder ", f"\nFILES={tmp}/files-folder ")))):
+            text = (REPO / "aps" / "bootstrap" / source).read_text(encoding="utf-8")
+            for old, new in replaced:
+                self.assertEqual(text.count(old), 1, old)
+                text = text.replace(old, new)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
         for name, content in holds:
             path = tmp / "gestion" / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -632,9 +643,10 @@ class BootstrapRefusals(unittest.TestCase):
             (tmp / "bin" / name).write_text("\n".join(fake), encoding="utf-8")
             (tmp / "bin" / name).chmod(0o755)
         (tmp / "calls").touch()
-        r = subprocess.run([shutil.which("bash"), str(tmp / "install.sh")], capture_output=True, encoding="utf-8",
+        r = subprocess.run([shutil.which("bash"), str(tmp / command[0]), *command[1:]], capture_output=True,
+                           encoding="utf-8",
                            env={"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "CALLS": str(tmp / "calls")})
-        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls", "gestion", "dri"})
+        made = sorted({p.name for p in tmp.iterdir()} - {"install.sh", "bin", "calls", "gestion", "dri", "files-folder"})
         return r.returncode, r.stdout + r.stderr, (tmp / "calls").read_text().splitlines(), made
 
     def test_another_aio_installation_is_refused_naming_its_image(self):
@@ -694,6 +706,33 @@ class BootstrapRefusals(unittest.TestCase):
         self.assertTrue(calls[-1].startswith("python3 ") and calls[-1].endswith(" upgrade"), calls)
         self.assertIn("no se pudo preparar la actualización", out)
         self.assertEqual(made, [])
+
+    def started(self, files=None, command=("install.sh",)):
+        """The `docker run` calls of a mastercontainer start, through an upgrade the bootstrap cut short or through
+        `command`, on a server whose Provisionador stored the staff's files folder `files`, or none."""
+        run = self.RUN.replace(f" {self.IMAGE}:{self.TAG}", f"{{files}} {self.IMAGE}:{self.TAG}")
+        run = run.replace("{files}", f" --env NEXTCLOUD_DATADIR={files}" if files else "")
+        answers = {self.INSPECT: (1, ""), self.VOLUME: (0, "[]"),
+                   f"docker pull --quiet {self.DIGEST}": (0, ""),
+                   f"docker tag {self.DIGEST} {self.IMAGE}:{self.TAG}": (0, ""),
+                   "docker rm -f nextcloud-aio-mastercontainer": (0, ""), run: (0, ""),
+                   "systemctl stop aps-provisionador.service": (0, ""),
+                   "python3 @DIR@/gestion/provisionador/provisionador.py upgrade": (1, "")}
+        code, out, calls, _ = self.bootstrap(answers, holds=(("VERSION", f"{self.TAG}\n"),
+                                                             ("images.lock", f"{self.DIGEST}\n")),
+                                             files=files, command=command)
+        return [call for call in calls if call.startswith("docker run ")], run, out
+
+    def test_every_start_passes_the_staff_files_folder_the_provisionador_stored_to_aio(self):
+        files = "/mnt/aps-conecta/5b0c/aps-conecta/archivos"
+        for command in (("install.sh",), ("gestion/bootstrap/mastercontainer.sh", "keep")):
+            runs, run, out = self.started(files, command)
+            self.assertEqual(runs, [run], out)
+            self.assertIn(f" --env NEXTCLOUD_DATADIR={files} ", run)
+
+    def test_with_no_stored_folder_aio_keeps_the_staff_files_in_its_own_volume(self):
+        runs, run, out = self.started()
+        self.assertEqual(runs, [self.RUN], out)
 
     def test_a_volume_another_installation_left_is_refused_on_a_fresh_install(self):
         code, out, calls, made = self.bootstrap({self.INSPECT: (1, ""), self.VOLUME: (0, "[]")})

@@ -343,18 +343,42 @@ async function reach(name) {
 async function almacenamiento() {
   show("almacenamiento");
   try {
-    const storage = await api("GET", "/api/storage");
-    const others = storage.disks.filter((disk) => !disk.system);
-    $("storage-files").replaceChildren(...storage.disks.map(
-      (disk) => diskItem(disk, disk.files, storage.files === disk.id)));
-    const folder = {...storage.disks.find((disk) => disk.system), name: folderName(storage)};
-    $("storage-backups").replaceChildren(diskItem(folder, true, Boolean(storage.backups?.folder)),
-      ...others.map((disk) => diskItem(disk, disk.backups, storage.backups?.disk === disk.id)));
-    $("storage-warning").textContent = SAME_DISK;
-    $("storage-warning").hidden = !storage.same_disk;
+    showStorage(await api("GET", "/api/storage"));
     status("storage-status", "");
   } catch (e) {
     status("storage-status", e.message, true);
+  }
+}
+
+// The files disk is a choice until «Instalar» was pressed; the backup is shown as it goes.
+function showStorage(storage) {
+  const others = storage.disks.filter((disk) => !disk.system);
+  $("storage-files").replaceChildren(...storage.disks.map((disk) => filesChoice(disk, storage)));
+  const folder = {...storage.disks.find((disk) => disk.system), name: folderName(storage)};
+  $("storage-backups").replaceChildren(diskItem(folder, true, Boolean(storage.backups?.folder)),
+    ...others.map((disk) => diskItem(disk, disk.backups, storage.backups?.disk === disk.id)));
+  $("storage-warning").textContent = SAME_DISK;
+  $("storage-warning").hidden = !storage.same_disk;
+}
+
+// A disk for the staff's files, with the radio button that chooses it.
+function filesChoice(disk, storage) {
+  const node = diskItem(disk, disk.files, storage.files === disk.id);
+  const radio = Object.assign(document.createElement("input"), {type: "radio", name: "files", value: disk.id,
+    checked: storage.files === disk.id, disabled: !disk.files || storage.files_locked});
+  const label = element("label", "");
+  label.append(radio, node.querySelector("strong"));
+  node.prepend(label);
+  return node;
+}
+
+async function chooseFiles(event) {
+  try {
+    showStorage(await api("POST", "/api/storage", {files: event.target.value}));
+    status("storage-status", "");
+  } catch (e) {
+    status("storage-status", e.message, true);
+    showStorage(await api("GET", "/api/storage"));
   }
 }
 
@@ -511,6 +535,13 @@ async function listo(name) {
   for (const link of document.querySelectorAll(".step-link")) link.disabled = true;
   reach(name);
   try {
+    const storage = await api("GET", "/api/storage");
+    const files = storage.disks.find((disk) => disk.id === storage.files);
+    $("files-place").textContent = `Los archivos del personal quedan en: ${files ? diskName(files) : storage.files}.`;
+  } catch {
+    $("files-place").textContent = "";
+  }
+  try {
     const {passwords, file} = await api("POST", "/api/close", {});
     $("passwords").href = URL.createObjectURL(new Blob([passwords], {type: "text/plain;charset=utf-8"}));
     $("passwords").download = file;
@@ -590,6 +621,7 @@ async function start() {
   });
   $("teams-continue").addEventListener("click", async () => (await keepTeams()) && almacenamiento());
   $("storage-continue").addEventListener("click", revisar);
+  $("storage-files").addEventListener("change", chooseFiles);
   $("install").addEventListener("click", install);
   $("ai").addEventListener("change", chooseAi);
   $("log").addEventListener("scroll", () => {

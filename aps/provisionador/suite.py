@@ -46,6 +46,12 @@ import urllib.request
 from pathlib import Path
 
 CREDENTIAL = Path("/var/lib/aps-conecta/name-service.json")
+# The staff's files folder the mastercontainer passes to AIO as NEXTCLOUD_DATADIR: written here, read by the bundle's
+# mastercontainer start (aps/bootstrap/mastercontainer.sh) at every start of the mastercontainer.
+FILES_FOLDER = Path("/var/lib/aps-conecta/files-folder")
+START = Path(__file__).resolve().parent.parent / "bootstrap" / "mastercontainer.sh"  # in the unpacked bundle
+AIO_BACK = 5 * 60  # seconds AIO's page may take to answer again once the mastercontainer started again
+WWW_DATA = 33  # the user Nextcloud's container runs as, who owns its data folder (Containers/nextcloud/entrypoint.sh)
 APP_KEY = Path(__file__).resolve().parent / "apps.pub"  # the app key's public half, in signify's format
 UNREACHABLE = ("No se pudo conectar con el servicio de nombres de APS Conecta. Revise la conexión a internet del "
                "servidor y presione «Reintentar».")
@@ -53,6 +59,10 @@ LIMITED = ("El servicio de nombres de APS Conecta limita las direcciones que se 
            "cada semana. Presione «Reintentar» más tarde.")
 REFUSED = "El servicio de nombres de APS Conecta rechazó la solicitud (HTTP {code}). Contacte a APS Conecta."
 SUITE_DOWN = "El contenedor maestro de la suite no responde. Revise que Docker esté en marcha y presione «Reintentar»."
+MOUNT_FAILED = ("No se pudo montar el disco {} en {}. Revise que siga conectado y presione «Reintentar»; si vuelve a "
+                "ocurrir, contacte a APS Conecta.")
+FILES_FAILED = ("No se pudo preparar la carpeta {} para los archivos del personal. Presione «Reintentar»; si vuelve a "
+                "ocurrir, contacte a APS Conecta.")
 SUITE_REFUSED = ("El contenedor maestro de la suite rechazó la instalación (HTTP {code}). Presione «Reintentar»; si "
                  "vuelve a ocurrir, contacte a APS Conecta.")
 NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores de la suite. Presione «Reintentar»; si "
@@ -101,6 +111,7 @@ NOT_FILESYSTEMS = {"swap", "LVM2_member", "linux_raid_member", "crypto_LUKS", "z
 # The read-only mount, replaying no journal, that reads the free space of a Linux filesystem nobody has mounted: nothing
 # is written to the disk.
 READ_ONLY = {"ext4": "ro,noload", "xfs": "ro,norecovery", "btrfs": "ro,nologreplay"}
+MOUNTS = "/mnt/aps-conecta"  # where a disk the port mounts for good is mounted, under its filesystem's UUID
 HIDDEN = "***REMOVED SENSITIVE VALUE***"  # what occ config:list shows of a value Nextcloud counts as sensitive
 # How AIO's start answer ends once every container started (DockerController::getStreamingResponseHtmlEnd); when one
 # fails, it stops short or Slim's error page follows.
@@ -334,6 +345,19 @@ def downloads(listed, downloading):
         told = len(found)
 
     return read
+
+
+def host(*command, failed, timeout=120):
+    """What a command on this server printed; a failure logs its errors only and is Unreachable with `failed`."""
+    try:
+        run = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"{command[0]}: {error}", file=sys.stderr)
+        raise Unreachable(failed) from error
+    if run.returncode:
+        print(f"{' '.join(command[:2])}: {run.stderr[-2000:]}", file=sys.stderr)
+        raise Unreachable(failed)
+    return run.stdout
 
 
 def space(folder):
@@ -685,6 +709,64 @@ class Suite:
         walk(listed["blockdevices"], False, "")
         return list(found.values())
 
+    @staticmethod
+    def mount(disk):
+        """The disk mounted for good under MOUNTS, at its filesystem's UUID: an /etc/fstab entry by that UUID, marked so
+        that a missing disk neither stops nor holds up the boot, and ordered before Docker, whose containers then find
+        it mounted, and the disk mounted there now. Before the first mount the empty mount point is made immutable, so
+        that while the disk is missing nothing, Docker included, can create folders in its place. Its mount point."""
+        point = f"{MOUNTS}/{disk['id']}"
+        failed = MOUNT_FAILED.format(disk["device"], point)
+        try:
+            os.makedirs(point, exist_ok=True)
+            fstab = Path("/etc/fstab")
+            if f"UUID={disk['id']} " not in fstab.read_text(encoding="utf-8"):
+                with fstab.open("a", encoding="utf-8") as entries:
+                    entries.write(f"UUID={disk['id']} {point} {disk['filesystem']} "
+                                  "defaults,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service 0 2\n")
+                host("systemctl", "daemon-reload", failed=failed)
+        except OSError as error:
+            print(f"mount {point}: {error}", file=sys.stderr)
+            raise Unreachable(failed) from error
+        if not os.path.ismount(point):
+            host("chattr", "+i", point, failed=failed)
+            host("mount", point, failed=failed)
+        return point
+
+    @staticmethod
+    def files_folder():
+        """The folder AIO keeps the staff's files in: the mastercontainer's NEXTCLOUD_DATADIR, None for AIO's own
+        volume."""
+        env = host("docker", "container", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}",
+                   MASTERCONTAINER, failed=SUITE_DOWN)
+        return next((line.split("=", 1)[1] for line in env.splitlines() if line.startswith("NEXTCLOUD_DATADIR=")), None)
+
+    def place_files(self, folder):
+        """AIO keeps the staff's files in the folder from its next start of Nextcloud's container on, unless it already
+        does: the folder made as Nextcloud's container needs it (owned by its web user and group root, mode 750),
+        written where the bundle's mastercontainer start reads it, and the mastercontainer started again through that
+        start, which passes it to AIO as NEXTCLOUD_DATADIR; then AIO's page answers again."""
+        if self.files_folder() == folder:
+            return
+        try:
+            os.makedirs(folder, exist_ok=True)
+            os.chown(folder, WWW_DATA, 0)
+            os.chmod(folder, 0o750)
+            write_root_only(FILES_FOLDER, f"{folder}\n")
+        except OSError as error:
+            print(f"files folder {folder}: {error}", file=sys.stderr)
+            raise Unreachable(FILES_FAILED.format(folder)) from error
+        host("bash", str(START), "keep", failed=SUITE_DOWN, timeout=900)
+        deadline = time.monotonic() + AIO_BACK
+        while True:
+            try:
+                self._signed_in()
+                return
+            except Unreachable:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(5)
+
     def switch_ollama(self, settings):
         """«IA local»'s container on, with these settings, the GPU found ("gpu") and the memory cap ("memory_gib"),
         or, with None, off: it stops and AIO no longer runs it, and its volume, with the models, stays. AIO's own code
@@ -820,6 +902,10 @@ class FakeSuite:
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
         self.found_gpu = None  # the GPU the server offers Ollama: "nvidia", "dri" (AMD or Intel) or None, the CPU
         self.found_disks = [dict(self.SYSTEM_DISK)]  # the server's disks, as the suite port reads them
+        self.mounts = []  # each disk the port mounted for good, in turn: (its id, its mount point)
+        self.files_in = None  # AIO's NEXTCLOUD_DATADIR: the folder it keeps the staff's files in; None, its own volume
+        self.files_at_start = None  # where AIO kept the staff's files when its start was last pressed
+        self.restarts = 0  # how often the mastercontainer was started again for a new files folder
         self.ollama = None  # the settings «IA local»'s container runs with, None while it is off
         self.volumes = set()  # the Docker volumes «IA local» made, which outlive its container
         self.registry = {}  # what Ollama's registry serves, each model's tag with its digest
@@ -909,6 +995,21 @@ class FakeSuite:
     def disks(self):
         return [dict(disk) for disk in self.found_disks]
 
+    def mount(self, disk):
+        point = f"{MOUNTS}/{disk['id']}"
+        found = next(found for found in self.found_disks if found["id"] == disk["id"])
+        found.update(mounted=point, at_boot=True)
+        self.mounts.append((disk["id"], point))
+        return point
+
+    def files_folder(self):
+        return self.files_in
+
+    def place_files(self, folder):
+        if self.files_in != folder:
+            self.files_in = folder
+            self.restarts += 1
+
     def switch_ollama(self, settings):
         """«IA local»'s container, as AIO creates and starts it with the settings, or stops and removes it, its volume
         kept."""
@@ -956,6 +1057,7 @@ class FakeSuite:
                 text += f"<div>{name}: Iniciando el contenedor</div>"
                 read(text)
         self.starts += 1
+        self.files_at_start = self.files_in
         self.release.wait()
         if self.dies:
             raise SystemExit  # the thread ends without a word, as the process would
