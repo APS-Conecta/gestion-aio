@@ -15,23 +15,25 @@ A step module, whose name is its id, declares:
 Both answer the same way; only the suite port raises, Unreachable with its Spanish reason, and the runner turns that
 into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
-address (`inside`), the folder the Provisionador keeps its files in (`folder`), the ids of the steps a Provisionador
-restart cut short (`interrupted`) and of the optional apps the operator ticked on «Revisar» (`optional`), whether «IA
-local» is on (`ai`), and the teams declared on «Equipos» (`teams`, as teams.py names them), the people its spreadsheet
-loads (`people`, as spreadsheet.py reads them) and the usernames retired there (`retired`), as they were when «Instalar»
-or «Reintentar» was pressed; `declared()` answers those people and usernames as «Equipos» declares them now, and
-`log(text)` adds our own Spanish line, never a secret nor what occ or AIO printed, to the install's log. A new step is a
-new module: no other file lists the steps.
+address (`inside`), the folder the Provisionador keeps its files in (`folder`), whether the run is an upgrade's
+(`upgrade`), the ids of the steps a Provisionador restart cut short (`interrupted`) and of the optional apps the
+operator ticked on «Revisar» (`optional`), whether «IA local» is on (`ai`), and the teams declared on «Equipos»
+(`teams`, as teams.py names them), the people its spreadsheet loads (`people`, as spreadsheet.py reads them) and the
+usernames retired there (`retired`), as they were when «Instalar» or «Reintentar» was pressed; `declared()` answers
+those people and usernames as «Equipos» declares them now, and `log(text)` adds our own Spanish line, never a secret nor
+what occ or AIO printed, to the install's log. A new step is a new module: no other file lists the steps.
 A step that configures an app gets it through `steps.apps.ensure`
-rather than NEEDS "apps".
+rather than NEEDS "apps". A step that sets what administrators may change after «Listo» answers its check through
+`record`, which keeps what the step set once the check is clean, and asks `kept` what an upgrade leaves of the rest.
 """
 
 import json
 import time
 
-from suite import HIDDEN
+from suite import HIDDEN, write_root_only
 
 POLL = 1  # seconds between two readings of the suite while a step waits for it
+RECORD = "record.json"  # in the Provisionador's folder: what the steps set that administrators may change after «Listo»
 DIFFERS = ("Nextcloud no conserva estos ajustes: {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
            "Conecta.")
 
@@ -64,3 +66,27 @@ def configure(suite, settings):
     """Import the settings with occ; what Nextcloud then does not hold, as `differences` answers it."""
     suite.occ("config:import", stdin=json.dumps(settings))
     return differences(suite, settings)
+
+
+def records(context):
+    """The record, by kind: what each step set at its last run whose check was clean; empty before any."""
+    path = context.folder / RECORD
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def kept(context, kind, held):
+    """Of what the suite holds of `kind`, {key: names}, what a step keeps where it does not declare it: at an upgrade,
+    what the record does not list as the steps' own, so what administrators added after «Listo» stays; nothing at an
+    install, nor at the upgrade of a server whose release kept no record."""
+    last = records(context).get(kind) if context.upgrade else None
+    return {} if last is None else {key: [name for name in names if name not in last.get(key, ())]
+                                    for key, names in held.items()}
+
+
+def record(context, kind, declared, found):
+    """`found`, the step's check: once it is clean, the record keeps what the step set of `kind`, {key: names}, in place
+    of what it kept, so a run whose check is not clean leaves «Reintentar» the record it started from."""
+    if not found:
+        kept_now = {**records(context), kind: {key: sorted(names) for key, names in declared.items()}}
+        write_root_only(context.folder / RECORD, json.dumps(kept_now, ensure_ascii=False, indent=1))
+    return found

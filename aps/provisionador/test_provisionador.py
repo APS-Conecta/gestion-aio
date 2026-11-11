@@ -34,7 +34,8 @@ from xml.etree import ElementTree
 import brand
 import provisionador
 import runner
-from steps import apps, people, start
+import steps
+from steps import apps, cargo_accounts, folders, people, start
 from suite import FakeSuite
 
 HERE = Path(__file__).resolve().parent
@@ -920,6 +921,66 @@ class Upgrade(InstallTest):
         self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
         self.stop()
 
+    def upgraded(self):
+        """The upgrade, run to «Listo» and closed: the bootstrap restarts the Provisionador, which resumes the install
+        by itself, and the wizard closes again."""
+        self.assertEqual(self.upgrade(), None)
+        self.start()
+        self.browser = self.operator()
+        self.assertEqual(self.until("done")["status"], "done")
+        self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
+        self.stop()
+
+    def test_an_upgrade_keeps_the_group_admins_administrators_added_and_restores_the_declared_ones(self):
+        self.installed()
+        admins = self.suite.sub_admins  # in «Cuentas», after «Listo», an administrator
+        admins["ana"] = {"cat-clinicos"}  # made a person a group admin,
+        admins["jefe.some"].add("cat-administrativos")  # gave a cargo account another group
+        del admins["subdirector"]  # and took «Todo el personal» from the subdirector
+        self.upgraded()
+        self.assertEqual(self.suite.sub_admins, {**POSITION_ADMINS, "ana": {"cat-clinicos"},
+                                                 "jefe.some": {"staff-recovery", "cat-administrativos"}})
+
+    def grants(self):
+        """Each group folder's grants, by its mount point."""
+        return {folder["mount"]: folder["groups"] for folder in self.suite.group_folders.values()}
+
+    def test_an_upgrade_keeps_the_folder_grants_administrators_added_and_restores_the_declared_ones(self):
+        self.installed()
+        grants = self.grants()  # in Groupfolders' settings, after «Listo», an administrator
+        grants["Unidades/Dirección"]["role-jefe-some"] = 1  # let the Jefe/a de SOME read Dirección,
+        grants["Intranet"]["cat-clinicos"] = MANAGE  # gave a category the Intranet
+        del grants["Unidades/SOME"]["all-staff"]  # and took SOME from the staff
+        self.upgraded()
+        self.assertEqual(self.grants(), {
+            **UNITS_AND_INTRANET, "Unidades/Dirección": {**DIRECTORATE, "role-jefe-some": 1},
+            "Intranet": {**FOLDERS["Intranet"], "cat-clinicos": MANAGE}})
+
+    def test_the_first_upgrade_of_a_server_whose_release_kept_no_record_ends_with_exactly_the_declared_set(self):
+        self.installed()
+        (self.state / steps.RECORD).unlink()  # the release that installed the server kept no record of what it set
+        self.grants()["Unidades/Dirección"]["cat-jefaturas"] = MANAGE  # as an earlier release declared it
+        self.suite.sub_admins["ana"] = {"all-staff"}
+        self.upgraded()
+        self.assertEqual(self.grants(), UNITS_AND_INTRANET)
+        self.assertEqual(self.suite.sub_admins, POSITION_ADMINS)
+        self.grants()["Unidades/Dirección"]["role-jefe-some"] = 1  # an administrator's grant after that «Listo»,
+        self.upgraded()  # which the next upgrade keeps
+        self.assertEqual(self.grants()["Unidades/Dirección"], {**DIRECTORATE, "role-jefe-some": 1})
+
+    def test_an_upgrade_withdraws_what_the_record_lists_and_the_release_no_longer_declares(self):
+        self.installed()
+        path = self.state / steps.RECORD
+        record = json.loads(path.read_text(encoding="utf-8"))  # as an earlier release kept it, which also
+        record[folders.KIND]["Unidades/Dirección"].append("cat-jefaturas")  # gave the Jefaturas Dirección
+        record[cargo_accounts.KIND]["jefe.some"].append("all-staff")  # and made jefe.some admin of «Todo el personal»
+        path.write_text(json.dumps(record), encoding="utf-8")
+        self.grants()["Unidades/Dirección"].update({"cat-jefaturas": MANAGE, "role-jefe-some": 1})  # and, after
+        self.suite.sub_admins["jefe.some"] |= {"all-staff", "cat-administrativos"}  # «Listo», administrators the latter
+        self.upgraded()
+        self.assertEqual(self.grants()["Unidades/Dirección"], {**DIRECTORATE, "role-jefe-some": 1})
+        self.assertEqual(self.suite.sub_admins["jefe.some"], {"staff-recovery", "cat-administrativos"})
+
     def test_an_install_still_under_way_is_left_to_resume_not_reconciled(self):
         self.claim()
         self.suite.release.clear()  # the install never reaches «Listo»
@@ -1326,6 +1387,12 @@ FOLDERS = {"Sectores/Sector Norte": STAFF, "Sectores/Sector Sur": STAFF, "Progra
            "Unidades/Dental": STAFF, "Unidades/OIRS": STAFF, "Unidades/Estadística-REM": STAFF,
            "Unidades/Dirección": DIRECTORATE, "Unidades/Subdirección": DIRECTORATE,
            "Intranet": {**STAFF, "admin": MANAGE}}  # IntraVox reaches it as Nextcloud's admin
+# The group admins an install without teams makes: the positions' cargo accounts.
+POSITION_ADMINS = {"director": {"all-staff"}, "subdirector": {"all-staff"}, "jefe.farmacia": {"staff-recovery"},
+                   "jefe.some": {"staff-recovery"}}
+# The group folders an install without teams makes: FOLDERS but the teams' own.
+UNITS_AND_INTRANET = {mount: groups for mount, groups in FOLDERS.items()
+                      if not mount.startswith(("Sectores/", "Programas/"))}
 FOLDERS_STEP = "Carpetas de equipo y permisos"
 WELCOME_STEP = "Página de bienvenida"
 
