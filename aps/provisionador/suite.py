@@ -210,7 +210,7 @@ if ($in['kept']) {  // a remote repository already in place: marked as backupscr
 
 # AIO's backup encryption password, made as AIO makes it for its borg container when it has none yet: before
 # «Instalar» AIO has created no container, so the other computer's test makes it, and AIO's first backup uses it.
-BACKUP_PASSWORD = r"""
+BACKUP_ENCRYPTION = r"""
 ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
 echo \AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class)
@@ -899,7 +899,7 @@ class Suite:
         the folder takes it. Whether AIO's repository is in place: one that opens, or the one made when the computer
         keeps it whole, as an append-only hosting account does. The destination is not written in AIO: `back_up` sets
         and marks it. Unreachable, with why, when the computer does not take it."""
-        passphrase = self.mastercontainer("php", "-r", BACKUP_PASSWORD)
+        passphrase = self.mastercontainer("php", "-r", BACKUP_ENCRYPTION)
         env = {"BORG_REPO": repo, "BORG_PASSPHRASE": passphrase,
                "BORG_RSH": f"ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 "
                            f"-i {BORG_KEY}"}
