@@ -64,12 +64,12 @@ jobs:
           df -h /
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/share/swift
           df -h /
-      - name: Install the VM tools, DNS and NSS tools and the browser driver (Playwright with Chromium)
+      - name: Install the VM tools, DNS and NSS tools, the backup's SSH and Borg target and the browser driver (Playwright with Chromium)
         run: |
           aps/release/ubuntu-mirrors.sh
           sudo apt-get -qq update
           sudo apt-get -qq install -y qemu-system-x86 qemu-utils cloud-image-utils dnsmasq-base python3-venv \
-            bind9-dnsutils libnss3-tools > /dev/null
+            bind9-dnsutils libnss3-tools borgbackup openssh-server > /dev/null
           python3 -m venv "$RUNNER_TEMP/browser"
           "$RUNNER_TEMP/browser/bin/pip" install --quiet playwright==1.64.1
           "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium > /dev/null

@@ -50,6 +50,7 @@ import runner
 import spreadsheet
 import teams
 from steps import apps, components, local_ai, passwords, people
+from steps import backups as steps_backups
 from suite import Suite, Taken, Unreachable
 
 HERE = Path(__file__).resolve().parent
@@ -81,7 +82,8 @@ TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
 DISK_GONE = "Ese disco ya no está en el servidor. Vuelva a abrir «Almacenamiento» para ver sus discos de ahora."
 NOT_FOR_FILES = "Ese disco no puede guardar los archivos del personal: {}."
 FILES_KEPT = "El disco de los archivos del personal ya no puede cambiarse: se presionó «Instalar»."
-NOT_A_DESTINATION = "Indique dónde se guarda la copia de seguridad: la carpeta de copias de este servidor o un disco."
+NOT_A_DESTINATION = ("Indique dónde se guarda la copia de seguridad: la carpeta de copias de este servidor, un disco u otro "
+                     "computador.")
 NOT_FOR_BACKUP = "Ese lugar no puede guardar la copia de seguridad: {}."
 BACKUP_KEPT = ("La instalación ya terminó: el destino de la copia de seguridad ahora se cambia en la página de AIO, como "
                "explica el manual.")
@@ -355,19 +357,36 @@ class Provisionador:
         /api/state's, which the progress polls: reading the free space of a disk that isn't mounted mounts it read-only
         for a moment."""
         state = self.state.read()
-        return 200, disks.shown(self.suite.disks(), *stored(state), "install" in state)
+        return 200, self.storage(self.suite.disks(), *stored(state), "install" in state)
+
+    def storage(self, listed, files, backups, installed):
+        """GET /api/storage's answer, with AIO's public key for remote backups when the backup goes to another
+        computer."""
+        found = disks.shown(listed, files, backups, installed)
+        return {**found, "ssh_key": self.suite.ssh_key() if "ssh" in (found["backups"] or {}) else None}
 
     def post_storage(self, query, body):
-        """POST /api/storage {"files": id, "backups": {"disk": id} | {"folder": true}}, either or both: the files disk and
-        the backup destination, each where «Almacenamiento» offers it beside the other. The files disk stays once
-        «Instalar» was pressed: the one stored, or the system disk on a server installed before «Almacenamiento». The
-        backup destination may change until «Listo», though not while the steps run; a change after «Instalar» runs
-        «Almacenamiento» and «Copias de seguridad» again, then the end-of-install check. The answer is GET's, from the
-        same reading of the disks."""
+        """POST /api/storage {"files": id, "backups": {"disk": id} | {"folder": true} | {"ssh": {host, port, user,
+        folder}}}, either or both: the files disk and the backup destination, each where «Almacenamiento» offers it
+        beside the other. The files disk stays once «Instalar» was pressed: the one stored, or the system disk on a
+        server installed before «Almacenamiento». Another computer is tested at once, with AIO's key, which is made
+        first when AIO has none; a refusal carries its public half. The backup destination may change until «Listo»,
+        though not while the steps run; a change after «Instalar» runs «Almacenamiento» and «Copias de seguridad»
+        again, then the end-of-install check. The answer is GET's, from the same reading of the disks."""
         backups = body.get("backups")
         if "backups" in body and backups != {"folder": True} and not (
-                isinstance(backups, dict) and list(backups) == ["disk"] and isinstance(backups["disk"], str)):
+                isinstance(backups, dict) and len(backups) == 1 and (isinstance(backups.get("disk"), str) or "ssh" in backups)):
             return 400, {"error": NOT_A_DESTINATION}
+        if "ssh" in (backups or {}):
+            try:
+                repo = steps_backups.remote(backups["ssh"])
+            except ValueError as refused:
+                return 400, {"error": str(refused)}
+            key = self.suite.ssh_key()
+            try:
+                self.suite.reachable(repo)
+            except Unreachable as failure:
+                return 400, {"error": str(failure), "key": key}
         listed = self.suite.disks()
         with self.install_lock:
             busy, state = self.snapshot()
@@ -376,8 +395,9 @@ class Provisionador:
             found = disks.shown(listed, files, backups, installed)
             by_id = {disk["id"]: disk for disk in found["disks"]}
             chosen = [("files", files, NOT_FOR_FILES)] if "files" in body else []
-            if "backups" in body:
-                place = backups.get("disk") or next(disk["id"] for disk in found["disks"] if disk["system"])
+            place = None if "ssh" in (backups or {}) else (backups or {}).get("disk") or next(
+                disk["id"] for disk in found["disks"] if disk["system"])
+            if "backups" in body and place:
                 chosen.append(("backups", place, NOT_FOR_BACKUP))
             for part, disk_id, refused in chosen:
                 if disk_id not in by_id:
@@ -385,8 +405,8 @@ class Provisionador:
                 if not by_id[disk_id][part]:
                     return 400, {"error": refused.format(by_id[disk_id]["reasons"][part])}
             moved = installed and backups != held
-            if moved and by_id[place]["free"] < disks.FLOORS["backup"]:  # the floors are off once installed, but
-                return 400, {"error": NOT_FOR_BACKUP.format(disks.NO_ROOM)}  # a new destination needs a backup's room
+            if moved and place and by_id[place]["free"] < disks.FLOORS["backup"]:  # the floors are off once installed,
+                return 400, {"error": NOT_FOR_BACKUP.format(disks.NO_ROOM)}  # but a new disk needs a backup's room
             if installed and "files" in body and files != disks.shown(listed, stored_files(state), held, True)["files"]:
                 return 409, {"error": FILES_KEPT}
             if moved and state["install"].get("listo"):
@@ -401,7 +421,7 @@ class Provisionador:
                     runner.add_line(s["install"], BACKUP_LINE)
             if moved:
                 self.run_install()
-        return 200, found
+        return 200, self.storage(listed, files, backups, installed)
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and

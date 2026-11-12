@@ -126,6 +126,20 @@
       <ul class="progress" id="storage-files" aria-label="Discos para los archivos del personal"></ul>
       <h2>Copias de seguridad</h2>
       <ul class="progress" id="storage-backups" aria-label="Destinos de la copia de seguridad"></ul>
+      <fieldset class="remote" id="storage-ssh" hidden>
+        <legend>Otro computador (SSH)</legend>
+        <div class="filters">
+          <label>Nombre o dirección<input id="ssh-host" autocomplete="off" placeholder="Por ejemplo: copias.municipio.cl"></label>
+          <label>Puerto<input id="ssh-port" type="number" min="1" max="65535" value="22"></label>
+          <label>Usuario<input id="ssh-user" autocomplete="off"></label>
+          <label>Carpeta<input id="ssh-folder" autocomplete="off" placeholder="Por ejemplo: /srv/copias/aps-conecta"></label>
+        </div>
+        <p class="muted" id="ssh-key-note" hidden>Agregue esta clave pública de AIO a ~/.ssh/authorized_keys del usuario
+          en el otro computador; un servicio de copias con Borg la pide al crear el repositorio:</p>
+        <code id="ssh-key"></code>
+        <div class="actions"><button type="button" id="ssh-test">Probar la conexión</button></div>
+        <p class="message" id="ssh-status" role="status"></p>
+      </fieldset>
       <p class="message error" id="storage-warning" hidden></p>
       <p class="message" id="storage-status" role="status"></p>
       <div class="actions"><button type="button" class="primary" id="storage-continue">Continuar</button></div>
