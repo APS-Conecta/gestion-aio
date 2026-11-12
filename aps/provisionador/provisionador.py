@@ -81,6 +81,8 @@ TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
 DISK_GONE = "Ese disco ya no está en el servidor. Vuelva a abrir «Almacenamiento» para ver sus discos de ahora."
 NOT_FOR_FILES = "Ese disco no puede guardar los archivos del personal: {}."
 FILES_KEPT = "El disco de los archivos del personal ya no puede cambiarse: se presionó «Instalar»."
+NO_FILES_DISK = ("Ningún disco del servidor tiene espacio suficiente para los archivos del personal. Libere espacio o "
+                 "conecte otro disco y vuelva a abrir «Almacenamiento».")
 NOT_SPREADSHEET = ("Suba la planilla del personal como libro de Excel (.xlsx), con su hoja «Personal», o como CSV "
                    "delimitado por «;».")
 PEOPLE_KEPT = "La instalación terminó: el personal se administra ahora en «Cuentas», en APS Conecta Gestión."
@@ -344,8 +346,8 @@ class Provisionador:
         """POST /api/storage {"files": id}: the files disk, one «Almacenamiento» offers for the staff's files. Once
         «Instalar» was pressed it stays: the one stored, or the system disk on a server installed before
         «Almacenamiento». The answer is GET's, from the same reading of the disks."""
-        files, listed = body.get("files"), self.suite.disks()
-        found = next((disk for disk in disks.shown(listed)["disks"] if disk["id"] == files), None)
+        files, listed, installed = body.get("files"), self.suite.disks(), "install" in self.state.read()
+        found = next((disk for disk in disks.shown(listed, installed=installed)["disks"] if disk["id"] == files), None)
         if found is None:
             return 400, {"error": DISK_GONE}
         if not found["files"]:
@@ -458,8 +460,8 @@ class Provisionador:
     def post_install(self, query, body):
         """POST /api/install {"optional": [ids]}, «Instalar» and «Reintentar»: the steps not green yet run in the
         background and GET /api/state shows their progress. The optional apps ticked on «Revisar» are those of the first
-        «Instalar». Both wait for a spreadsheet that loads people. While the steps run, or at «Listo», pressing it again
-        starts nothing more."""
+        «Instalar», which keeps the files disk «Revisar» showed and waits for one with room. Both wait for a spreadsheet
+        that loads people. While the steps run, or at «Listo», pressing it again starts nothing more."""
         optional = body.get("optional", [])
         if not (isinstance(optional, list) and all(isinstance(app, str) and app in apps.OPTIONAL for app in optional)):
             return 400, {"error": NOT_OFFERED}
@@ -469,11 +471,15 @@ class Provisionador:
                 return 409, {"error": NO_ADDRESS}
             if not plan(state)["people"]:
                 return 409, {"error": PEOPLE_WRONG if plan(state)["errors"] else NO_PEOPLE}
+            first = not state.get("install")
+            files = stored_files(state) or (disks.shown(self.suite.disks())["files"] if first else None)
+            if first and not files:
+                return 409, {"error": NO_FILES_DISK}
             if not (busy or state.get("install", {}).get("listo")):
-                if not state.get("install"):
+                if first:
                     with self.state.change() as s:
                         s["optional"] = sorted(set(optional))
-                        s.setdefault("storage", {}).setdefault("files", disks.shown(self.suite.disks())["files"])
+                        s.setdefault("storage", {})["files"] = files
                 runner.begin(self.state)
                 self.run_install()
         return 202, {"install": self.progress(*self.snapshot())}

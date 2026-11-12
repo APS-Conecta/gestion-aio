@@ -5,11 +5,20 @@ The staff's files go to the disk with the most free space unless the operator ch
 the operator chooses, and is chosen already only where the backup folder is the one place it may go. The suite port
 reads the disks; this module only decides.
 
-The system disk, the one holding Docker's storage, always may hold both, as it does on every server today: the files in
-AIO's own volume, the backup in the backup folder. Any other disk must carry a filesystem whose owners and permissions
-AIO's containers keep, and a USB disk holds backups only, so that an unplugged cable never stops the suite."""
+The system disk, the one holding Docker's storage, may hold both, as it does on every server today: the files in AIO's
+own volume, the backup in the backup folder. Any other disk must carry a filesystem whose owners and permissions AIO's
+containers keep, and a USB disk holds backups only, so that an unplugged cable never stops the suite. Each disk holds a
+role only with room for it, the bootstrap's floors: another disk the install's own files' or a first backup's, the
+system disk the program's besides them, and besides the backup's too when it holds the files and the backup has nowhere
+else to go."""
+
+import re
+from pathlib import Path
 
 from steps.backups import BACKUP_FOLDER
+
+# The floors' one source, the bootstrap, which the bundle carries beside the Provisionador for this.
+BOOTSTRAP = Path(__file__).resolve().parent.parent / "bootstrap" / "install.sh"
 
 LINUX = {"ext4", "xfs", "btrfs"}
 WINDOWS = {"ntfs", "exfat", "vfat"}
@@ -18,6 +27,19 @@ WINDOWS_FORMAT = "formato de Windows"
 OTHER_FORMAT = "formato {}, no compatible"
 FREE_UNREAD = "no se pudo leer su espacio libre"
 USB_BACKUPS_ONLY = "disco USB: solo para copias"
+NO_ROOM = "sin espacio suficiente"
+
+
+def floors():
+    """The room in bytes the bootstrap requires: the program's on the system disk, the install's own files' and a
+    first backup's."""
+    script = BOOTSTRAP.read_text(encoding="utf-8")
+    return {role: int(re.search(rf"^{variable}=(\d+)$", script, re.M)[1]) * 10 ** 9
+            for role, variable in (("program", "MIN_PROGRAM_GB"), ("files", "MIN_FILES_GB"),
+                                   ("backup", "MIN_BACKUP_GB"))}
+
+
+FLOORS = floors()
 
 
 def roles(disk):
@@ -38,6 +60,12 @@ def roles(disk):
     return True, True, None
 
 
+def limit(disk, role, need):
+    """The disk keeps the role only with `need` bytes free; without them it no longer holds it, for lack of room."""
+    if disk[role] and disk["free"] < need:
+        disk[role], disk["reason"] = False, NO_ROOM
+
+
 def most_free(disks):
     """The disk with the most free space; on a tie the first, the system disk coming first."""
     return max(disks, key=lambda disk: disk["free"], default=None)
@@ -45,15 +73,26 @@ def most_free(disks):
 
 def shown(disks, files=None, installed=False):
     """«Almacenamiento» as GET /api/storage answers it: each disk with its roles, then the files disk and the backup
-    destination. The files disk is the one the operator chose, by its id; with none chosen, the system disk once
-    «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files are, and before it,
-    the disk with the most free space that may hold them. The backup destination is the backup folder when no other
-    disk may hold the backup, otherwise None, for the operator to choose."""
+    destination. Until «Instalar», each disk holds a role only with room for it; from then on the suite already takes
+    its room, and the floors no longer apply. The files disk is the one the operator chose, by its id; with none chosen,
+    the system disk once «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files
+    are, and before it, the disk with the most free space that may hold them, or None when no disk has room for them.
+    The backup destination is the backup folder when no other disk may hold the backup and the system disk may,
+    otherwise None, for the operator to choose."""
     listed = [{**disk, **dict(zip(("files", "backups", "reason"), roles(disk)))} for disk in disks]
+    system = next(disk for disk in listed if disk["system"])
+    floors = dict.fromkeys(FLOORS, 0) if installed else FLOORS
+    for disk in listed:
+        if disk is not system:
+            limit(disk, "files", floors["files"])
+            limit(disk, "backups", floors["backup"])
+    alone = not any(disk["backups"] for disk in listed if disk is not system)
+    limit(system, "files", floors["program"] + floors["files"] + (floors["backup"] if alone else 0))
     if not files:
-        files = (next(disk for disk in listed if disk["system"]) if installed
-                 else most_free([disk for disk in listed if disk["files"]]))["id"]
-    on_system = any(disk["id"] == files and disk["system"] for disk in listed)
-    alone = not any(disk["backups"] for disk in listed if not disk["system"])
-    return {"disks": listed, "files": files, "files_locked": installed, "backups": {"folder": True} if alone else None,
-            "folder": BACKUP_FOLDER, "same_disk": alone and on_system}
+        found = system if installed else most_free([disk for disk in listed if disk["files"]])
+        files = found and found["id"]
+    on_system = files == system["id"]
+    limit(system, "backups", floors["program"] + floors["backup"] + (floors["files"] if on_system else 0))
+    backups = {"folder": True} if alone and system["backups"] else None
+    return {"disks": listed, "files": files, "files_locked": installed, "backups": backups, "folder": BACKUP_FOLDER,
+            "same_disk": bool(backups) and on_system}
