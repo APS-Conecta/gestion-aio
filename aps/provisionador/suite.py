@@ -64,6 +64,8 @@ REFUSED = "El servicio de nombres de APS Conecta rechazó la solicitud (HTTP {co
 SUITE_DOWN = "El contenedor maestro de la suite no responde. Revise que Docker esté en marcha y presione «Reintentar»."
 MOUNT_FAILED = ("No se pudo montar el disco {} en {}. Revise que siga conectado y presione «Reintentar»; si vuelve a "
                 "ocurrir, contacte a APS Conecta.")
+UNWRITABLE = ("No se pudo escribir en {}, el destino de la copia de seguridad. Revise que el disco esté conectado y "
+              "presione «Reintentar», o elija otro destino en «Almacenamiento».")
 FILES_FAILED = ("No se pudo preparar la carpeta {} para los archivos del personal. Presione «Reintentar»; si vuelve a "
                 "ocurrir, contacte a APS Conecta.")
 SUITE_REFUSED = ("El contenedor maestro de la suite rechazó la instalación (HTTP {code}). Presione «Reintentar»; si "
@@ -95,6 +97,7 @@ MASTERCONTAINER = "nextcloud-aio-mastercontainer"
 NEXTCLOUD = "nextcloud-aio-nextcloud"
 DOWN = {MASTERCONTAINER: SUITE_DOWN, NEXTCLOUD: NEXTCLOUD_DOWN}
 AIO_CONFIG = "/mnt/docker-aio-config/data/configuration.json"  # AIO's settings, its passphrase among them
+AIO_BACKUP_TIME = "/mnt/docker-aio-config/data/daily_backup_time"  # the nightly backup's time, then its switches
 AIO_AUTHORITY = "/mnt/docker-aio-config/caddy-internal/pki/authorities/local/root.crt"  # signs AIO's page certificate
 OFFICE_SUITES = {"collabora", "onlyoffice", "eurooffice"}  # AIO's office suites, one choice among them
 OLLAMA = "nextcloud-aio-ollama"  # «IA local»'s container, as community-containers/ollama names it
@@ -161,6 +164,15 @@ $config->setDomain($in['domain'], true);
 # on, it joins AIO's community containers with AIO's NVIDIA switch as the GPU found asks and its memory cap among AIO's
 # secrets, and AIO's own code recreates and starts it, as AIO's start does; off, it stops, AIO removes it, keeping its
 # volume, and it leaves the list. AIO's start, every night too, then starts it with the suite only while it is listed.
+# AIO's backup destination and time, set as its page sets them (ConfigurationController), from stdin's JSON.
+BACK_UP = r"""
+ini_set('display_errors', 'stderr');
+require '/var/www/docker-aio/php/vendor/autoload.php';
+$config = \AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class);
+$in = json_decode(stream_get_contents(STDIN), true, 4, JSON_THROW_ON_ERROR);
+$config->setBorgLocationVars($in['folder'], '');
+$config->setDailyBackupTime($in['time'], true, true);
+"""
 SWITCH_OLLAMA = r"""
 ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
@@ -665,9 +677,9 @@ class Suite:
         """Each filesystem of this server's disks: whole disks, partitions, LVM volumes and software RAID, skipping
         loop, RAM and optical devices, swap, the boot partitions and anything under 1 GB; a disk or partition with no
         filesystem is listed too, unformatted. Each with its filesystem's UUID as its id (its device when it has none),
-        its device, model, size and free space in bytes, its filesystem, whether it is the system disk, whether it hangs
-        off USB or is removable, where it is mounted and whether that mount comes back at boot. The system disk comes
-        first. The free space of a Linux filesystem nobody has mounted is read through a read-only mount in a temporary
+        its device, the drive it is on (the whole disk at the top of lsblk's tree, for one drive is one disk), model,
+        size and free space in bytes, its filesystem, whether it is the system disk, whether it hangs off USB or is
+        removable, where it is mounted and whether that mount comes back at boot. The system disk comes first. The free space of a Linux filesystem nobody has mounted is read through a read-only mount in a temporary
         folder, unmounted at once; None when that mount fails."""
         target = next(path for path in DOCKER_STORAGE if os.path.isdir(path))
         system = json.loads(subprocess.run(["findmnt", "--json", "--output", "SOURCE,TARGET,FSTYPE,UUID", "--target",
@@ -683,21 +695,22 @@ class Suite:
                                capture_output=True, text=True, timeout=30, check=False).stdout
         boot = [entry for entry in json.loads(fstab or '{"filesystems": []}')["filesystems"]
                 if "noauto" not in (entry.get("options") or "").split(",")]
-        found = {source: {"id": system.get("uuid") or source, "device": source, "model": "", **space(system["target"]),
-                          "filesystem": system.get("fstype"), "system": True, "usb": False, "mounted": system["target"],
-                          "at_boot": True}}
+        found = {source: {"id": system.get("uuid") or source, "device": source, "drive": source, "model": "",
+                          **space(system["target"]), "filesystem": system.get("fstype"), "system": True, "usb": False,
+                          "mounted": system["target"], "at_boot": True}}
 
-        def walk(devices, usb, model):
+        def walk(devices, usb, model, drive):
             for device in devices:
                 on_usb = usb or device.get("tran") == "usb" or device.get("rm") in (True, "1")
                 named = (device.get("model") or model or "").strip()
+                on = drive or device["path"]
                 children = device.get("children") or []
-                walk(children, on_usb, named)
+                walk(children, on_usb, named, on)
                 path, filesystem, uuid = device["path"], device.get("fstype"), device.get("uuid")
                 mounted = device.get("mountpoint")
                 size = int(device.get("size") or 0)
                 if path == source:  # the system disk, read through Docker's storage, gets lsblk's model and transport
-                    found[source].update(model=named, usb=on_usb)
+                    found[source].update(model=named, usb=on_usb, drive=on)
                     continue
                 if (path in found or device["type"] in ("loop", "rom", "ram") or path.startswith("/dev/zram")
                         or filesystem in NOT_FILESYSTEMS or mounted in BOOT or size < SMALLEST_DISK
@@ -705,11 +718,11 @@ class Suite:
                     continue
                 at_boot = any(entry["source"] == path or (mounted and entry["target"] == mounted) for entry in boot)
                 free = (space(mounted)["free"] if mounted else unmounted_free(path, filesystem))
-                found[path] = {"id": uuid or path, "device": path, "model": named, "size": size,
+                found[path] = {"id": uuid or path, "device": path, "drive": on, "model": named, "size": size,
                                "free": free, "filesystem": filesystem, "system": False, "usb": on_usb,
                                "mounted": mounted, "at_boot": at_boot}
 
-        walk(listed["blockdevices"], False, "")
+        walk(listed["blockdevices"], False, "", None)
         return list(found.values())
 
     @staticmethod
@@ -808,10 +821,29 @@ class Suite:
         """AIO's own backup to the folder on this server, daily at the time (UTC), with its success notification and
         its automatic updates on: AIO's nightly job then restarts the containers on the pins the release holds and
         updates the store's apps (own and fork apps stay above the store's versions, and our timer runs them nightly
-        anyway), so security fixes reach the suite between releases."""
-        self._signed_in().post("/api/configuration", {"borg_backup_host_location": folder, "borg_remote_repo": "",
-                                                      "daily_backup_time": time, "success_notification": "on",
-                                                      "automatic_updates": "on"})
+        anyway), so security fixes reach the suite between releases. Set through AIO's own code in its mastercontainer,
+        the same calls its page makes, so a destination changed once the suite runs, when the page's login is closed,
+        reaches AIO too."""
+        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"folder": folder, "time": time}))
+
+    def backup_settings(self):
+        """Where AIO's nightly backup goes and at what time (UTC), as AIO holds them."""
+        location = json.loads(self.mastercontainer("cat", AIO_CONFIG)).get("borg_backup_host_location")
+        time = self.mastercontainer("cat", AIO_BACKUP_TIME).splitlines()
+        return location, time[0] if time else None
+
+    @staticmethod
+    def writable(folder):
+        """The backup destination takes a file: the folder made if missing, a test file written there and removed at
+        once. A missing disk's empty mount point is immutable, so nothing is made in its place."""
+        test = Path(folder) / ".aps-conecta-prueba"
+        try:
+            os.makedirs(folder, exist_ok=True)
+            test.write_text("APS Conecta Gestión\n", encoding="utf-8")
+            test.unlink()
+        except OSError as error:
+            print(f"backup destination {folder}: {error}", file=sys.stderr)
+            raise Unreachable(UNWRITABLE.format(folder)) from error
 
     def start(self, downloading):
         """AIO's start button: it pulls, creates and starts every container in order, and answers once it is done. As
@@ -881,9 +913,9 @@ class FakeSuite:
     BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
     # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
-    SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "model": "", "size": 60 * 10 ** 9,
-                   "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True, "usb": False, "mounted": "/",
-                   "at_boot": True}
+    SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda", "model": "",
+                   "size": 60 * 10 ** 9, "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True, "usb": False,
+                   "mounted": "/", "at_boot": True}
 
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
@@ -916,6 +948,8 @@ class FakeSuite:
         self.pulls = []  # each model Ollama was asked to pull, in turn
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
+        self.unwritable = set()  # backup destinations a file cannot be written to
+        self.tested = []  # each backup destination a test file was written to, in turn
         self.automatic_updates = None  # whether AIO's nightly update job is on, as the backups step sets it
         self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
         self.starts = 0  # how often AIO's start button was pressed
@@ -1043,8 +1077,17 @@ class FakeSuite:
         self.switched = set(components)
 
     def back_up(self, folder, time):
-        self._signed_in()
+        self._outage_guard()
         self.backup, self.automatic_updates = (folder, time), True
+
+    def backup_settings(self):
+        self._outage_guard()
+        return self.backup
+
+    def writable(self, folder):
+        if folder in self.unwritable:
+            raise Unreachable(UNWRITABLE.format(folder))
+        self.tested.append(folder)
 
     def start(self, downloading):
         """AIO's start answers once every container it started runs. Its answer streams as AIO's does: each container
