@@ -14,7 +14,6 @@ destination (run.sh's KEPT, as they stood before the upgrade), the passwords fil
 closes."""
 
 import json
-
 import os
 import subprocess
 import sys
@@ -58,7 +57,7 @@ def reload_people(page, state, backup):
         page.screenshot(path=evidence / "equipos.png")
     page.click("#teams-continue")
     expect(page.get_by_role("heading", name="Almacenamiento")).to_be_visible()
-    expect(page.locator("#storage-status")).to_contain_text(f"Cada noche, en {backup}, donde AIO la guarda.")
+    expect(page.locator("#storage-status")).to_contain_text(f"copia de seguridad de cada noche en {backup}, donde AIO")
     expect(page.locator("#storage-backups input:enabled")).to_have_count(0)
     page.screenshot(path=evidence / "almacenamiento.png")
     page.click("#storage-continue")

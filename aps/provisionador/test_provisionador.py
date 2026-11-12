@@ -1496,12 +1496,13 @@ class UpgradeTest(InstallTest):
     def upgrade(self, version="v1.1.0"):
         return provisionador.upgrade(self.suite, provisionador.State(self.state), version)
 
-    def installed(self, files=None):
+    def installed(self, files=None, backups=None):
         """A finished, closed install, as the server holds it once the wizard ended: the Provisionador is stopped. With
-        `files`, the staff's files went to that disk, by its id, and the backup to the backup folder."""
+        `files`, the staff's files went to that disk, by its id, and the backup to `backups`, the backup folder unless
+        given."""
         self.claim()
         if files:
-            self.assertEqual(self.choose(files, {"folder": True})[0], 200)
+            self.assertEqual(self.choose(files, backups or {"folder": True})[0], 200)
         self.assertEqual(self.install()[0], 202)
         self.until("done")
         self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
@@ -3642,37 +3643,53 @@ class FilesDiskUpgrade(UpgradeTest):
 class BackupUpgrade(UpgradeTest):
     """An upgrade keeps where AIO's nightly backup goes, as AIO holds it now: after «Listo» AIO's page owns the
     destination, which an administrator may have changed there. The upgrade sets only the time, the success
-    notification and the automatic updates, and AIO's repository stays."""
+    notification and the automatic updates: it neither tests nor mounts that destination, and AIO's repository stays."""
+
+    SSH = "ssh://copias@nas.cesfam.local:2222/volume1/aio"
 
     def changed_on_aios_page(self, destination):
         """After «Listo», an administrator moved the backup on AIO's page, and AIO's backup ran there once."""
         self.suite.backup, self.suite.repository = (destination, "03:30"), destination
 
-    def test_a_destination_changed_on_aios_page_to_another_folder_is_kept(self):
+    def test_a_destination_changed_on_aios_page_to_another_folder_is_kept_untested(self):
         self.installed()
         self.changed_on_aios_page("/mnt/usb/copias-aio")
+        self.suite.unwritable.add("/mnt/usb/copias-aio")  # its disk is not plugged in while the upgrade runs
         self.upgraded()
         self.assertEqual((self.suite.backup, self.suite.repository),
                          (("/mnt/usb/copias-aio", "06:00"), "/mnt/usb/copias-aio"))
-        self.assertEqual(self.suite.tested[-1], "/mnt/usb/copias-aio")
-
-    def test_a_destination_changed_on_aios_page_to_another_computer_is_kept(self):
-        self.installed()
-        self.changed_on_aios_page("ssh://copias@nas.cesfam.local:2222/volume1/aio")
-        self.upgraded()
-        self.assertEqual((self.suite.backup, self.suite.repository),
-                         (("ssh://copias@nas.cesfam.local:2222/volume1/aio", "06:00"),
-                          "ssh://copias@nas.cesfam.local:2222/volume1/aio"))
-        self.assertEqual(self.suite.tested[-1], "ssh://copias@nas.cesfam.local:2222/volume1/aio")
-        self.assertIn("Copia de seguridad: nas.cesfam.local responde por SSH con Borg.",
+        self.assertNotIn("/mnt/usb/copias-aio", self.suite.tested)
+        self.assertIn("Copia de seguridad: sigue en /mnt/usb/copias-aio, donde AIO la guarda.",
                       self.texts(provisionador.State(self.state).read()["install"]))
 
-    def test_the_reopened_wizard_shows_aios_destination_and_leaves_it_to_aios_page(self):
+    def test_a_destination_changed_on_aios_page_to_another_computer_is_kept_untested(self):
         self.installed()
-        self.changed_on_aios_page("/mnt/usb/copias-aio")
+        self.changed_on_aios_page(self.SSH)
+        self.suite.remote_answer = "unreachable"  # the other computer is off while the upgrade runs
+        self.upgraded()
+        self.assertEqual((self.suite.backup, self.suite.repository), ((self.SSH, "06:00"), self.SSH))
+        self.assertNotIn(self.SSH, self.suite.tested)
+
+    def test_a_backup_disk_replaced_on_aios_page_and_unplugged_no_longer_holds_up_the_upgrade(self):
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.installed(FakeSuite.SYSTEM_DISK["id"], {"disk": "usb"})
+        self.changed_on_aios_page("/srv/copias-aio")
+        self.suite.found_disks.pop()  # the install's backup disk, unplugged
+        self.upgraded()
+        self.assertEqual((self.suite.mounts, self.suite.backup),
+                         ([("usb", "/mnt/aps-conecta/usb")], ("/srv/copias-aio", "06:00")))
+
+    def reopened(self):
+        """The upgrade, its Provisionador restarted and the operator's browser on the reopened wizard."""
         self.assertIsNone(self.upgrade())
         self.start()
         self.browser = self.operator()
+
+    def test_the_reopened_wizard_shows_aios_destination_and_leaves_it_to_aios_page(self):
+        self.suite.found_disks.append(disk("usb", usb=True, mounted="/mnt/usb", at_boot=True))
+        self.installed(FakeSuite.SYSTEM_DISK["id"])
+        self.changed_on_aios_page("/mnt/usb/copias-aio")
+        self.reopened()
         storage = self.browser.get("/api/storage")[1]
         self.assertEqual((storage["backups"], storage["backups_locked"], storage["same_disk"]),
                          ({"kept": "/mnt/usb/copias-aio"}, True, False))
@@ -3682,6 +3699,14 @@ class BackupUpgrade(UpgradeTest):
         self.until("done")
         self.assertEqual(self.suite.backup, ("/mnt/usb/copias-aio", "06:00"))
 
+    def test_a_one_disk_server_s_kept_backup_still_warns_that_it_shares_the_files_disk(self):
+        self.installed()
+        with provisionador.State(self.state).change() as held:
+            held.pop("storage", None)  # installed before «Almacenamiento»
+        self.reopened()
+        storage = self.browser.get("/api/storage")[1]
+        self.assertEqual((storage["backups"], storage["same_disk"]), ({"kept": "/var/backups/aps-conecta"}, True))
+        self.until("done")
 
 if __name__ == "__main__":
     unittest.main()

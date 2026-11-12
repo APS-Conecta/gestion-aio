@@ -5,7 +5,8 @@ backup goes to one. Before AIO first creates Nextcloud's container, each chosen 
 /mnt/aps-conecta/<uuid> (a disk already mounted at boot keeps its mount point) and AIO keeps the staff's files in the
 files disk's aps-conecta/archivos folder: its NEXTCLOUD_DATADIR, which the bootstrap's mastercontainer start passes from
 then on. Files on the system disk, and an install that stored no files disk, stay in AIO's own volume. Nothing is
-formatted, partitioned or deleted."""
+formatted, partitioned or deleted. At an upgrade only the files disk counts: after «Listo» the backup destination is
+AIO's page's, which may have moved it off the backup disk."""
 
 from suite import MOUNTS, OWN_VOLUME
 
@@ -52,14 +53,14 @@ def disk_name(disk):
 
 
 def chosen_disks(context):
-    """The files disk and the backup disk, each None when not on a disk of its own; raises LookupError naming GONE or
-    BACKUP_GONE when one is gone."""
+    """The files disk and the backup disk, each None when not on a disk of its own, the backup disk always at an
+    upgrade; raises LookupError naming GONE or BACKUP_GONE when one is gone."""
     try:
         files = files_disk(context)
     except LookupError as gone:
         raise LookupError(GONE) from gone
     try:
-        return files, backup_disk(context)
+        return files, None if context.upgrade else backup_disk(context)
     except LookupError as gone:
         raise LookupError(BACKUP_GONE) from gone
 

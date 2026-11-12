@@ -26,7 +26,8 @@ as «Equipos» declares them now, and `log(text)` adds our own Spanish line, nev
 to the install's log. A new step is a new module: no other file lists the steps.
 A step that configures an app gets it through `steps.apps.ensure`
 rather than NEEDS "apps". A step that sets what administrators may change after «Listo» answers its check through
-`record`, which keeps what the step set once the check is clean, and asks `kept` what an upgrade leaves of the rest.
+`record`, which keeps what the step set once the check is clean, and asks `kept` what an upgrade leaves of the rest;
+a step whose one setting AIO's page owns after «Listo» reads it from the suite at an upgrade instead.
 """
 
 import json

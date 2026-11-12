@@ -67,6 +67,13 @@ def limit(disk, part, need):
         disk["reasons"][part] = NO_ROOM
 
 
+def holder(disks, folder):
+    """The drive of the disk a folder on this server lies on, the one mounted deepest above it; None for a remote
+    repository."""
+    above = [disk for disk in disks if disk["mounted"] and folder.startswith(disk["mounted"].rstrip("/") + "/")]
+    return max(above, key=lambda disk: len(disk["mounted"]), default={}).get("drive")
+
+
 def most_free(disks):
     """The disk with the most free space; on a tie the first, the system disk coming first."""
     return max(disks, key=lambda disk: disk["free"], default=None)
@@ -84,8 +91,8 @@ def shown(disks, files=None, backups=None, installed=False):
     destination, {"folder": True} for the backup folder on the system disk or {"disk": id}, is the one the operator
     chose; with none, the backup folder once «Instalar» was pressed, as on a server installed before «Almacenamiento»,
     or when no other disk may hold the backup, one drive being one disk, and the system disk may; otherwise None, for
-    the operator to choose. The backup shares the files disk when it sits on that disk's
-    drive."""
+    the operator to choose. During an upgrade it is {"kept": destination}, the one AIO holds. The backup shares the
+    files disk when it sits on that disk's drive."""
     listed = [{**disk, "reasons": reasons(disk)} for disk in disks]
     system = next(disk for disk in listed if disk["system"])
     floors = dict.fromkeys(FLOORS, 0) if installed else FLOORS
@@ -104,7 +111,8 @@ def shown(disks, files=None, backups=None, installed=False):
     if backups is None and (installed or alone and system["reasons"]["backups"] is None):
         backups = {"folder": True}
     drives = {disk["id"]: disk["drive"] for disk in listed}
-    held = system["drive"] if backups == {"folder": True} else drives.get(backup_disk)
+    held = (system["drive"] if backups == {"folder": True} else drives.get(backup_disk) if backup_disk
+            else holder(listed, (backups or {}).get("kept", "")))
     return {"disks": [{**disk, "files": disk["reasons"]["files"] is None, "backups": disk["reasons"]["backups"] is None}
                       for disk in listed],
             "files": files, "files_locked": installed, "backups": backups, "folder": BACKUP_FOLDER,

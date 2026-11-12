@@ -21,8 +21,8 @@ const NO_FILES_DISK = "Ningún disco del servidor tiene espacio suficiente para 
   + "espacio o conecte otro disco y vuelva a abrir «Almacenamiento».";
 const SAME_DISK = "La copia de seguridad queda en el mismo disco que los archivos del personal: si ese disco falla, "
   + "se pierden ambos. Para protegerlos, conecte otro disco al servidor.";
-const KEPT_BACKUP = "La actualización mantiene la copia de seguridad donde AIO la guarda; su destino se cambia en "
-  + "la página de AIO, como explica el manual.";
+const KEPT_BACKUP = (place) => `La actualización mantiene la copia de seguridad de cada noche en ${place}, donde AIO `
+  + "la guarda; su destino se cambia en la página de AIO, como explica el manual.";
 const AI = "Un modelo de lenguaje en este servidor redacta textos para las aplicaciones, como la nota de Estadística, "
   + "sin enviar datos fuera de él. Puede activarla o desactivarla aquí más adelante.";
 let register = null;
@@ -381,7 +381,7 @@ function showStorage(storage) {
   $("storage-warning").hidden = !storage.same_disk;
   $("storage-continue").disabled = !(storage.files && storage.backups);
   const anywhere = storage.disks.some((disk) => disk.backups);
-  const kept = storage.backups?.kept && `${backupPlace(storage)} ${KEPT_BACKUP}`;
+  const kept = storage.backups?.kept && KEPT_BACKUP(storage.backups.kept);
   status("storage-status", !storage.files ? NO_FILES_DISK : kept || (storage.backups ? "" : anywhere ? CHOOSE_BACKUP
     : NO_BACKUP_DISK), !storage.files || !anywhere);
 }
