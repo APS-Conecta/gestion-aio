@@ -64,6 +64,18 @@ REFUSED = "El servicio de nombres de APS Conecta rechazó la solicitud (HTTP {co
 SUITE_DOWN = "El contenedor maestro de la suite no responde. Revise que Docker esté en marcha y presione «Reintentar»."
 MOUNT_FAILED = ("No se pudo montar el disco {} en {}. Revise que siga conectado y presione «Reintentar»; si vuelve a "
                 "ocurrir, contacte a APS Conecta.")
+REMOTE = {  # why another computer can't take AIO's backup, as Borg and SSH answer it
+    "unreachable": ("El otro computador no responde por SSH en {host}, puerto {port}. Revise su nombre o dirección, su "
+                    "puerto y que esté encendido y conectado, y presione «Probar de nuevo»."),
+    "key": ("El otro computador no acepta la clave de AIO para el usuario {user}. Agregue la clave pública que se "
+            "muestra a ~/.ssh/authorized_keys de ese usuario y presione «Probar de nuevo»."),
+    "borg": ("El otro computador responde, pero no tiene Borg instalado para el usuario {user}. Instale Borg en él y "
+             "presione «Probar de nuevo»."),
+    "folder": ("La carpeta {folder} del otro computador no se puede usar: no se puede escribir en ella o ya guarda "
+               "otros archivos. Elija otra carpeta y presione «Probar de nuevo»."),
+}
+# What SSH says when the other computer can't be reached at all.
+UNREACHABLE_SIGNS = ("connection refused", "could not resolve", "no route to host", "timed out", "network is unreachable")
 UNWRITABLE = ("No se pudo escribir en {}, el destino de la copia de seguridad. Revise que el disco esté conectado y "
               "presione «Reintentar», o elija otro destino en «Almacenamiento».")
 FILES_FAILED = ("No se pudo preparar la carpeta {} para los archivos del personal. Presione «Reintentar»; si vuelve a "
@@ -98,6 +110,10 @@ NEXTCLOUD = "nextcloud-aio-nextcloud"
 DOWN = {MASTERCONTAINER: SUITE_DOWN, NEXTCLOUD: NEXTCLOUD_DOWN}
 AIO_CONFIG = "/mnt/docker-aio-config/data/configuration.json"  # AIO's settings, its passphrase among them
 AIO_BACKUP_TIME = "/mnt/docker-aio-config/data/daily_backup_time"  # the nightly backup's time, then its switches
+# AIO's key for remote backups, as its borg container sees the mastercontainer's volume (Containers/borgbackup/start.sh)
+AIO_VOLUME = "/nextcloud_aio_volumes/nextcloud_aio_mastercontainer"
+BORG_KEY = f"{AIO_VOLUME}/data/id_borg"
+IMAGES = Path(__file__).resolve().parent.parent / "images.lock"  # the bundle's pins, AIO's borg image among them
 AIO_AUTHORITY = "/mnt/docker-aio-config/caddy-internal/pki/authorities/local/root.crt"  # signs AIO's page certificate
 OFFICE_SUITES = {"collabora", "onlyoffice", "eurooffice"}  # AIO's office suites, one choice among them
 OLLAMA = "nextcloud-aio-ollama"  # «IA local»'s container, as community-containers/ollama names it
@@ -160,7 +176,8 @@ $config->setDomain($in['domain'], true);
 """
 
 
-# AIO's backup destination and time, set as its page sets them (ConfigurationController), from stdin's JSON. A new
+# AIO's backup destination, a folder or an ssh:// repository, and time, set as its page sets them (ConfigurationController),
+# from stdin's JSON. A new
 # destination once one was set goes through AIO's own reset first, which also removes borg.config, so its first backup
 # starts a repository there, as AIO's page does after «Reset backup location».
 BACK_UP = r"""
@@ -168,10 +185,12 @@ ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
 $config = \AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class);
 $in = json_decode(stream_get_contents(STDIN), true, 4, JSON_THROW_ON_ERROR);
-if ($config->borgBackupHostLocation !== '' && $config->borgBackupHostLocation !== $in['folder']) {
+$held = $config->borgBackupHostLocation !== '' ? $config->borgBackupHostLocation : $config->borgRemoteRepo;
+if ($held !== '' && $held !== $in['folder']) {
     $config->deleteBorgBackupLocationItems();
 }
-$config->setBorgLocationVars($in['folder'], '');
+$remote = str_starts_with($in['folder'], 'ssh://');
+$config->setBorgLocationVars($remote ? '' : $in['folder'], $remote ? $in['folder'] : '');
 $config->setDailyBackupTime($in['time'], true, true);
 """
 
@@ -835,10 +854,57 @@ class Suite:
         self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"folder": folder, "time": time}))
 
     def backup_settings(self):
-        """Where AIO's nightly backup goes and at what time (UTC), as AIO holds them."""
-        location = json.loads(self.mastercontainer("cat", AIO_CONFIG)).get("borg_backup_host_location")
+        """Where AIO's nightly backup goes, a folder or a remote repository, and at what time (UTC), as AIO holds
+        them."""
+        config = json.loads(self.mastercontainer("cat", AIO_CONFIG))
         time = self.mastercontainer("cat", AIO_BACKUP_TIME).splitlines()
-        return location, time[0] if time else None
+        return config.get("borg_backup_host_location") or config.get("borg_remote_repo"), time[0] if time else None
+
+    def ssh_key(self):
+        """AIO's public key for remote backups, made first when AIO has none, as AIO's backup script makes it: in the
+        mastercontainer's volume, by AIO's pinned borg image. The private half never leaves that volume."""
+        public = f"{AIO_DATA}/id_borg.pub"
+        if not self.mastercontainer("sh", "-c", f"test -f {public} && echo held || true").strip():
+            self.borg("ssh-keygen", "-q", "-f", BORG_KEY, "-N", "", failed=SUITE_DOWN)
+        return self.mastercontainer("cat", public).strip()
+
+    def reachable(self, repo):
+        """The other computer takes AIO's backup at the remote repository: Borg alone, from AIO's pinned borg image with
+        AIO's key and passphrase, reads the repository, as AIO's first backup does before it makes one; a repository
+        that does not exist yet passes. Unreachable, with why, when it does not."""
+        user, host, port, folder = re.fullmatch(r"ssh://([^@]+)@([^:]+):(\d+)(/.*)", repo).groups()
+        env = {"BORG_REPO": repo, "BORG_PASSPHRASE": self.secrets()["backup_password"],
+               "BORG_RSH": f"ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 -i {BORG_KEY}"}
+        answer = self.borg("borg", "info", env=env, failed=None)
+        if answer is None:
+            return
+        said = answer.lower()  # SSH's own failures first: Borg asks «Is borg working on the server?» after any of them
+        why = ("key" if "permission denied (publickey" in said
+               else "unreachable" if any(sign in said for sign in UNREACHABLE_SIGNS)
+               else "borg" if any(sign in said for sign in ("command not found", "borg: not found", "is borg working"))
+               else None if "does not exist" in said
+               else "folder")
+        if why:
+            raise Unreachable(REMOTE[why].format(user=user, host=host, port=port, folder=folder))
+
+    @staticmethod
+    def borg(*command, env=None, failed=None, timeout=300):
+        """A command in a throwaway container of AIO's pinned borg image, with the mastercontainer's volume where AIO's
+        borg container has it and `env` passed by name, so no value reaches a command line. None when it succeeds,
+        what it printed when it fails and `failed` is None, Unreachable with `failed` otherwise."""
+        image = next(line.strip() for line in IMAGES.read_text(encoding="utf-8").splitlines()
+                     if "/aio-borgbackup@sha256:" in line)
+        names = [part for key in (env or {}) for part in ("--env", key)]
+        run = subprocess.run(["docker", "run", "--rm", "--volume", f"nextcloud_aio_mastercontainer:{AIO_VOLUME}",
+                              *names, "--entrypoint", command[0], image, *command[1:]],
+                             env={**os.environ, **(env or {})}, capture_output=True, text=True, timeout=timeout,
+                             check=False)
+        if run.returncode == 0:
+            return None
+        if failed is None:
+            return run.stdout + run.stderr
+        print(f"{command[0]} in AIO's borg image: {run.stderr[-2000:]}", file=sys.stderr)
+        raise Unreachable(failed)
 
     @staticmethod
     def writable(folder):
@@ -919,6 +985,7 @@ class FakeSuite:
     # The app settings occ config:list hides, as Nextcloud's own list of sensitive ones names them.
     SENSITIVE = {"theming": ("imprintUrl", "privacyUrl", "slogan", "url")}
     BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
+    SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAPSConectaGestionFakeKeyForRemoteBackups root@nextcloud-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
     # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
     SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda", "model": "",
@@ -959,6 +1026,8 @@ class FakeSuite:
         self.unwritable = set()  # backup destinations a file cannot be written to
         self.tested = []  # each backup destination a test file was written to, in turn
         self.repository = None  # where AIO's borg.config holds the repository its backups went to, None before any
+        self.ssh_key_made = False  # whether AIO's key for remote backups was made
+        self.remote_answer = None  # why the other computer refuses AIO's backup, a key of REMOTE, or None: it takes it
         self.automatic_updates = None  # whether AIO's nightly update job is on, as the backups step sets it
         self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
         self.starts = 0  # how often AIO's start button was pressed
@@ -1099,6 +1168,17 @@ class FakeSuite:
         if folder in self.unwritable:
             raise Unreachable(UNWRITABLE.format(folder))
         self.tested.append(folder)
+
+    def ssh_key(self):
+        self._outage_guard()
+        self.ssh_key_made = True
+        return self.SSH_KEY
+
+    def reachable(self, repo):
+        if self.remote_answer:
+            user, host, port, folder = re.fullmatch(r"ssh://([^@]+)@([^:]+):(\d+)(/.*)", repo).groups()
+            raise Unreachable(REMOTE[self.remote_answer].format(user=user, host=host, port=port, folder=folder))
+        self.tested.append(repo)
 
     def start(self, downloading):
         """AIO's start answers once every container it started runs. Its answer streams as AIO's does: each container
