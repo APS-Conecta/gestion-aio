@@ -2,9 +2,10 @@
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The staff's files come back after a reboot: a staff member stores a file in their own files, which lands in AIO's
-data folder (on the second disk when «Almacenamiento» moved it there), the machine reboots, and once it answers again
-that folder is mounted from the same disk as before, the suite answers at its name and the file comes back, the same
-bytes. It runs last: the reboot ends hardware.sh's sampler, whose peaks cover every stage before it."""
+data folder (on the second disk when «Almacenamiento» moved it there), AIO's backup runs as its nightly job would and
+leaves an archive in the backup destination, the machine reboots, and once it answers again that folder is mounted from
+the same disk as before, the suite answers at its name and the file comes back, the same bytes. It runs last: the reboot
+ends hardware.sh's sampler, whose peaks cover every stage before it."""
 
 import os
 import subprocess
@@ -14,7 +15,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import as_person, files_folder, machine, person, suite_name  # noqa: E402
+from browser import aio_config, aio_file, as_person, files_folder, machine, person, suite_name  # noqa: E402
 
 USER, FILE = "prueba.reinicio", "reinicio.txt"
 BODY = "Guardado antes de reiniciar el servidor.\n".encode()
@@ -59,6 +60,16 @@ status, _ = as_person(USER, password, "PUT", url, BODY)
 if status not in (201, 204):
     sys.exit(f"{USER} could not store {FILE} in their own files: HTTP {status}")
 folder, held = data_folder()
+
+destination = aio_config()["borg_backup_host_location"]
+print(f"running AIO's backup to {destination}, as its nightly job does, then starting the suite again")
+machine("sudo docker exec --env DAILY_BACKUP=1 --env START_CONTAINERS=1 nextcloud-aio-mastercontainer /daily-backup.sh")
+archives = [line for line in aio_file("backup_archives.list").splitlines() if line.startswith("nextcloud-aio")]
+machine(f"sudo test -f {destination}/borg/config")
+if not archives:
+    sys.exit(f"AIO's backup to {destination} left no archive")
+print(f"AIO's backup left the archive {archives[-1].split(',')[0]} in the Borg repository at {destination}/borg")
+
 boot = machine(f"cat {BOOT_ID}").strip()
 machine(f"sudo test -f {folder}/{USER}/files/{FILE}")
 print(f"{FILE} lies in AIO's data folder {folder}, on {held[0]} mounted at {held[1]}; rebooting")
