@@ -85,8 +85,7 @@ FILES_KEPT = "El disco de los archivos del personal ya no puede cambiarse: se pr
 NOT_A_DESTINATION = ("Indique dónde se guarda la copia de seguridad: la carpeta de copias de este servidor, un disco u otro "
                      "computador.")
 NOT_FOR_BACKUP = "Ese lugar no puede guardar la copia de seguridad: {}."
-BACKUP_KEPT = ("La instalación ya terminó: el destino de la copia de seguridad ahora se cambia en la página de AIO, como "
-               "explica el manual.")
+BACKUP_KEPT = "Tras «Listo», el destino de la copia de seguridad se cambia en la página de AIO, como explica el manual."
 STORAGE_BUSY = "Espere a que termine la instalación en curso para cambiar el destino de la copia de seguridad."
 BACKUP_LINE = "«Almacenamiento»: cambia el destino de la copia de seguridad."
 CHOOSE_BACKUP = "Elija en «Almacenamiento» dónde se guarda la copia de seguridad de cada noche."
@@ -229,6 +228,11 @@ def stored(state):
     return stored_files(state), state.get("storage", {}).get("backups")
 
 
+def upgrading(state):
+    """Whether the install under way is the one command's upgrade of an installed server."""
+    return bool(state.get("install", {}).get("upgrade"))
+
+
 class Provisionador:
     def __init__(self, state_dir, register, suite):
         self.state = State(state_dir)
@@ -357,13 +361,16 @@ class Provisionador:
         /api/state's, which the progress polls: reading the free space of a disk that isn't mounted mounts it read-only
         for a moment."""
         state = self.state.read()
-        return 200, self.storage(self.suite.disks(), *stored(state), "install" in state)
+        return 200, self.storage(self.suite.disks(), *stored(state), state)
 
-    def storage(self, listed, files, backups, installed):
+    def storage(self, listed, files, backups, state):
         """GET /api/storage's answer, with AIO's public key for remote backups when the backup goes to another
-        computer."""
-        found = disks.shown(listed, files, backups, installed)
-        return {**found, "ssh_key": self.suite.ssh_key() if "ssh" in (found["backups"] or {}) else None}
+        computer. During an upgrade the backup destination is the one AIO holds, {"kept": destination}, for after
+        «Listo» AIO's page owns it: «Almacenamiento» shows it locked."""
+        held = steps_backups.held_destination(self.suite, upgrading(state))
+        found = disks.shown(listed, files, {"kept": held} if held else backups, "install" in state)
+        return {**found, "backups_locked": upgrading(state),
+                "ssh_key": self.suite.ssh_key() if "ssh" in (found["backups"] or {}) else None}
 
     def post_storage(self, query, body):
         """POST /api/storage {"files": id, "backups": {"disk": id} | {"folder": true} | {"ssh": {host, port, user,
@@ -371,12 +378,15 @@ class Provisionador:
         beside the other. The files disk stays once «Instalar» was pressed: the one stored, or the system disk on a
         server installed before «Almacenamiento». Another computer is tested at once, with AIO's key, which is made
         first when AIO has none; a refusal carries its public half. The backup destination may change until «Listo»,
-        though not while the steps run; a change after «Instalar» runs «Almacenamiento» and «Copias de seguridad»
-        again, then the end-of-install check. The answer is GET's, from the same reading of the disks."""
+        though not while the steps run nor during an upgrade, when AIO's page owns it; a change after «Instalar» runs
+        «Almacenamiento» and «Copias de seguridad» again, then the end-of-install check. The answer is GET's, from the
+        same reading of the disks."""
         backups = body.get("backups")
         if "backups" in body and backups != {"folder": True} and not (
                 isinstance(backups, dict) and len(backups) == 1 and (isinstance(backups.get("disk"), str) or "ssh" in backups)):
             return 400, {"error": NOT_A_DESTINATION}
+        if "backups" in body and upgrading(self.state.read()):
+            return 409, {"error": BACKUP_KEPT}  # during an upgrade AIO's page owns the destination, as after «Listo»
         if "ssh" in (backups or {}):
             try:
                 repo = steps_backups.remote(backups["ssh"])
@@ -421,7 +431,7 @@ class Provisionador:
                     runner.add_line(s["install"], BACKUP_LINE)
             if moved:
                 self.run_install()
-        return 200, self.storage(listed, files, backups, installed)
+        return 200, self.storage(listed, files, backups, state)
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
@@ -516,7 +526,7 @@ class Provisionador:
                                   optional=frozenset(state.get("optional", ())), ai=bool(state.get("ai")),
                                   teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
-                                  upgrade=bool(state.get("install", {}).get("upgrade")),
+                                  upgrade=upgrading(state),
                                   files=files, backups=backups,
                                   log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
