@@ -73,10 +73,15 @@ def begin(state):
     with state.change() as s:
         again = "install" in s
         install = s.setdefault("install", {"steps": {}})
-        for name in STEPS:
-            if install["steps"].get(name, {}).get("status") != "green":
-                install["steps"][name] = {"status": "pending"}
+        reopen(install)
         add_line(install, REINTENTAR if again else INSTALAR)
+
+
+def reopen(install, *names):
+    """The named steps, and every step that is not green, as the steps waiting on them are, are to run."""
+    for name in STEPS:
+        if name in names or install["steps"].get(name, {}).get("status") != "green":
+            install["steps"][name] = {"status": "pending"}
 
 
 def set_upgrade(install, version):

@@ -359,11 +359,11 @@ async function almacenamiento() {
 function showStorage(storage) {
   const system = storage.disks.find((disk) => disk.system);
   $("storage-files").replaceChildren(...storage.disks.map((disk) => placeRow("files", disk.id, diskName(disk), disk,
-    disk.reasons.files, storage.files === disk.id, storage.files_locked)));
+    storage.files === disk.id, storage.files_locked)));
   $("storage-backups").replaceChildren(
-    placeRow("backups", "folder", folderName(storage), system, system.reasons.backups, Boolean(storage.backups?.folder)),
+    placeRow("backups", "folder", folderName(storage), system, Boolean(storage.backups?.folder)),
     ...storage.disks.filter((disk) => !disk.system).map((disk) => placeRow("backups", disk.id, diskName(disk), disk,
-      disk.reasons.backups, storage.backups?.disk === disk.id)));
+      storage.backups?.disk === disk.id)));
   $("storage-warning").textContent = SAME_DISK;
   $("storage-warning").hidden = !storage.same_disk;
   $("storage-continue").disabled = !(storage.files && storage.backups);
@@ -374,7 +374,8 @@ function showStorage(storage) {
 
 // A row of one part: a disk or the backup folder, with the radio button that chooses it, «Se usará» where the part goes,
 // else whether it may hold it, its size and free space and, where it may not, why.
-function placeRow(part, value, name, disk, reason, chosen, locked = false) {
+function placeRow(part, value, name, disk, chosen, locked = false) {
+  const reason = disk.reasons[part];
   const radio = Object.assign(document.createElement("input"), {type: "radio", name: part, value, checked: chosen,
     disabled: Boolean(reason) || locked});
   const label = element("label", "");
@@ -420,7 +421,6 @@ function diskName(disk) {
 function folderName(storage) {
   return `Carpeta de copias de este servidor, ${storage.folder}`;
 }
-
 
 // «Revisar»: one summary of what will be installed, then «Instalar»; the progress follows each step and, once AIO runs
 // our components, each container as AIO reports it, until «Listo».

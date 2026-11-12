@@ -86,8 +86,9 @@ def check(context):
         files, backup = chosen_disks(context)
     except LookupError as gone:
         return [str(gone)]
-    found = [NOT_MOUNTED.format(disk_name(disk), point(disk)) for disk in (files, backup)
-             if disk and not (disk["mounted"] and disk["at_boot"])]
+    chosen_ones = {disk["id"]: disk for disk in (files, backup) if disk}.values()
+    found = [NOT_MOUNTED.format(disk_name(disk), point(disk)) for disk in chosen_ones
+             if not (disk["mounted"] and disk["at_boot"])]
     if found:
         return found
     declared = f"{files['mounted']}/{FOLDER}" if files else None

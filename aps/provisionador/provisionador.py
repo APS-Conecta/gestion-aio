@@ -384,19 +384,19 @@ class Provisionador:
                     return 400, {"error": DISK_GONE}
                 if not by_id[disk_id][part]:
                     return 400, {"error": refused.format(by_id[disk_id]["reasons"][part])}
+            moved = installed and backups != held
+            if moved and by_id[place]["free"] < disks.FLOORS["backup"]:  # the floors are off once installed, but
+                return 400, {"error": NOT_FOR_BACKUP.format(disks.NO_ROOM)}  # a new destination needs a backup's room
             if installed and "files" in body and files != disks.shown(listed, stored_files(state), held, True)["files"]:
                 return 409, {"error": FILES_KEPT}
-            moved = installed and backups != held
             if moved and state["install"].get("listo"):
                 return 409, {"error": BACKUP_KEPT}
             if moved and busy:
                 return 409, {"error": STORAGE_BUSY}
             with self.state.change() as s:
                 s["storage"] = {**s.get("storage", {}), "files": files, "backups": backups}
-                if moved:  # its two steps run again, and so does every step that is not green, waiting on them
-                    for name, step in s["install"]["steps"].items():
-                        if name in ("storage", "backups") or step["status"] != "green":
-                            s["install"]["steps"][name] = {"status": "pending"}
+                if moved:
+                    runner.reopen(s["install"], "storage", "backups")
                     s["install"]["listo"] = False
                     runner.add_line(s["install"], BACKUP_LINE)
             if moved:
@@ -490,13 +490,14 @@ class Provisionador:
         """The install's steps, in the background, with what they need to know."""
         state = self.state.read()
         loaded, retired = declared(state)
+        files, backups = stored(state)
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
                                   optional=frozenset(state.get("optional", ())), ai=bool(state.get("ai")),
                                   teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
                                   upgrade=bool(state.get("install", {}).get("upgrade")),
-                                  files=stored_files(state), backups=stored(state)[1],
+                                  files=files, backups=backups,
                                   log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()

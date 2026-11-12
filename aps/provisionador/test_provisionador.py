@@ -983,6 +983,29 @@ class BackupDestination(InstallTest):
         self.assertEqual(status, 409)
         self.assertIn("AIO", body["error"])
 
+    def stopped_before_listo(self):
+        """An install the ISP's certificate stopped red after «Copias de seguridad» went green: before «Listo»."""
+        self.suite.down.add("issuer")
+        self.claim()
+        self.choose(backups=self.FOLDER)
+        self.install()
+        self.until("failed")
+
+    def test_after_instalar_a_new_destination_still_needs_room_for_a_backup(self):
+        self.stopped_before_listo()
+        self.suite.found_disks.append(disk("small", usb=True, free=10 ** 9))
+        status, body = self.choose(backups={"disk": "small"})
+        self.assertEqual(status, 400)
+        self.assertIn(self.ROOM, body["error"])
+
+    def test_a_new_destination_after_aio_backed_up_starts_its_repository_afresh_there(self):
+        self.stopped_before_listo()
+        self.suite.repository = "/var/backups/aps-conecta"  # AIO backed up once: its borg.config holds the old place
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.assertEqual(self.choose(backups={"disk": "usb"})[0], 200)
+        self.until("failed")
+        self.assertEqual((self.suite.repository, self.suite.backup), (None, (self.COPIES, "06:00")))
+
     def test_while_the_steps_run_the_destination_waits(self):
         self.suite.found_disks.append(disk("usb", usb=True))
         self.suite.release.clear()
@@ -1070,6 +1093,18 @@ class FilesDisk(InstallTest):
         status, reason = self.steps(self.until("failed"))[self.STEP]
         self.assertEqual(status, "failed")
         self.assertIn("/mnt/aps-conecta/data", reason)
+
+    def test_a_disk_holding_the_files_and_the_backup_is_reported_once_when_no_longer_mounted_for_good(self):
+        self.suite.found_disks.append(disk("data"))
+        self.claim()
+        self.choose("data", {"disk": "data"})
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        self.suite.found_disks[-1]["at_boot"] = False
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))[self.STEP]
+        self.assertEqual((status, reason.count("ya no queda montado")), ("failed", 1), reason)
 
     def test_the_end_of_install_check_finds_aio_keeping_the_files_elsewhere(self):
         self.chosen("data", disk("data"))

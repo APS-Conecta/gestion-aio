@@ -42,24 +42,29 @@ def floors():
 FLOORS = floors()
 
 
-def roles(disk):
+def reasons(disk):
     """Why the disk may not hold the staff's files and the backup, {"files": reason, "backups": reason}, in Spanish,
     None where it may."""
-    if disk["system"]:
-        return {"files": None, "backups": None}
     filesystem = disk["filesystem"]
-    refused = (UNFORMATTED if not filesystem else WINDOWS_FORMAT if filesystem in WINDOWS
-               else OTHER_FORMAT.format(filesystem) if filesystem not in LINUX
-               else FREE_UNREAD if disk["free"] is None else None)
-    if refused:
-        return {"files": refused, "backups": refused}
-    return {"files": USB_BACKUPS_ONLY if disk["usb"] else None, "backups": None}
+    if disk["system"]:
+        refused = None
+    elif not filesystem:
+        refused = UNFORMATTED
+    elif filesystem in WINDOWS:
+        refused = WINDOWS_FORMAT
+    elif filesystem not in LINUX:
+        refused = OTHER_FORMAT.format(filesystem)
+    elif disk["free"] is None:
+        refused = FREE_UNREAD
+    else:
+        return {"files": USB_BACKUPS_ONLY if disk["usb"] else None, "backups": None}
+    return {"files": refused, "backups": refused}
 
 
-def limit(disk, role, need):
-    """The disk keeps the role only with `need` bytes free; without them it no longer holds it, for lack of room."""
-    if disk["reasons"][role] is None and disk["free"] < need:
-        disk["reasons"][role] = NO_ROOM
+def limit(disk, part, need):
+    """The disk keeps the part only with `need` bytes free; without them it no longer holds it, for lack of room."""
+    if disk["reasons"][part] is None and disk["free"] < need:
+        disk["reasons"][part] = NO_ROOM
 
 
 def most_free(disks):
@@ -81,7 +86,7 @@ def shown(disks, files=None, backups=None, installed=False):
     or when no other disk may hold the backup, one drive being one disk, and the system disk may; otherwise None, for
     the operator to choose. The backup shares the files disk when it sits on that disk's
     drive."""
-    listed = [{**disk, "reasons": roles(disk)} for disk in disks]
+    listed = [{**disk, "reasons": reasons(disk)} for disk in disks]
     system = next(disk for disk in listed if disk["system"])
     floors = dict.fromkeys(FLOORS, 0) if installed else FLOORS
     backup_disk = (backups or {}).get("disk")

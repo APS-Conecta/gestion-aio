@@ -160,19 +160,26 @@ $config->setDomain($in['domain'], true);
 """
 
 
-# «IA local»'s switch of our «ollama» community container (community-containers/ollama), from the JSON object on stdin:
-# on, it joins AIO's community containers with AIO's NVIDIA switch as the GPU found asks and its memory cap among AIO's
-# secrets, and AIO's own code recreates and starts it, as AIO's start does; off, it stops, AIO removes it, keeping its
-# volume, and it leaves the list. AIO's start, every night too, then starts it with the suite only while it is listed.
-# AIO's backup destination and time, set as its page sets them (ConfigurationController), from stdin's JSON.
+# AIO's backup destination and time, set as its page sets them (ConfigurationController), from stdin's JSON. A new
+# destination once one was set goes through AIO's own reset first, which also removes borg.config, so its first backup
+# starts a repository there, as AIO's page does after «Reset backup location».
 BACK_UP = r"""
 ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
 $config = \AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class);
 $in = json_decode(stream_get_contents(STDIN), true, 4, JSON_THROW_ON_ERROR);
+if ($config->borgBackupHostLocation !== '' && $config->borgBackupHostLocation !== $in['folder']) {
+    $config->deleteBorgBackupLocationItems();
+}
 $config->setBorgLocationVars($in['folder'], '');
 $config->setDailyBackupTime($in['time'], true, true);
 """
+
+
+# «IA local»'s switch of our «ollama» community container (community-containers/ollama), from the JSON object on stdin:
+# on, it joins AIO's community containers with AIO's NVIDIA switch as the GPU found asks and its memory cap among AIO's
+# secrets, and AIO's own code recreates and starts it, as AIO's start does; off, it stops, AIO removes it, keeping its
+# volume, and it leaves the list. AIO's start, every night too, then starts it with the suite only while it is listed.
 SWITCH_OLLAMA = r"""
 ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
@@ -674,13 +681,14 @@ class Suite:
 
     @staticmethod
     def disks():
-        """Each filesystem of this server's disks: whole disks, partitions, LVM volumes and software RAID, skipping
-        loop, RAM and optical devices, swap, the boot partitions and anything under 1 GB; a disk or partition with no
+        """Each filesystem of this server's disks: whole disks, partitions, LVM volumes and software RAID, skipping loop,
+        RAM and optical devices, swap, the boot partitions and anything under 1 GB; a disk or partition with no
         filesystem is listed too, unformatted. Each with its filesystem's UUID as its id (its device when it has none),
         its device, the drive it is on (the whole disk at the top of lsblk's tree, for one drive is one disk), model,
         size and free space in bytes, its filesystem, whether it is the system disk, whether it hangs off USB or is
-        removable, where it is mounted and whether that mount comes back at boot. The system disk comes first. The free space of a Linux filesystem nobody has mounted is read through a read-only mount in a temporary
-        folder, unmounted at once; None when that mount fails."""
+        removable, where it is mounted and whether that mount comes back at boot. The system disk comes first. The free
+        space of a Linux filesystem nobody has mounted is read through a read-only mount in a temporary folder,
+        unmounted at once; None when that mount fails."""
         target = next(path for path in DOCKER_STORAGE if os.path.isdir(path))
         system = json.loads(subprocess.run(["findmnt", "--json", "--output", "SOURCE,TARGET,FSTYPE,UUID", "--target",
                                             target], capture_output=True, text=True, timeout=30, check=True).stdout)
@@ -950,6 +958,7 @@ class FakeSuite:
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.unwritable = set()  # backup destinations a file cannot be written to
         self.tested = []  # each backup destination a test file was written to, in turn
+        self.repository = None  # where AIO's borg.config holds the repository its backups went to, None before any
         self.automatic_updates = None  # whether AIO's nightly update job is on, as the backups step sets it
         self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
         self.starts = 0  # how often AIO's start button was pressed
@@ -1078,11 +1087,13 @@ class FakeSuite:
 
     def back_up(self, folder, time):
         self._outage_guard()
+        if self.backup and self.backup[0] != folder:  # AIO's reset: its next backup starts a repository afresh
+            self.repository = None
         self.backup, self.automatic_updates = (folder, time), True
 
     def backup_settings(self):
         self._outage_guard()
-        return self.backup
+        return self.backup or (None, None)
 
     def writable(self, folder):
         if folder in self.unwritable:
