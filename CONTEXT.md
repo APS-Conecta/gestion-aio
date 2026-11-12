@@ -111,10 +111,11 @@ one.
 
 **Backup destination** (destino de las copias):
 The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento» until «Listo»: the backup
-folder, or the aps-conecta/copias folder of another disk, USB included, which the install mounts for good. On a server
+folder, the aps-conecta/copias folder of another disk, USB included, which the install mounts for good, or a repository
+on another computer over SSH, the establishment's own or a Borg hosting service's, which takes AIO's key. On a server
 where no other disk may hold it, one drive being one disk, the backup folder, chosen already when the system disk has
-room for it. The install writes a test file there before handing it to AIO, and warns when it sits on the files disk's
-drive.
+room for it. The install tests it before handing it to AIO, a test file written in a folder or the other computer
+reached with Borg, and warns when it sits on the files disk's drive.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server: the backup destination on the system disk.
