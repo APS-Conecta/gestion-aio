@@ -1106,6 +1106,24 @@ class RemoteBackup(InstallTest):
         self.until("done")
         self.assertTrue(self.suite.ssh_key_made)
 
+    def test_a_repository_the_computer_keeps_is_marked_for_aio_once_the_install_hands_it_over(self):
+        self.suite.remote_kept = True  # an append-only hosting account keeps the test's repository: AIO's own first one
+        self.claim()
+        self.remote()
+        self.assertEqual(self.suite.repository, None)  # the test itself writes nothing in AIO
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.repository, self.REPO)
+
+    def test_a_kept_repository_left_for_the_backup_folder_leaves_aio_unmarked(self):
+        self.suite.remote_kept = True
+        self.claim()
+        self.remote()
+        self.choose(backups={"folder": True})
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.repository, None)
+
     def test_a_bare_folder_is_under_the_user_s_home(self):
         self.assertEqual(self.remote({**self.TARGET, "folder": "copias"})[0], 200)
         self.assertEqual(self.suite.tested, ["ssh://aio@copias.example:22/./copias"])

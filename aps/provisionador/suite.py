@@ -74,6 +74,8 @@ REMOTE = {  # why another computer can't take AIO's backup, as Borg and SSH answ
     "folder": ("La carpeta {folder} del otro computador no se puede usar: no se puede escribir en ella o ya guarda "
                "otros archivos. Elija otra carpeta y vuelva a probar."),
 }
+
+
 def remote_refusal(why, repo):
     """The Spanish reason, as Unreachable, why the other computer can't take AIO's backup: why, a key of REMOTE."""
     user, host, port, folder = re.fullmatch(r"ssh://([^@]+)@([^:]+):(\d+)(/.*)", repo).groups()
@@ -81,7 +83,8 @@ def remote_refusal(why, repo):
 
 
 # What SSH says when the other computer can't be reached at all.
-UNREACHABLE_SIGNS = ("connection refused", "could not resolve", "no route to host", "timed out", "network is unreachable")
+UNREACHABLE_SIGNS = ("connection refused", "could not resolve", "no route to host", "timed out",
+                     "network is unreachable")
 UNWRITABLE = ("No se pudo escribir en {}, el destino de la copia de seguridad. Revise que el disco esté conectado y "
               "presione «Reintentar», o elija otro destino en «Almacenamiento».")
 FILES_FAILED = ("No se pudo preparar la carpeta {} para los archivos del personal. Presione «Reintentar»; si vuelve a "
@@ -199,6 +202,9 @@ if ($held !== '' && $held !== $in['destination']) {
 $remote = str_starts_with($in['destination'], 'ssh://');
 $config->setBorgLocationVars($remote ? '' : $in['destination'], $remote ? $in['destination'] : '');
 $config->setDailyBackupTime($in['time'], true, true);
+if ($in['kept']) {  // a remote repository already in place: marked as backupscript.sh marks one it made
+    touch(\AIO\Data\DataConst::GetBackupKeyFile());
+}
 """
 
 
@@ -707,8 +713,8 @@ class Suite:
 
     @staticmethod
     def disks():
-        """Each filesystem of this server's disks: whole disks, partitions, LVM volumes and software RAID, skipping loop,
-        RAM and optical devices, swap, the boot partitions and anything under 1 GB; a disk or partition with no
+        """Each filesystem of this server's disks: whole disks, partitions, LVM volumes and software RAID, skipping
+        loop, RAM and optical devices, swap, the boot partitions and anything under 1 GB; a disk or partition with no
         filesystem is listed too, unformatted. Each with its filesystem's UUID as its id (its device when it has none),
         its device, the drive it is on (the whole disk at the top of lsblk's tree, for one drive is one disk), model,
         size and free space in bytes, its filesystem, whether it is the system disk, whether it hangs off USB or is
@@ -851,14 +857,16 @@ class Suite:
                 form[component] = "on"
         self._signed_in().post("/api/configuration", form)
 
-    def back_up(self, destination, time):
-        """AIO's own backup to the destination, a folder on this server or a remote repository, daily at the time (UTC), with its success notification and
-        its automatic updates on: AIO's nightly job then restarts the containers on the pins the release holds and
-        updates the store's apps (own and fork apps stay above the store's versions, and our timer runs them nightly
-        anyway), so security fixes reach the suite between releases. Set through AIO's own code in its mastercontainer,
-        the same calls its page makes, so a destination changed once the suite runs, when the page's login is closed,
-        reaches AIO too."""
-        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"destination": destination, "time": time}))
+    def back_up(self, destination, time, kept=False):
+        """AIO's own backup to the destination, a folder on this server or a remote repository, daily at the time (UTC),
+        with its success notification and its automatic updates on: AIO's nightly job then restarts the containers on
+        the pins the release holds and updates the store's apps (own and fork apps stay above the store's versions, and
+        our timer runs them nightly anyway), so security fixes reach the suite between releases. Set through AIO's own
+        code in its mastercontainer, the same calls its page makes, so a destination changed once the suite runs, when
+        the page's login is closed, reaches AIO too. `kept`: the remote repository is already in place, AIO's own, which
+        BACK_UP marks as AIO marks one its backup made."""
+        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"destination": destination, "time": time,
+                                                                     "kept": kept}))
 
     def backup_settings(self):
         """Where AIO's nightly backup goes, a folder or a remote repository, and at what time (UTC), as AIO holds
@@ -877,14 +885,16 @@ class Suite:
     def reachable(self, repo):
         """The other computer takes AIO's backup at the remote repository, Borg alone, from AIO's pinned borg image with
         AIO's key and passphrase: a repository AIO's passphrase opens passes; where there is none yet, one is made as
-        AIO's first backup makes it and then deleted, which proves the folder takes it; a computer that keeps it, as
-        an append-only hosting account does, keeps AIO's own first repository, marked as AIO marks a remote one it
-        made. Unreachable, with why, when the computer does not take it."""
+        AIO's first backup makes it and then deleted, which proves the folder takes it. Whether AIO's repository is in
+        place: one that opens, or the one made when the computer keeps it whole, as an append-only hosting account
+        does. Nothing is written in AIO: `back_up` marks it. Unreachable, with why, when the computer does not take
+        it."""
         env = {"BORG_REPO": repo, "BORG_PASSPHRASE": self.secrets()["backup_password"],
-               "BORG_RSH": f"ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 -i {BORG_KEY}"}
+               "BORG_RSH": f"ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 "
+                           f"-i {BORG_KEY}"}
         answer = self.borg("borg", "info", env=env, failed=None)
         if answer is None:
-            return
+            return True
         said = answer.lower()  # SSH's own failures first: Borg asks «Is borg working on the server?» after any of them
         why = ("key" if "permission denied (publickey" in said
                else "unreachable" if any(sign in said for sign in UNREACHABLE_SIGNS)
@@ -895,9 +905,9 @@ class Suite:
             raise remote_refusal(why, repo)
         if self.borg("borg", "init", "--encryption=repokey-blake2", env=env, failed=None) is not None:
             raise remote_refusal("folder", repo)
-        kept = self.borg("borg", "delete", env={**env, "BORG_DELETE_I_KNOW_WHAT_I_AM_DOING": "YES"}, failed=None)
-        if kept is not None:  # Containers/borgbackup/backupscript.sh touches it once it made a remote repository
-            self.mastercontainer("touch", f"{AIO_DATA}/borg.config")
+        if self.borg("borg", "delete", env={**env, "BORG_DELETE_I_KNOW_WHAT_I_AM_DOING": "YES"}, failed=None) is None:
+            return False
+        return self.borg("borg", "info", env=env, failed=None) is None  # kept whole, not half deleted
 
     @staticmethod
     def borg(*command, env=None, failed=None, timeout=600):
@@ -1004,9 +1014,9 @@ class FakeSuite:
     SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAPSConectaGestionFakeKeyForRemoteBackups root@nextcloud-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
     # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
-    SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda", "model": "",
-                   "size": 60 * 10 ** 9, "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True, "usb": False,
-                   "mounted": "/", "at_boot": True}
+    SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda",
+                   "model": "", "size": 60 * 10 ** 9, "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True,
+                   "usb": False, "mounted": "/", "at_boot": True}
 
     def __init__(self):
         self.in_use = set()  # DEIS codes whose name another installation holds
@@ -1044,6 +1054,7 @@ class FakeSuite:
         self.repository = None  # where AIO's borg.config holds the repository its backups went to, None before any
         self.ssh_key_made = False  # whether AIO's key for remote backups was made
         self.remote_answer = None  # why the other computer refuses AIO's backup, a key of REMOTE, or None: it takes it
+        self.remote_kept = False  # whether it keeps the test's repository whole, as an append-only hosting account does
         self.automatic_updates = None  # whether AIO's nightly update job is on, as the backups step sets it
         self.backup_password = self.BACKUP_PASSWORD  # its encryption password, which AIO made, or None
         self.starts = 0  # how often AIO's start button was pressed
@@ -1170,10 +1181,12 @@ class FakeSuite:
         self._signed_in()
         self.switched = set(components)
 
-    def back_up(self, destination, time):
+    def back_up(self, destination, time, kept=False):
         self._outage_guard()
         if self.backup and self.backup[0] != destination:  # AIO's reset: its next backup starts a repository afresh
             self.repository = None
+        if kept:
+            self.repository = destination
         self.backup, self.automatic_updates = (destination, time), True
 
     def backup_settings(self):
@@ -1195,6 +1208,7 @@ class FakeSuite:
         if self.remote_answer:
             raise remote_refusal(self.remote_answer, repo)
         self.tested.append(repo)
+        return self.remote_kept
 
     def start(self, downloading):
         """AIO's start answers once every container it started runs. Its answer streams as AIO's does: each container

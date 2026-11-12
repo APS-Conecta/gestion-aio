@@ -56,14 +56,15 @@ def run(context):
         target = destination(context)
     except LookupError:
         return [BACKUP_GONE]
+    kept = False
     if target.startswith("ssh://"):
         context.suite.ssh_key()  # made when AIO has none yet, so the test and AIO's backup use it
-        context.suite.reachable(target)
+        kept = context.suite.reachable(target)
         context.log(REACHED.format(context.backups["ssh"]["host"]))
     else:
         context.suite.writable(target)
         context.log(WRITTEN.format(target))
-    context.suite.back_up(target, BACKUP_TIME)
+    context.suite.back_up(target, BACKUP_TIME, kept)
     return None
 
 
