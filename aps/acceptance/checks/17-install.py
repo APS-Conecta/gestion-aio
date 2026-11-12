@@ -7,22 +7,23 @@ downloads the people workbook, uploads the people as Excel saves a CSV, then in 
 and each time sees the people the install will create with their cargos, on a page in the brand fonts with no console
 error and no content-security-policy violation, then to «Almacenamiento», which lists the system disk and the machine's
 second disk, ext4 and not mounted: the staff's files go to the second disk, which has the most free space, and the
-backup, which may go to either disk, waits for the operator's choice, «Continuar» with it: the operator chooses the
-backup folder, then to «Revisar», which summarises the centre's address, the teams, the people, the cargo accounts, the
-components, where the staff's files go and that the backup goes to the backup folder; «Instalar» shows each step and,
-once AIO runs our components, each container's progress live, and below them «Registro de la instalación», which logs
-the suite's start as it runs. Meanwhile the operator goes back to «Equipos», ticks a person who left and presses
-«Retirar», then confirms: the install applies the people as they were at «Instalar», so that person can still store a
-file in their own files, and stops with the people step red until «Reintentar» applies «Retirar» (48-retire checks the
-person). Then «Listo» shows the suite's address. There the wizard hands over the passwords file, the same as the
-root-only copy on the machine, with the administrator's first password, AIO's passphrase and the backup's encryption
-password AIO made (its own copy of it unchanged), and closes; the page then still tells, behind a resolver that drops
-the name's answer, the router change, and otherwise that this computer opens the suite (no check goes back to
-«Dirección» after «Instalar»). The second disk is mounted for good by its UUID, its empty mount point immutable
-underneath, and AIO keeps the staff's files on it, as «Listo» says, with where the backup goes. AIO reports our
-components on, every other optional one off (Talk recording follows the hardware: 70-talk checks it) and nightly backups
-to the backup folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only root
-reads the file AIO keeps it in."""
+backup, which may go to either disk, waits for the operator's choice, «Continuar» with it: the runner, another computer
+over SSH, refuses AIO's key, which the page shows, until it is authorized there and then answers with Borg, and the
+operator goes back to the backup folder, then to «Revisar», which summarises the centre's address, the teams, the
+people, the cargo accounts, the components, where the staff's files go and that the backup goes to the backup folder;
+«Instalar» shows each step and, once AIO runs our components, each container's progress live, and below them «Registro
+de la instalación», which logs the suite's start as it runs. Meanwhile the operator goes back to «Equipos», ticks a
+person who left and presses «Retirar», then confirms: the install applies the people as they were at «Instalar», so that
+person can still store a file in their own files, and stops with the people step red until «Reintentar» applies
+«Retirar» (48-retire checks the person). Then «Listo» shows the suite's address. There the wizard hands over the
+passwords file, the same as the root-only copy on the machine, with the administrator's first password, AIO's passphrase
+and the backup's encryption password AIO made (its own copy of it unchanged), and closes; the page then still tells,
+behind a resolver that drops the name's answer, the router change, and otherwise that this computer opens the suite (no
+check goes back to «Dirección» after «Instalar»). The second disk is mounted for good by its UUID, its empty mount point
+immutable underneath, and AIO keeps the staff's files on it, as «Listo» says, with where the backup goes. AIO reports
+our components on, every other optional one off (Talk recording follows the hardware: 70-talk checks it) and nightly
+backups to the backup folder. AIO's passphrase reaches the browser only in the passwords file, and on the machine only
+root reads the file AIO keeps it in; no answer carries a private key."""
 
 import json
 import os
@@ -51,6 +52,7 @@ from steps.storage import FOLDER as FILES_FOLDER  # noqa: E402
 from suite import MOUNTS  # noqa: E402
 
 LISTO_WITHIN = 20  # minutes: the install's GitHub downloads alone can take several on a slow day
+SSH = {field: os.environ[f"BACKUP_SSH_{field.upper()}"] for field in ("host", "user", "folder")}  # run.sh's target
 SECTORS, PROGRAMS = ["Norte", "Sector Sur"], ["Cardiovascular"]  # as an operator types them; 45-equipos checks them
 DECLARED = teams.declare(SECTORS, PROGRAMS)
 # As Excel saves a Spanish sheet as plain CSV: «;» and Windows-1252.
@@ -113,6 +115,29 @@ with tempfile.NamedTemporaryFile() as console:  # one-command.sh masks the fresh
     link, printed = wizard_link(Path(console.name).read_text(encoding="utf-8"))
 url = urlsplit(link)
 
+def other_computer(page):
+    """«Almacenamiento»'s other computer, the runner over SSH: refused until AIO's key, which the page shows, is
+    authorized there, then chosen; the backup goes back to the backup folder afterwards."""
+    page.check('#storage-backups input[value="ssh"]')
+    for field, value in SSH.items():
+        page.fill(f"#ssh-{field}", value)
+    page.click("#ssh-test")  # the first test also pulls AIO's borg image
+    expect(page.locator("#ssh-status")).to_contain_text("no acepta la clave de AIO", timeout=600_000)
+    key = page.inner_text("#ssh-key").strip()
+    if not key.startswith("ssh-") or "PRIVATE" in key:
+        sys.exit(f"«Almacenamiento» shows no public key for AIO's remote backups: {key!r}")
+    page.screenshot(path=evidence / "almacenamiento-ssh-clave.png")
+    authorized = f"/home/{SSH['user']}/.ssh/authorized_keys"
+    subprocess.run(["sudo", "sh", "-c", f"cat >> {authorized} && chown {SSH['user']}: {authorized} && chmod 600 "
+                    f"{authorized}"], input=key + "\n", text=True, check=True)
+    page.click("#ssh-test")
+    expect(page.locator("#ssh-status")).to_contain_text("El otro computador responde", timeout=300_000)
+    expect(page.locator('#storage-backups li[data-id="ssh"] span')).to_have_text("Se usará")
+    page.screenshot(path=evidence / "almacenamiento-ssh.png")
+    print(f"the backup's other computer {SSH['user']}@{SSH['host']} refused AIO's key until it was authorized, then "
+          f"answered with Borg")
+
+
 with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     har = Path(tmp, "wizard.har")  # every answer the browser got, bodies included; it stays out of the evidence
     context = browser.new_context(viewport={"width": 1280, "height": 900}, record_har_path=har,
@@ -142,7 +167,9 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     expect(page.locator("#storage-backups li").first.locator("strong")).to_contain_text(BACKUP_FOLDER)
     expect(page.locator("#storage-backups li[data-state=chosen]")).to_have_count(0)
     expect(page.locator("#storage-continue")).to_be_disabled()
+    other_computer(page)
     page.check('#storage-backups input[value="folder"]')
+    expect(page.locator("#storage-ssh")).to_be_hidden()
     expect(page.locator('#storage-backups li[data-id="folder"] span')).to_have_text("Se usará")
     expect(page.locator("#storage-continue")).to_be_enabled()
     expect(page.locator("#storage-warning")).to_be_hidden()
@@ -227,7 +254,7 @@ backup_password = config["secrets"].get("BORGBACKUP_PASSWORD") or sys.exit("AIO 
 if aio_file("backupsecret") != backup_password:  # AIO's own copy, written when it made the password; neither is printed
     sys.exit("AIO's backup encryption password is not the one it made")
 carried = [url for url, text in answers if not url.endswith("/api/close")
-           and any(secret in text for secret in (passphrase, administrator, backup_password))]
+           and (any(secret in text for secret in (passphrase, administrator, backup_password)) or "PRIVATE KEY" in text)]
 if carried:
     sys.exit(f"these answers of the wizard carried AIO's passphrase, the administrator's password or the backup's "
              f"encryption password: {carried}")
