@@ -1029,6 +1029,106 @@ class BackupDestination(InstallTest):
         self.assertIn("/var/backups/aps-conecta", reason)
 
 
+class RemoteBackup(InstallTest):
+    """«Almacenamiento»'s other computer: the nightly backup goes over SSH to a computer the operator names, its own or
+    a Borg hosting service. The wizard makes AIO's key as AIO would and shows its public half, tests the computer at
+    once with Borg alone and says what is wrong; the install tests it again before handing AIO the remote repository."""
+
+    TARGET = {"host": "copias.example", "port": 22, "user": "aio", "folder": "/srv/copias/aio"}
+    REPO = "ssh://aio@copias.example:22/srv/copias/aio"
+    HOSTED = {"host": "xyz.repo.borgbase.com", "port": 22, "user": "xyz", "folder": "./repo"}
+
+    def remote(self, target=None):
+        return self.choose(backups={"ssh": target or self.TARGET})
+
+    def test_a_computer_that_answers_is_chosen_and_aio_s_key_shows(self):
+        status, body = self.remote()
+        self.assertEqual((status, body["backups"]), (200, {"ssh": self.TARGET}), body)
+        self.assertEqual(self.suite.tested, [self.REPO])
+        self.assertTrue(self.suite.ssh_key_made)
+        storage = self.browser.get("/api/storage")[1]
+        self.assertEqual((storage["backups"], storage["ssh_key"]), ({"ssh": self.TARGET}, FakeSuite.SSH_KEY))
+
+    def test_a_hosting_service_s_relative_folder_makes_its_repository(self):
+        self.assertEqual(self.remote(self.HOSTED)[0], 200)
+        self.assertEqual(self.suite.tested, ["ssh://xyz@xyz.repo.borgbase.com:22/./repo"])
+
+    def test_each_failure_of_the_test_is_its_own_spanish_answer_with_aio_s_public_key(self):
+        for answer, text in (("unreachable", "no responde"), ("key", "clave"), ("borg", "Borg"),
+                             ("folder", "carpeta")):
+            self.suite.remote_answer = answer
+            status, body = self.remote()
+            self.assertEqual(status, 400, answer)
+            self.assertIn(text, body["error"])
+            self.assertEqual(body["key"], FakeSuite.SSH_KEY)
+            self.assertNotIn("PRIVATE KEY", json.dumps(body))
+        self.assertEqual(self.browser.get("/api/storage")[1]["backups"], {"folder": True})  # a refusal stores nothing
+
+    def test_fields_that_make_no_remote_repository_are_refused(self):
+        for target in ({**self.TARGET, "host": ""}, {**self.TARGET, "host": "a b"}, {**self.TARGET, "port": 0},
+                       {**self.TARGET, "port": "22"}, {**self.TARGET, "user": "a@b"}, {**self.TARGET, "folder": ""},
+                       {**self.TARGET, "folder": "/srv/../etc"}, {k: v for k, v in self.TARGET.items() if k != "user"}):
+            status, body = self.remote(target)
+            self.assertEqual(status, 400, target)
+            self.assertIn("otro computador", body["error"])
+        self.assertEqual(self.suite.tested, [])
+
+    def test_the_install_tests_the_computer_again_and_hands_aio_the_remote_repository(self):
+        self.claim()
+        self.remote()
+        self.install()
+        install = self.until("done")
+        self.assertEqual((self.suite.tested, self.suite.backup), ([self.REPO, self.REPO], (self.REPO, "06:00")))
+        self.assertIn("Copia de seguridad: copias.example responde por SSH con Borg.", self.texts(install))
+        self.assertEqual(self.suite.mounts, [])
+
+    def test_each_failure_of_the_test_turns_the_backup_step_red_until_reintentar(self):
+        self.claim()
+        self.remote()
+        for answer, text in (("unreachable", "no responde"), ("key", "clave"), ("borg", "Borg"),
+                             ("folder", "carpeta")):
+            self.suite.remote_answer = answer
+            self.install()
+            status, reason = self.steps(self.until("failed"))["Copias de seguridad"]
+            self.assertEqual(status, "failed", answer)
+            self.assertIn(text, reason)
+            self.assertNotIn("«Probar de nuevo»", reason)
+        self.suite.remote_answer = None
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.backup, (self.REPO, "06:00"))
+
+    def test_the_backup_step_makes_aio_s_key_when_aio_has_none(self):
+        self.claim()
+        self.remote()
+        self.suite.ssh_key_made = False
+        self.install()
+        self.until("done")
+        self.assertTrue(self.suite.ssh_key_made)
+
+    def test_a_repository_the_computer_keeps_is_marked_for_aio_once_the_install_hands_it_over(self):
+        self.suite.remote_kept = True  # an append-only hosting account keeps the test's repository: AIO's own first one
+        self.claim()
+        self.remote()
+        self.assertEqual(self.suite.repository, None)  # the test itself writes nothing in AIO
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.repository, self.REPO)
+
+    def test_a_kept_repository_left_for_the_backup_folder_leaves_aio_unmarked(self):
+        self.suite.remote_kept = True
+        self.claim()
+        self.remote()
+        self.choose(backups={"folder": True})
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.repository, None)
+
+    def test_a_bare_folder_is_under_the_user_s_home(self):
+        self.assertEqual(self.remote({**self.TARGET, "folder": "copias"})[0], 200)
+        self.assertEqual(self.suite.tested, ["ssh://aio@copias.example:22/./copias"])
+
+
 class FilesDisk(InstallTest):
     """The install step «Almacenamiento»: before AIO first creates Nextcloud's container, the chosen disk is mounted for
     good under /mnt/aps-conecta/<uuid>, unless it already is at boot, and AIO keeps the staff's files in its

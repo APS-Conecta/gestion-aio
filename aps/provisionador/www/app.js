@@ -46,7 +46,9 @@ async function api(method, path, body) {
   } catch {
     throw new Error("No se pudo comunicar con el Provisionador. Revise la conexión e intente nuevamente.");
   }
-  if (!response.ok) throw new Error(answer.error || "Ocurrió un error inesperado. Intente nuevamente.");
+  if (!response.ok) {
+    throw Object.assign(new Error(answer.error || "Ocurrió un error inesperado. Intente nuevamente."), {answer});
+  }
   return answer;
 }
 
@@ -363,7 +365,14 @@ function showStorage(storage) {
   $("storage-backups").replaceChildren(
     placeRow("backups", "folder", folderName(storage), system, Boolean(storage.backups?.folder)),
     ...storage.disks.filter((disk) => !disk.system).map((disk) => placeRow("backups", disk.id, diskName(disk), disk,
-      storage.backups?.disk === disk.id)));
+      storage.backups?.disk === disk.id)),
+    placeRow("backups", "ssh", "Otro computador (SSH)", null, Boolean(storage.backups?.ssh)));
+  const ssh = storage.backups?.ssh;
+  if (ssh) {
+    for (const field of ["host", "port", "user", "folder"]) $(`ssh-${field}`).value = ssh[field];
+    showKey(storage.ssh_key);
+  }
+  $("storage-ssh").hidden = !ssh && !$("storage-ssh").dataset.open;
   $("storage-warning").textContent = SAME_DISK;
   $("storage-warning").hidden = !storage.same_disk;
   $("storage-continue").disabled = !(storage.files && storage.backups);
@@ -375,7 +384,7 @@ function showStorage(storage) {
 // A row of one part: a disk or the backup folder, with the radio button that chooses it, «Se usará» where the part goes,
 // else whether it may hold it, its size and free space and, where it may not, why.
 function placeRow(part, value, name, disk, chosen, locked = false) {
-  const reason = disk.reasons[part];
+  const reason = disk?.reasons[part];
   const radio = Object.assign(document.createElement("input"), {type: "radio", name: part, value, checked: chosen,
     disabled: Boolean(reason) || locked});
   const label = element("label", "");
@@ -384,13 +393,20 @@ function placeRow(part, value, name, disk, chosen, locked = false) {
   node.dataset.id = value;
   node.dataset.state = chosen ? "chosen" : reason ? "refused" : "";
   node.append(label, element("span", chosen ? "Se usará" : reason ? "No disponible" : "Disponible"));
-  const facts = [gigabytes(disk.size), disk.free === null ? null : `${gigabytes(disk.free)} libres`, reason];
+  const facts = disk ? [gigabytes(disk.size), disk.free === null ? null : `${gigabytes(disk.free)} libres`, reason]
+    : ["Por SSH, a un computador del establecimiento o a un servicio de copias con Borg"];
   node.append(element("p", facts.filter(Boolean).join(" · ")));
   return node;
 }
 
 async function choosePlace(event) {
   const {name, value} = event.target;
+  if (value === "ssh") {  // the other computer is chosen once its test passes («Probar la conexión»)
+    $("storage-ssh").dataset.open = "yes";
+    $("storage-ssh").hidden = false;
+    return;
+  }
+  if (name === "backups") delete $("storage-ssh").dataset.open;
   const body = name === "files" ? {files: value} : {backups: value === "folder" ? {folder: true} : {disk: value}};
   try {
     showStorage(await api("POST", "/api/storage", body));
@@ -400,12 +416,34 @@ async function choosePlace(event) {
   }
 }
 
+// The other computer: AIO's key made and shown, the computer tested at once; a refusal says why, with the key to add.
+async function testRemote() {
+  const ssh = {host: $("ssh-host").value.trim(), port: Number($("ssh-port").value), user: $("ssh-user").value.trim(),
+    folder: $("ssh-folder").value.trim()};
+  status("ssh-status", "Probando el otro computador…");
+  try {
+    showStorage(await api("POST", "/api/storage", {backups: {ssh}}));
+    status("ssh-status", "El otro computador responde: la copia de seguridad de cada noche irá allí.");
+  } catch (e) {
+    if (e.answer?.key) showKey(e.answer.key);
+    status("ssh-status", e.message, true);
+  }
+  $("ssh-test").textContent = "Probar de nuevo";
+}
+
+function showKey(key) {
+  $("ssh-key").textContent = key || "";
+  $("ssh-key-note").hidden = !key;
+}
+
 // Where the nightly backup goes, as «Revisar» and «Listo» say it, with the warning when it shares the files disk.
 function backupPlace(storage) {
   const byId = (id) => storage.disks.find((disk) => disk.id === id);
+  const ssh = storage.backups?.ssh;
   const place = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
     : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
-      : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
+      : ssh ? `Cada noche, en el otro computador ${ssh.host}, carpeta ${ssh.folder} del usuario ${ssh.user}.`
+        : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
   return storage.same_disk ? `${place} ${SAME_DISK}` : place;
 }
 
@@ -637,6 +675,7 @@ async function start() {
   $("storage-continue").addEventListener("click", revisar);
   $("storage-files").addEventListener("change", choosePlace);
   $("storage-backups").addEventListener("change", choosePlace);
+  $("ssh-test").addEventListener("click", testRemote);
   $("install").addEventListener("click", install);
   $("ai").addEventListener("change", chooseAi);
   $("log").addEventListener("scroll", () => {

@@ -23,6 +23,9 @@
 #   EVIDENCE  an empty directory for the check's own files, such as screenshots
 #   TEST_PASSWORD  the password of each staff account a check makes for itself, masked in the log already
 #   DATA_LABEL     the label of the VM's second disk: ext4, not mounted, with more free space than the system disk
+#   BACKUP_SSH_HOST, BACKUP_SSH_USER, BACKUP_SSH_FOLDER
+#                  another computer for the backup: the runner, at the shared network's address, with Borg and that user,
+#                  whose folder does not exist yet; the check that chooses it adds AIO's key to its authorized_keys
 # A check never prints a secret, not even to mask it: run.sh masks the ones it knows before the checks run.
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
@@ -154,6 +157,13 @@ sudo iptables -I FORWARD -i aps0 -j ACCEPT
 sudo iptables -I FORWARD -o aps0 -j ACCEPT
 sudo dnsmasq --interface=aps0 --except-interface=lo --bind-interfaces --dhcp-range="$ADDRESS,$ADDRESS,12h" \
   "${blocked[@]}"
+
+# The backup's other computer, as an establishment's or a Borg hosting service's: SSH and Borg on the runner, a user
+# with no password to log in with but a key, and a home where AIO's first backup makes the repository.
+export BACKUP_SSH_HOST=192.168.77.1 BACKUP_SSH_USER=copias BACKUP_SSH_FOLDER=/home/copias/aps-conecta
+sudo useradd --create-home --shell /bin/bash --password '*' "$BACKUP_SSH_USER"
+sudo -u "$BACKUP_SSH_USER" install -d -m 700 "/home/$BACKUP_SSH_USER/.ssh"
+sudo systemctl start ssh
 
 ssh-keygen -q -t ed25519 -N '' -C acceptance -f "$work/key"
 printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$work/key.pub")" > "$work/user-data"
