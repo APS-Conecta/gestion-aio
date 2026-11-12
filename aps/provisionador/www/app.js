@@ -21,6 +21,8 @@ const NO_FILES_DISK = "Ningún disco del servidor tiene espacio suficiente para 
   + "espacio o conecte otro disco y vuelva a abrir «Almacenamiento».";
 const SAME_DISK = "La copia de seguridad queda en el mismo disco que los archivos del personal: si ese disco falla, "
   + "se pierden ambos. Para protegerlos, conecte otro disco al servidor.";
+const KEPT_BACKUP = (place) => `La actualización mantiene la copia de seguridad de cada noche en ${place}, donde AIO `
+  + "la guarda; su destino se cambia en la página de AIO, como explica el manual.";
 const AI = "Un modelo de lenguaje en este servidor redacta textos para las aplicaciones, como la nota de Estadística, "
   + "sin enviar datos fuera de él. Puede activarla o desactivarla aquí más adelante.";
 let register = null;
@@ -356,17 +358,19 @@ async function almacenamiento() {
   }
 }
 
-// Both parts are choices: the files disk until «Instalar» was pressed, the backup destination until «Listo». «Continuar»
-// waits for both, and the page says why one cannot be chosen.
+// Both parts are choices: the files disk until «Instalar» was pressed, the backup destination until «Listo», never
+// during an upgrade, which keeps the one AIO holds. «Continuar» waits for both, and the page says why one cannot be
+// chosen.
 function showStorage(storage) {
   const system = storage.disks.find((disk) => disk.system);
   $("storage-files").replaceChildren(...storage.disks.map((disk) => placeRow("files", disk.id, diskName(disk), disk,
     storage.files === disk.id, storage.files_locked)));
+  const locked = storage.backups_locked;
   $("storage-backups").replaceChildren(
-    placeRow("backups", "folder", folderName(storage), system, Boolean(storage.backups?.folder)),
+    placeRow("backups", "folder", folderName(storage), system, Boolean(storage.backups?.folder), locked),
     ...storage.disks.filter((disk) => !disk.system).map((disk) => placeRow("backups", disk.id, diskName(disk), disk,
-      storage.backups?.disk === disk.id)),
-    placeRow("backups", "ssh", "Otro computador (SSH)", null, Boolean(storage.backups?.ssh)));
+      storage.backups?.disk === disk.id, locked)),
+    placeRow("backups", "ssh", "Otro computador (SSH)", null, Boolean(storage.backups?.ssh), locked));
   const ssh = storage.backups?.ssh;
   if (ssh) {
     for (const field of ["host", "port", "user", "folder"]) $(`ssh-${field}`).value = ssh[field];
@@ -377,8 +381,9 @@ function showStorage(storage) {
   $("storage-warning").hidden = !storage.same_disk;
   $("storage-continue").disabled = !(storage.files && storage.backups);
   const anywhere = storage.disks.some((disk) => disk.backups);
-  status("storage-status", !storage.files ? NO_FILES_DISK : storage.backups ? "" : anywhere ? CHOOSE_BACKUP
-    : NO_BACKUP_DISK, !storage.files || !anywhere);
+  const kept = storage.backups?.kept && KEPT_BACKUP(storage.backups.kept);
+  status("storage-status", !storage.files ? NO_FILES_DISK : kept || (storage.backups ? "" : anywhere ? CHOOSE_BACKUP
+    : NO_BACKUP_DISK), !storage.files || !anywhere);
 }
 
 // A row of one part: a disk or the backup folder, with the radio button that chooses it, «Se usará» where the part goes,
@@ -441,6 +446,7 @@ function backupPlace(storage) {
   const byId = (id) => storage.disks.find((disk) => disk.id === id);
   const ssh = storage.backups?.ssh;
   const place = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
+    : storage.backups.kept ? `Cada noche, en ${storage.backups.kept}, donde AIO la guarda.`
     : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
       : ssh ? `Cada noche, en el otro computador ${ssh.host}, carpeta ${ssh.folder} del usuario ${ssh.user}.`
         : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;

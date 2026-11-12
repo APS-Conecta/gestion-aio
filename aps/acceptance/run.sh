@@ -26,6 +26,8 @@
 #   BACKUP_SSH_HOST, BACKUP_SSH_USER, BACKUP_SSH_FOLDER
 #                  another computer for the backup: the runner, at the shared network's address, with Borg and that user,
 #                  whose folder does not exist yet; the check that chooses it adds AIO's key to its authorized_keys
+#   KEPT           on the upgrade path only, a JSON file of where the previous release keeps the suite's data
+#                  (browser.py's layout), as it stood before the upgrade: 18-upgrade finds it unchanged after «Listo»
 # A check never prints a secret, not even to mask it: run.sh masks the ones it knows before the checks run.
 # python3 has Playwright with Chromium (aps-acceptance.yml installs it); browser.py is the one way to open it.
 # Exit 0 passes. A failing check is named in the log, its EVIDENCE gets every container's log and the
@@ -214,6 +216,8 @@ if [ -n "$previous" ]; then
     check "$check" "$previous"
   done
   [ "${#failed[@]}" -eq 0 ] || { echo "failed: ${failed[*]}"; exit 1; }
+  export KEPT="$work/kept.json"
+  PYTHONPATH=aps/acceptance python3 -c 'import json, browser; print(json.dumps(browser.layout()))' > "$KEPT"
 
   stage="the upgrade"
   echo "$(date +%s) upgrade" >> "$work/hardware/stages.txt"

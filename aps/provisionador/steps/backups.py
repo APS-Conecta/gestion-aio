@@ -3,7 +3,8 @@
 """AIO's own nightly backup, to the backup destination the operator chose on «Almacenamiento»: the backup folder on this
 server, the aps-conecta/copias folder of the backup disk, which «Almacenamiento» mounted for good, or a repository on
 another computer over SSH. The destination is tested first, so «Listo» never comes with a backup that cannot be made: a
-file written in the folder and removed at once, or the other computer reached with AIO's key and Borg alone.
+file written in the folder and removed at once, or the other computer reached with AIO's key and Borg alone. After
+«Listo» AIO's page owns the destination: an upgrade keeps the one AIO holds, untested, and sets only the time.
 AIO's automatic updates are on too: AIO's nightly job (Containers/mastercontainer/daily-backup.sh) then keeps the
 containers on the release's pins and updates the store's apps, which our host timer (install.sh) also does every
 night."""
@@ -19,6 +20,7 @@ BACKUP_TIME = "06:00"  # UTC, as AIO's clock runs: 02:00 or 03:00 in continental
 COPIES = "aps-conecta/copias"  # the backup's folder on a backup disk, beside the staff's files folder
 WRITTEN = "Copia de seguridad: se pudo escribir en {}."
 REACHED = "Copia de seguridad: {} responde por SSH con Borg."
+KEPT = "Copia de seguridad: sigue en {}, donde AIO la guarda."
 NOT_A_COMPUTER = ("Indique el otro computador de la copia de seguridad: su nombre o dirección, su puerto SSH (de 1 a "
                   "65535), el usuario y la carpeta del repositorio, sin espacios ni «..».")
 HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*")  # a host's name or IPv4 address
@@ -41,9 +43,15 @@ def remote(ssh):
     return f"ssh://{user}@{host}:{port}{folder if folder.startswith('/') else '/' + folder}"
 
 
+def held_destination(suite, upgrade):
+    """At an upgrade, the backup destination AIO holds, which its page owns since «Listo»; None otherwise, and when AIO
+    holds none."""
+    return suite.backup_settings()[0] if upgrade else None
+
+
 def destination(context):
-    """Where AIO's nightly backup goes: a folder on this server or a remote repository; raises LookupError when the
-    backup disk is gone."""
+    """Where the operator chose on «Almacenamiento» that AIO's nightly backup goes: a folder on this server or a remote
+    repository; raises LookupError when the backup disk is gone."""
     ssh = (context.backups or {}).get("ssh")
     if ssh:
         return remote(ssh)
@@ -52,6 +60,10 @@ def destination(context):
 
 
 def run(context):
+    if held := held_destination(context.suite, context.upgrade):
+        context.log(KEPT.format(held))
+        context.suite.back_up(held, BACKUP_TIME)
+        return None
     try:
         target = destination(context)
     except LookupError:
@@ -70,7 +82,7 @@ def run(context):
 
 def check(context):
     try:
-        target = destination(context)
+        target = held_destination(context.suite, context.upgrade) or destination(context)
     except LookupError:
         return [BACKUP_GONE]
     held = context.suite.backup_settings()

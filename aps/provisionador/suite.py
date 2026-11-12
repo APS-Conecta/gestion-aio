@@ -89,6 +89,10 @@ UNWRITABLE = ("No se pudo escribir en {}, el destino de la copia de seguridad. R
               "presione «Reintentar», o elija otro destino en «Almacenamiento».")
 FILES_FAILED = ("No se pudo preparar la carpeta {} para los archivos del personal. Presione «Reintentar»; si vuelve a "
                 "ocurrir, contacte a APS Conecta.")
+FILES_STAY = ("AIO ya guarda los archivos del personal en {}, y la suite no los mueve a {}. Revise que el disco de los "
+              "archivos siga montado donde estaba y presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
+              "Conecta.")
+OWN_VOLUME = "su propio volumen"  # where AIO keeps the staff's files without NEXTCLOUD_DATADIR
 SUITE_REFUSED = ("El contenedor maestro de la suite rechazó la instalación (HTTP {code}). Presione «Reintentar»; si "
                  "vuelve a ocurrir, contacte a APS Conecta.")
 NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores de la suite. Presione «Reintentar»; si "
@@ -811,9 +815,13 @@ class Suite:
         """AIO keeps the staff's files in the folder from its next start of Nextcloud's container on, unless it already
         does: the folder made as Nextcloud's container needs it (owned by its web user and group root, mode 750),
         written where the bundle's mastercontainer start reads it, and the mastercontainer started again through that
-        start, which passes it to AIO as NEXTCLOUD_DATADIR; then AIO's page answers again."""
-        if self.files_folder() == folder:
+        start, which passes it to AIO as NEXTCLOUD_DATADIR; then AIO's page answers again. Once Nextcloud's container
+        exists the files are where AIO keeps them, so another folder is Unreachable, FILES_STAY, and nothing moves."""
+        held = self.files_folder()
+        if held == folder:
             return
+        if host("docker", "ps", "--all", "--quiet", "--filter", f"name=^{NEXTCLOUD}$", failed=SUITE_DOWN).strip():
+            raise Unreachable(FILES_STAY.format(held or OWN_VOLUME, folder))
         try:
             os.makedirs(folder, exist_ok=True)
             os.chown(folder, WWW_DATA, 0)
@@ -1024,6 +1032,8 @@ class FakeSuite:
     BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
     SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAPSConectaGestionFakeKeyForRemoteBackups root@nextcloud-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
+    ADDED = 31  # the permissions Groupfolders gives a group it adds to a folder: every one
+    INTRAVOX_GRANTS = {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7, "IntraVox Users": 1}  # first setup's
     # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
     SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda",
                    "model": "", "size": 60 * 10 ** 9, "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True,
@@ -1160,6 +1170,8 @@ class FakeSuite:
 
     def place_files(self, folder):
         if self.files_in != folder:
+            if self.starts:  # AIO's start created Nextcloud's container, whose data is where AIO keeps the files
+                raise Unreachable(FILES_STAY.format(self.files_in or OWN_VOLUME, folder))
             self.files_in = folder
             self.restarts += 1
 
@@ -1400,12 +1412,14 @@ class FakeSuite:
         elif (command, args) == ("intravox:setup", ("--skip-demo",)):
             if self.apps.get("groupfolders", {}).get("enabled") != "yes":
                 raise failed
-            for group in ("IntraVox Admins", "IntraVox Editors", "IntraVox Users"):
+            for group in self.INTRAVOX_GRANTS.keys() - {"admin"}:
                 self.groups.setdefault(group, {"name": group, "members": set()})
             mount = self.apps[app].get("groupfolder_name", "IntraVox")
             if mount not in mounts:
-                self._group_folder(mount, {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7,
-                                           "IntraVox Users": 1})
+                self._group_folder(mount, dict(self.INTRAVOX_GRANTS))
+            else:  # each rerun grants the folder its groups again where it lacks them, as Groupfolders adds a group
+                for group in self.INTRAVOX_GRANTS:
+                    self.group_folders[mounts[mount]]["groups"].setdefault(group, self.ADDED)
         elif (command, args) == ("intravox:reindex", ()):  # as Nextcloud's admin, whom the admin group's grant lets read
             mount = self.apps[app].get("groupfolder_name", "IntraVox")
             if not self.group_folders.get(mounts.get(mount), {}).get("groups", {}).get("admin", 0) & 1:
