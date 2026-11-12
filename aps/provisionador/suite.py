@@ -208,6 +208,16 @@ if ($in['kept']) {  // a remote repository already in place: marked as backupscr
 """
 
 
+# AIO's backup encryption password, made as AIO makes it for its borg container when it has none yet: before
+# «Instalar» AIO has created no container, so the other computer's test makes it, and AIO's first backup uses it.
+BACKUP_PASSWORD = r"""
+ini_set('display_errors', 'stderr');
+require '/var/www/docker-aio/php/vendor/autoload.php';
+echo \AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class)
+    ->getAndGenerateSecret('BORGBACKUP_PASSWORD');
+"""
+
+
 # «IA local»'s switch of our «ollama» community container (community-containers/ollama), from the JSON object on stdin:
 # on, it joins AIO's community containers with AIO's NVIDIA switch as the GPU found asks and its memory cap among AIO's
 # secrets, and AIO's own code recreates and starts it, as AIO's start does; off, it stops, AIO removes it, keeping its
@@ -884,12 +894,13 @@ class Suite:
 
     def reachable(self, repo):
         """The other computer takes AIO's backup at the remote repository, Borg alone, from AIO's pinned borg image with
-        AIO's key and passphrase: a repository AIO's passphrase opens passes; where there is none yet, one is made as
-        AIO's first backup makes it and then deleted, which proves the folder takes it. Whether AIO's repository is in
-        place: one that opens, or the one made when the computer keeps it whole, as an append-only hosting account
-        does. Nothing is written in AIO: `back_up` marks it. Unreachable, with why, when the computer does not take
-        it."""
-        env = {"BORG_REPO": repo, "BORG_PASSPHRASE": self.secrets()["backup_password"],
+        AIO's key and passphrase, the passphrase made first as AIO makes it when it has none yet: a repository it
+        opens passes; where there is none yet, one is made as AIO's first backup makes it and then deleted, which proves
+        the folder takes it. Whether AIO's repository is in place: one that opens, or the one made when the computer
+        keeps it whole, as an append-only hosting account does. The destination is not written in AIO: `back_up` sets
+        and marks it. Unreachable, with why, when the computer does not take it."""
+        passphrase = self.mastercontainer("php", "-r", BACKUP_PASSWORD)
+        env = {"BORG_REPO": repo, "BORG_PASSPHRASE": passphrase,
                "BORG_RSH": f"ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 "
                            f"-i {BORG_KEY}"}
         answer = self.borg("borg", "info", env=env, failed=None)
