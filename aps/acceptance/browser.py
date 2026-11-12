@@ -128,6 +128,21 @@ def files_folder():
     return next((line.split("=", 1)[1] for line in env if line.startswith("NEXTCLOUD_DATADIR=")), None)
 
 
+def data_folder():
+    """AIO's data folder, the staff's files folder, with the disk and the mount point that hold it."""
+    folder = files_folder() or machine("sudo docker volume inspect --format '{{.Mountpoint}}' "
+                                       "nextcloud_aio_nextcloud_data").strip()
+    return folder, machine(f"sudo findmnt --noheadings --output SOURCE,TARGET --target {folder}").split()
+
+
+def layout():
+    """Where the suite keeps its data, which an upgrade keeps: AIO's data folder with the disk and the mount point that
+    hold it, and AIO's backup destination, its folder on the machine or its remote repository."""
+    folder, held = data_folder()
+    config = aio_config()
+    return {"files": [folder, *held], "backup": config["borg_backup_host_location"] or config["borg_remote_repo"]}
+
+
 def suite_name():
     """The suite's name, which «Dirección» claimed: AIO's domain."""
     name = aio_config().get("domain")

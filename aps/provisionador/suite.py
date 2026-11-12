@@ -89,6 +89,10 @@ UNWRITABLE = ("No se pudo escribir en {}, el destino de la copia de seguridad. R
               "presione «Reintentar», o elija otro destino en «Almacenamiento».")
 FILES_FAILED = ("No se pudo preparar la carpeta {} para los archivos del personal. Presione «Reintentar»; si vuelve a "
                 "ocurrir, contacte a APS Conecta.")
+FILES_STAY = ("AIO ya guarda los archivos del personal en {}, y la suite no los mueve a {}. Revise que el disco de los "
+              "archivos siga montado donde estaba y presione «Reintentar»; si vuelve a ocurrir, contacte a APS "
+              "Conecta.")
+OWN_VOLUME = "su propio volumen"  # where AIO keeps the staff's files without NEXTCLOUD_DATADIR
 SUITE_REFUSED = ("El contenedor maestro de la suite rechazó la instalación (HTTP {code}). Presione «Reintentar»; si "
                  "vuelve a ocurrir, contacte a APS Conecta.")
 NOT_STARTED = ("El contenedor maestro no logró iniciar todos los contenedores de la suite. Presione «Reintentar»; si "
@@ -811,9 +815,13 @@ class Suite:
         """AIO keeps the staff's files in the folder from its next start of Nextcloud's container on, unless it already
         does: the folder made as Nextcloud's container needs it (owned by its web user and group root, mode 750),
         written where the bundle's mastercontainer start reads it, and the mastercontainer started again through that
-        start, which passes it to AIO as NEXTCLOUD_DATADIR; then AIO's page answers again."""
-        if self.files_folder() == folder:
+        start, which passes it to AIO as NEXTCLOUD_DATADIR; then AIO's page answers again. Once Nextcloud's container
+        exists the files are where AIO keeps them, so another folder is Unreachable, FILES_STAY, and nothing moves."""
+        held = self.files_folder()
+        if held == folder:
             return
+        if host("docker", "ps", "--all", "--quiet", "--filter", f"name=^{NEXTCLOUD}$", failed=SUITE_DOWN).strip():
+            raise Unreachable(FILES_STAY.format(held or OWN_VOLUME, folder))
         try:
             os.makedirs(folder, exist_ok=True)
             os.chown(folder, WWW_DATA, 0)
@@ -1160,6 +1168,8 @@ class FakeSuite:
 
     def place_files(self, folder):
         if self.files_in != folder:
+            if self.starts:  # AIO's start created Nextcloud's container, whose data is where AIO keeps the files
+                raise Unreachable(FILES_STAY.format(self.files_in or OWN_VOLUME, folder))
             self.files_in = folder
             self.restarts += 1
 

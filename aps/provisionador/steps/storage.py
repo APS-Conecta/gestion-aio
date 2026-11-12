@@ -7,7 +7,7 @@ files disk's aps-conecta/archivos folder: its NEXTCLOUD_DATADIR, which the boots
 then on. Files on the system disk, and an install that stored no files disk, stay in AIO's own volume. Nothing is
 formatted, partitioned or deleted."""
 
-from suite import MOUNTS
+from suite import MOUNTS, OWN_VOLUME
 
 NAME = "Almacenamiento"
 NEEDS = ()
@@ -21,7 +21,6 @@ NOT_MOUNTED = ("El disco {} ya no queda montado en {} en cada arranque del servi
                "ocurrir, contacte a APS Conecta.")
 ELSEWHERE = ("AIO guarda los archivos del personal en {}, no en {}. Presione «Reintentar»; si vuelve a ocurrir, "
              "contacte a APS Conecta.")
-OWN_VOLUME = "su propio volumen"
 
 
 def chosen(context, disk_id):
