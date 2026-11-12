@@ -42,28 +42,29 @@ def floors():
 FLOORS = floors()
 
 
-def roles(disk):
-    """(may hold the staff's files, may hold the backup, why not in Spanish or None)."""
-    if disk["system"]:
-        return True, True, None
+def reasons(disk):
+    """Why the disk may not hold the staff's files and the backup, {"files": reason, "backups": reason}, in Spanish,
+    None where it may."""
     filesystem = disk["filesystem"]
-    if not filesystem:
-        return False, False, UNFORMATTED
-    if filesystem in WINDOWS:
-        return False, False, WINDOWS_FORMAT
-    if filesystem not in LINUX:
-        return False, False, OTHER_FORMAT.format(filesystem)
-    if disk["free"] is None:
-        return False, False, FREE_UNREAD
-    if disk["usb"]:
-        return False, True, USB_BACKUPS_ONLY
-    return True, True, None
+    if disk["system"]:
+        refused = None
+    elif not filesystem:
+        refused = UNFORMATTED
+    elif filesystem in WINDOWS:
+        refused = WINDOWS_FORMAT
+    elif filesystem not in LINUX:
+        refused = OTHER_FORMAT.format(filesystem)
+    elif disk["free"] is None:
+        refused = FREE_UNREAD
+    else:
+        return {"files": USB_BACKUPS_ONLY if disk["usb"] else None, "backups": None}
+    return {"files": refused, "backups": refused}
 
 
-def limit(disk, role, need):
-    """The disk keeps the role only with `need` bytes free; without them it no longer holds it, for lack of room."""
-    if disk[role] and disk["free"] < need:
-        disk[role], disk["reason"] = False, NO_ROOM
+def limit(disk, part, need):
+    """The disk keeps the part only with `need` bytes free; without them it no longer holds it, for lack of room."""
+    if disk["reasons"][part] is None and disk["free"] < need:
+        disk["reasons"][part] = NO_ROOM
 
 
 def most_free(disks):
@@ -71,28 +72,40 @@ def most_free(disks):
     return max(disks, key=lambda disk: disk["free"], default=None)
 
 
-def shown(disks, files=None, installed=False):
-    """«Almacenamiento» as GET /api/storage answers it: each disk with its roles, then the files disk and the backup
-    destination. Until «Instalar», each disk holds a role only with room for it; from then on the suite already takes
-    its room, and the floors no longer apply. The files disk is the one the operator chose, by its id; with none chosen,
-    the system disk once «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files
-    are, and before it, the disk with the most free space that may hold them, or None when no disk has room for them.
-    The backup destination is the backup folder when no other disk may hold the backup and the system disk may,
-    otherwise None, for the operator to choose."""
-    listed = [{**disk, **dict(zip(("files", "backups", "reason"), roles(disk)))} for disk in disks]
+def shown(disks, files=None, backups=None, installed=False):
+    """«Almacenamiento» as GET /api/storage answers it: each disk with why it may not hold each part, then the files disk
+    and the backup destination.
+
+    Until «Instalar», each disk holds a part only with room for it, and for the other part when that sits there too;
+    the system disk also keeps the suite's room. From «Instalar» on the suite already takes its room, and the floors no
+    longer apply. The files disk is the one the operator chose, by its id; with none chosen, the system disk once
+    «Instalar» was pressed, which keeps a server installed before «Almacenamiento» where its files are, and before it,
+    the disk with the most free space that may hold them, or None when no disk has room for them. The backup
+    destination, {"folder": True} for the backup folder on the system disk or {"disk": id}, is the one the operator
+    chose; with none, the backup folder once «Instalar» was pressed, as on a server installed before «Almacenamiento»,
+    or when no other disk may hold the backup, one drive being one disk, and the system disk may; otherwise None, for
+    the operator to choose. The backup shares the files disk when it sits on that disk's
+    drive."""
+    listed = [{**disk, "reasons": reasons(disk)} for disk in disks]
     system = next(disk for disk in listed if disk["system"])
     floors = dict.fromkeys(FLOORS, 0) if installed else FLOORS
+    backup_disk = (backups or {}).get("disk")
     for disk in listed:
         if disk is not system:
-            limit(disk, "files", floors["files"])
-            limit(disk, "backups", floors["backup"])
-    alone = not any(disk["backups"] for disk in listed if disk is not system)
-    limit(system, "files", floors["program"] + floors["files"] + (floors["backup"] if alone else 0))
+            limit(disk, "files", floors["files"] + (floors["backup"] if backup_disk == disk["id"] else 0))
+            limit(disk, "backups", floors["backup"] + (floors["files"] if files == disk["id"] else 0))
+    alone = not any(disk["reasons"]["backups"] is None for disk in listed if disk["drive"] != system["drive"])
+    in_folder = backups == {"folder": True} or (backups is None and alone)
+    limit(system, "files", floors["program"] + floors["files"] + (floors["backup"] if in_folder else 0))
     if not files:
-        found = system if installed else most_free([disk for disk in listed if disk["files"]])
+        found = system if installed else most_free([disk for disk in listed if disk["reasons"]["files"] is None])
         files = found and found["id"]
-    on_system = files == system["id"]
-    limit(system, "backups", floors["program"] + floors["backup"] + (floors["files"] if on_system else 0))
-    backups = {"folder": True} if alone and system["backups"] else None
-    return {"disks": listed, "files": files, "files_locked": installed, "backups": backups, "folder": BACKUP_FOLDER,
-            "same_disk": bool(backups) and on_system}
+    limit(system, "backups", floors["program"] + floors["backup"] + (floors["files"] if files == system["id"] else 0))
+    if backups is None and (installed or alone and system["reasons"]["backups"] is None):
+        backups = {"folder": True}
+    drives = {disk["id"]: disk["drive"] for disk in listed}
+    held = system["drive"] if backups == {"folder": True} else drives.get(backup_disk)
+    return {"disks": [{**disk, "files": disk["reasons"]["files"] is None, "backups": disk["reasons"]["backups"] is None}
+                      for disk in listed],
+            "files": files, "files_locked": installed, "backups": backups, "folder": BACKUP_FOLDER,
+            "same_disk": bool(backups) and held is not None and held == drives.get(files)}

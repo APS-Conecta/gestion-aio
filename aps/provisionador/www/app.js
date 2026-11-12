@@ -14,6 +14,9 @@ const STEP_STATES = {pending: "Pendiente", running: "En curso", green: "Completa
 const ADMINISTRATOR = "primer/a administrador/a de la suite";
 const APPLY = " Los cambios se aplican al presionar «Reintentar» en «Revisar».";
 const DROPPED = "Retirado/a: ya no está en la planilla";
+const CHOOSE_BACKUP = "Elija dónde se guarda la copia de seguridad de cada noche.";
+const NO_BACKUP_DISK = "Ningún disco del servidor tiene espacio suficiente para la copia de seguridad. Libere espacio o "
+  + "conecte otro disco y vuelva a abrir «Almacenamiento».";
 const NO_FILES_DISK = "Ningún disco del servidor tiene espacio suficiente para los archivos del personal. Libere "
   + "espacio o conecte otro disco y vuelva a abrir «Almacenamiento».";
 const SAME_DISK = "La copia de seguridad queda en el mismo disco que los archivos del personal: si ese disco falla, "
@@ -345,44 +348,65 @@ async function reach(name) {
 async function almacenamiento() {
   show("almacenamiento");
   try {
-    const storage = await api("GET", "/api/storage");
-    showStorage(storage);
-    status("storage-status", storage.files ? "" : NO_FILES_DISK, !storage.files);
+    showStorage(await api("GET", "/api/storage"));
   } catch (e) {
     status("storage-status", e.message, true);
   }
 }
 
-// The files disk is a choice until «Instalar» was pressed; the backup is shown as it goes.
+// Both parts are choices: the files disk until «Instalar» was pressed, the backup destination until «Listo». «Continuar»
+// waits for both, and the page says why one cannot be chosen.
 function showStorage(storage) {
-  const others = storage.disks.filter((disk) => !disk.system);
-  $("storage-files").replaceChildren(...storage.disks.map((disk) => filesChoice(disk, storage)));
-  const folder = {...storage.disks.find((disk) => disk.system), name: folderName(storage)};
-  $("storage-backups").replaceChildren(diskItem(folder, true, Boolean(storage.backups?.folder)),
-    ...others.map((disk) => diskItem(disk, disk.backups, storage.backups?.disk === disk.id)));
+  const system = storage.disks.find((disk) => disk.system);
+  $("storage-files").replaceChildren(...storage.disks.map((disk) => placeRow("files", disk.id, diskName(disk), disk,
+    storage.files === disk.id, storage.files_locked)));
+  $("storage-backups").replaceChildren(
+    placeRow("backups", "folder", folderName(storage), system, Boolean(storage.backups?.folder)),
+    ...storage.disks.filter((disk) => !disk.system).map((disk) => placeRow("backups", disk.id, diskName(disk), disk,
+      storage.backups?.disk === disk.id)));
   $("storage-warning").textContent = SAME_DISK;
   $("storage-warning").hidden = !storage.same_disk;
+  $("storage-continue").disabled = !(storage.files && storage.backups);
+  const anywhere = storage.disks.some((disk) => disk.backups);
+  status("storage-status", !storage.files ? NO_FILES_DISK : storage.backups ? "" : anywhere ? CHOOSE_BACKUP
+    : NO_BACKUP_DISK, !storage.files || !anywhere);
 }
 
-// A disk for the staff's files, with the radio button that chooses it.
-function filesChoice(disk, storage) {
-  const node = diskItem(disk, disk.files, storage.files === disk.id);
-  const radio = Object.assign(document.createElement("input"), {type: "radio", name: "files", value: disk.id,
-    checked: storage.files === disk.id, disabled: !disk.files || storage.files_locked});
+// A row of one part: a disk or the backup folder, with the radio button that chooses it, «Se usará» where the part goes,
+// else whether it may hold it, its size and free space and, where it may not, why.
+function placeRow(part, value, name, disk, chosen, locked = false) {
+  const reason = disk.reasons[part];
+  const radio = Object.assign(document.createElement("input"), {type: "radio", name: part, value, checked: chosen,
+    disabled: Boolean(reason) || locked});
   const label = element("label", "");
-  label.append(radio, node.querySelector("strong"));
-  node.prepend(label);
+  label.append(radio, element("strong", name));
+  const node = element("li", "");
+  node.dataset.id = value;
+  node.dataset.state = chosen ? "chosen" : reason ? "refused" : "";
+  node.append(label, element("span", chosen ? "Se usará" : reason ? "No disponible" : "Disponible"));
+  const facts = [gigabytes(disk.size), disk.free === null ? null : `${gigabytes(disk.free)} libres`, reason];
+  node.append(element("p", facts.filter(Boolean).join(" · ")));
   return node;
 }
 
-async function chooseFiles(event) {
+async function choosePlace(event) {
+  const {name, value} = event.target;
+  const body = name === "files" ? {files: value} : {backups: value === "folder" ? {folder: true} : {disk: value}};
   try {
-    showStorage(await api("POST", "/api/storage", {files: event.target.value}));
-    status("storage-status", "");
+    showStorage(await api("POST", "/api/storage", body));
   } catch (e) {
-    status("storage-status", e.message, true);
     showStorage(await api("GET", "/api/storage"));
+    status("storage-status", e.message, true);
   }
+}
+
+// Where the nightly backup goes, as «Revisar» and «Listo» say it, with the warning when it shares the files disk.
+function backupPlace(storage) {
+  const byId = (id) => storage.disks.find((disk) => disk.id === id);
+  const place = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
+    : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
+      : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
+  return storage.same_disk ? `${place} ${SAME_DISK}` : place;
 }
 
 function gigabytes(bytes) {
@@ -396,17 +420,6 @@ function diskName(disk) {
 
 function folderName(storage) {
   return `Carpeta de copias de este servidor, ${storage.folder}`;
-}
-
-// A disk on «Almacenamiento»: «Se usará» where its part goes, else whether it may hold it, its size and free space,
-// and, where it can't hold it, why.
-function diskItem(disk, offered, chosen) {
-  const facts = [gigabytes(disk.size), disk.free === null ? null : `${gigabytes(disk.free)} libres`,
-    offered ? null : disk.reason].filter(Boolean).join(" · ");
-  const node = item(disk.name || diskName(disk), chosen ? "chosen" : offered ? "" : "refused",
-    chosen ? "Se usará" : offered ? "Disponible" : "No disponible", facts);
-  node.dataset.id = disk.id;
-  return node;
 }
 
 // «Revisar»: one summary of what will be installed, then «Instalar»; the progress follows each step and, once AIO runs
@@ -436,12 +449,9 @@ async function revisar() {
       chosen: state.ai.chosen}));
     follow(state, false);
     const storage = await api("GET", "/api/storage");
-    const byId = (id) => storage.disks.find((disk) => disk.id === id);
-    $("summary-files").textContent = storage.files ? diskName(byId(storage.files)) : NO_FILES_DISK;
-    const backups = !storage.backups ? "Aún sin elegir: se elige en «Almacenamiento»."
-      : storage.backups.folder ? `Cada noche, en la carpeta ${storage.folder} del servidor.`
-        : `Cada noche, en el disco ${diskName(byId(storage.backups.disk))}.`;
-    $("summary-backups").textContent = storage.same_disk ? `${backups} ${SAME_DISK}` : backups;
+    const files = storage.disks.find((disk) => disk.id === storage.files);
+    $("summary-files").textContent = files ? diskName(files) : NO_FILES_DISK;
+    $("summary-backups").textContent = backupPlace(storage);
   } catch (e) {
     status("install-status", e.message, true);
   }
@@ -541,8 +551,9 @@ async function listo(name) {
     const storage = await api("GET", "/api/storage");
     const files = storage.disks.find((disk) => disk.id === storage.files);
     $("files-place").textContent = `Los archivos del personal quedan en: ${files ? diskName(files) : storage.files}.`;
+    $("backups-place").textContent = `La copia de seguridad: ${backupPlace(storage)}`;
   } catch {
-    $("files-place").textContent = "";
+    $("files-place").textContent = $("backups-place").textContent = "";
   }
   try {
     const {passwords, file} = await api("POST", "/api/close", {});
@@ -624,7 +635,8 @@ async function start() {
   });
   $("teams-continue").addEventListener("click", async () => (await keepTeams()) && almacenamiento());
   $("storage-continue").addEventListener("click", revisar);
-  $("storage-files").addEventListener("change", chooseFiles);
+  $("storage-files").addEventListener("change", choosePlace);
+  $("storage-backups").addEventListener("change", choosePlace);
   $("install").addEventListener("click", install);
   $("ai").addEventListener("change", chooseAi);
   $("log").addEventListener("scroll", () => {
