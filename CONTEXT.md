@@ -39,9 +39,11 @@ release «Latest» once every check passes, and is withdrawn otherwise.
 **Upgrade** (actualización):
 Rerunning the one command on an installed server moves it to the latest release: the bundle and the mastercontainer move to
 it, the suite stops, every install step but the people's runs again (their Users page owns them), keeping the group admins
-and folder grants administrators added after «Listo», and the reopened wizard shows the reconcile to «Listo». Between
-releases, AIO's nightly job — on, after the 06:00 UTC backup — keeps the containers on the release's pins, and the store's
-apps update nightly (own and fork apps move only with a release, their releases above the store's versions).
+and folder grants administrators added after «Listo» (but for IntraVox's own groups, whose grants IntraVox's setup
+gives again on every update), the files disk with AIO's data folder on it, and the backup destination AIO holds, which
+an administrator may have changed on AIO's page, and the reopened wizard shows the reconcile to «Listo». Between releases, AIO's nightly job — on, after the 06:00 UTC backup — keeps the containers on the
+release's pins, and the store's apps update nightly (own and fork apps move only with a release, their releases above
+the store's versions).
 
 **Test establishment** (establecimiento de prueba):
 APS Conecta's own entry beside the DEIS register, under a code outside DEIS's. «Centro» never lists it, and only APS's
@@ -110,12 +112,13 @@ in its aps-conecta/copias folder, and the install mounts it for good, as it moun
 one.
 
 **Backup destination** (destino de las copias):
-The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento» until «Listo»: the backup
-folder, the aps-conecta/copias folder of another disk, USB included, which the install mounts for good, or a repository
-on another computer over SSH, the establishment's own or a Borg hosting service's, which takes AIO's key. On a server
-where no other disk may hold it, one drive being one disk, the backup folder, chosen already when the system disk has
-room for it. The install tests it before handing it to AIO, a test file written in a folder or the other computer
-reached with Borg, and warns when it sits on the files disk's drive.
+The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento» until the install's «Listo»:
+the backup folder, the aps-conecta/copias folder of another disk, USB included, which the install mounts for good, or a
+repository on another computer over SSH, the establishment's own or a Borg hosting service's, which takes AIO's key. On
+a server where no other disk may hold it, one drive being one disk, the backup folder, chosen already when the system
+disk has room for it. The install tests it before handing it to AIO, a test file written in a folder or the other
+computer reached with Borg, and warns when it sits on the files disk's drive. After «Listo», an upgrade included, AIO's
+page owns it.
 
 **Backup folder** (carpeta de copias de seguridad):
 `/var/backups/aps-conecta` on the server: the backup destination on the system disk.

@@ -8,9 +8,12 @@ again. A fresh link opens the wizard at the same install, whose log names the up
 wizard offers, fill «Personal» with the install's people, with their cargos, and upload it, as 17-install does; once
 the other steps are done, the people's step alone is red, and «Reintentar» applies them. Where «Equipos» still loads the
 kept spreadsheet, nothing is uploaded and the people's step stays green throughout, for the Users page owns the people.
-«Listo» follows as at the first install: the suite keeps its name and address, the passwords file is handed over again
-and the wizard closes."""
+«Almacenamiento» shows the backup destination AIO holds, which only AIO's page changes now. «Listo» follows as at the
+first install: the suite keeps its name and address, AIO's data folder on the same disk and mount point and its backup
+destination (run.sh's KEPT, as they stood before the upgrade), the passwords file is handed over again and the wizard
+closes."""
 
+import json
 import os
 import subprocess
 import sys
@@ -22,7 +25,8 @@ from urllib.parse import urlsplit
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
 import spreadsheet  # noqa: E402
-from browser import chromium, machine, provisionador_file, provisionador_state, suite_name, verified, wizard_link  # noqa: E402
+from browser import chromium, layout, machine, provisionador_file, provisionador_state, suite_name  # noqa: E402
+from browser import verified, wizard_link  # noqa: E402
 from browser import XLSX, people_workbook, upload_people  # noqa: E402
 from playwright.sync_api import expect  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
@@ -37,10 +41,10 @@ def step_states(page):
                                            "items => items.map(i => [i.querySelector('strong').textContent, i.dataset.state])"))
 
 
-def reload_people(page, state):
-    """«Equipos» after the upgrade, then on through «Almacenamiento» to «Revisar»: where it rejects the people
-    spreadsheet the previous release kept, the workbook the upgraded wizard offers, filled with the install's people,
-    uploaded; whether it had to."""
+def reload_people(page, state, backup):
+    """«Equipos» after the upgrade, then on through «Almacenamiento», which shows the backup destination AIO holds, to
+    «Revisar»: where «Equipos» rejects the people spreadsheet the previous release kept, the workbook the upgraded
+    wizard offers, filled with the install's people, uploaded; whether it had to."""
     page.click(".step-link[data-step=equipos]")
     expect(page.get_by_role("heading", name="Equipos")).to_be_visible()
     rejected = page.locator("#people-errors li").all_inner_texts()
@@ -53,6 +57,9 @@ def reload_people(page, state):
         page.screenshot(path=evidence / "equipos.png")
     page.click("#teams-continue")
     expect(page.get_by_role("heading", name="Almacenamiento")).to_be_visible()
+    expect(page.locator("#storage-status")).to_contain_text(f"copia de seguridad de cada noche en {backup}, donde AIO")
+    expect(page.locator("#storage-backups input:enabled")).to_have_count(0)
+    page.screenshot(path=evidence / "almacenamiento.png")
     page.click("#storage-continue")
     expect(page.get_by_role("heading", name="Revisar")).to_be_visible()
     return bool(rejected)
@@ -62,7 +69,7 @@ tag = os.environ["TAG"]
 version = machine("cat /opt/aps-conecta/gestion/VERSION").strip()
 if version != tag:
     sys.exit(f"the machine holds the bundle of {version}, not {tag}'s upgrade")
-name, state = suite_name(), provisionador_state()
+name, state, kept = suite_name(), provisionador_state(), json.loads(Path(os.environ["KEPT"]).read_text())
 # the marking the one command's upgrade leaves, which it sets only over a finished, closed install
 if state.get("install", {}).get("upgrade") != tag:
     sys.exit(f"the wizard's state records no upgrade to {tag}: did the previous release's install ever finish?")
@@ -79,7 +86,7 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
     expect(page.locator("#steps li")).not_to_have_count(0)  # the reconcile runs by itself
     expect(page.locator("#log")).to_contain_text(f"Comienza la actualización a {tag}", timeout=60_000)
     page.screenshot(path=evidence / "actualizacion.png")
-    reloaded, retried = reload_people(page, state), False
+    reloaded, retried = reload_people(page, state, kept["backup"]), False
     deadline = time.monotonic() + LISTO_WITHIN * 60
     while not page.locator("#listo").is_visible():
         states = step_states(page)
@@ -97,6 +104,7 @@ with chromium(pinned=[verified(url.hostname, url.port, printed)]) as browser:
                      f"{page.inner_text('#steps')}")
         page.wait_for_timeout(2000)
     expect(page.locator("#suite-address")).to_have_text(f"https://{name}")
+    expect(page.locator("#backups-place")).to_contain_text(kept["backup"])
     page.screenshot(path=evidence / "listo.png")
     with page.expect_download() as download:
         page.click("#passwords")
@@ -109,6 +117,9 @@ if handed != provisionador_file(FILE):
 after = provisionador_state()
 if after["address"]["name"] != state["address"]["name"]:
     sys.exit(f"the upgrade changed the suite's name: {state['address']['name']} → {after['address']['name']}")
+if (now := layout()) != kept:
+    sys.exit(f"the upgrade moved the suite's data: {kept} → {now}")
 people = "loaded its people again from the workbook it offers" if reloaded else "kept its people"
-print(f"the upgrade to {version} reopened the wizard, kept https://{name}, {people} "
-      "and closed at «Listo» with the passwords file")
+folder, source, point = kept["files"]
+print(f"the upgrade to {version} reopened the wizard, kept https://{name}, {people}, AIO's data folder {folder} on "
+      f"{source} mounted at {point} and its backup at {kept['backup']}, and closed at «Listo» with the passwords file")
