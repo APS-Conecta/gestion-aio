@@ -1082,18 +1082,33 @@ class RemoteBackup(InstallTest):
         self.assertIn("Copia de seguridad: copias.example responde por SSH con Borg.", self.texts(install))
         self.assertEqual(self.suite.mounts, [])
 
-    def test_a_computer_that_stops_answering_turns_the_backup_step_red_until_reintentar(self):
+    def test_each_failure_of_the_test_turns_the_backup_step_red_until_reintentar(self):
         self.claim()
         self.remote()
-        self.suite.remote_answer = "unreachable"
-        self.install()
-        status, reason = self.steps(self.until("failed"))["Copias de seguridad"]
-        self.assertEqual(status, "failed")
-        self.assertIn("no responde", reason)
+        for answer, text in (("unreachable", "no responde"), ("key", "clave"), ("borg", "Borg"),
+                             ("folder", "carpeta")):
+            self.suite.remote_answer = answer
+            self.install()
+            status, reason = self.steps(self.until("failed"))["Copias de seguridad"]
+            self.assertEqual(status, "failed", answer)
+            self.assertIn(text, reason)
+            self.assertNotIn("«Probar de nuevo»", reason)
         self.suite.remote_answer = None
         self.install()
         self.until("done")
         self.assertEqual(self.suite.backup, (self.REPO, "06:00"))
+
+    def test_the_backup_step_makes_aio_s_key_when_aio_has_none(self):
+        self.claim()
+        self.remote()
+        self.suite.ssh_key_made = False
+        self.install()
+        self.until("done")
+        self.assertTrue(self.suite.ssh_key_made)
+
+    def test_a_bare_folder_is_under_the_user_s_home(self):
+        self.assertEqual(self.remote({**self.TARGET, "folder": "copias"})[0], 200)
+        self.assertEqual(self.suite.tested, ["ssh://aio@copias.example:22/./copias"])
 
 
 class FilesDisk(InstallTest):

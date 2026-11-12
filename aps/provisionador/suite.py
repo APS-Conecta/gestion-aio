@@ -66,14 +66,20 @@ MOUNT_FAILED = ("No se pudo montar el disco {} en {}. Revise que siga conectado 
                 "ocurrir, contacte a APS Conecta.")
 REMOTE = {  # why another computer can't take AIO's backup, as Borg and SSH answer it
     "unreachable": ("El otro computador no responde por SSH en {host}, puerto {port}. Revise su nombre o dirección, su "
-                    "puerto y que esté encendido y conectado, y presione «Probar de nuevo»."),
-    "key": ("El otro computador no acepta la clave de AIO para el usuario {user}. Agregue la clave pública que se "
-            "muestra a ~/.ssh/authorized_keys de ese usuario y presione «Probar de nuevo»."),
+                    "puerto y que esté encendido y conectado, y vuelva a probar."),
+    "key": ("El otro computador no acepta la clave de AIO para el usuario {user}. Agregue la clave pública de AIO, "
+            "que «Almacenamiento» muestra, a ~/.ssh/authorized_keys de ese usuario y vuelva a probar."),
     "borg": ("El otro computador responde, pero no tiene Borg instalado para el usuario {user}. Instale Borg en él y "
-             "presione «Probar de nuevo»."),
+             "vuelva a probar."),
     "folder": ("La carpeta {folder} del otro computador no se puede usar: no se puede escribir en ella o ya guarda "
-               "otros archivos. Elija otra carpeta y presione «Probar de nuevo»."),
+               "otros archivos. Elija otra carpeta y vuelva a probar."),
 }
+def remote_refusal(why, repo):
+    """The Spanish reason, as Unreachable, why the other computer can't take AIO's backup: why, a key of REMOTE."""
+    user, host, port, folder = re.fullmatch(r"ssh://([^@]+)@([^:]+):(\d+)(/.*)", repo).groups()
+    return Unreachable(REMOTE[why].format(user=user, host=host, port=port, folder=folder))
+
+
 # What SSH says when the other computer can't be reached at all.
 UNREACHABLE_SIGNS = ("connection refused", "could not resolve", "no route to host", "timed out", "network is unreachable")
 UNWRITABLE = ("No se pudo escribir en {}, el destino de la copia de seguridad. Revise que el disco esté conectado y "
@@ -108,8 +114,9 @@ ISSUER_FAILED = ("Nextcloud no pudo verificar ni importar el certificado interme
 MASTERCONTAINER = "nextcloud-aio-mastercontainer"
 NEXTCLOUD = "nextcloud-aio-nextcloud"
 DOWN = {MASTERCONTAINER: SUITE_DOWN, NEXTCLOUD: NEXTCLOUD_DOWN}
-AIO_CONFIG = "/mnt/docker-aio-config/data/configuration.json"  # AIO's settings, its passphrase among them
-AIO_BACKUP_TIME = "/mnt/docker-aio-config/data/daily_backup_time"  # the nightly backup's time, then its switches
+AIO_DATA = "/mnt/docker-aio-config/data"  # in the mastercontainer: AIO's settings and its other files
+AIO_CONFIG = f"{AIO_DATA}/configuration.json"  # AIO's settings, its passphrase among them
+AIO_BACKUP_TIME = f"{AIO_DATA}/daily_backup_time"  # the nightly backup's time, then its switches
 # AIO's key for remote backups, as its borg container sees the mastercontainer's volume (Containers/borgbackup/start.sh)
 AIO_VOLUME = "/nextcloud_aio_volumes/nextcloud_aio_mastercontainer"
 BORG_KEY = f"{AIO_VOLUME}/data/id_borg"
@@ -176,21 +183,21 @@ $config->setDomain($in['domain'], true);
 """
 
 
-# AIO's backup destination, a folder or an ssh:// repository, and time, set as its page sets them (ConfigurationController),
-# from stdin's JSON. A new
-# destination once one was set goes through AIO's own reset first, which also removes borg.config, so its first backup
-# starts a repository there, as AIO's page does after «Reset backup location».
+# AIO's backup destination, a folder or an ssh:// repository, and time, set as its page sets them
+# (ConfigurationController), from stdin's JSON. A new destination once one was set goes through AIO's own reset first,
+# which also removes borg.config, so its first backup starts a repository there, as AIO's page does after «Reset backup
+# location».
 BACK_UP = r"""
 ini_set('display_errors', 'stderr');
 require '/var/www/docker-aio/php/vendor/autoload.php';
 $config = \AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class);
 $in = json_decode(stream_get_contents(STDIN), true, 4, JSON_THROW_ON_ERROR);
 $held = $config->borgBackupHostLocation !== '' ? $config->borgBackupHostLocation : $config->borgRemoteRepo;
-if ($held !== '' && $held !== $in['folder']) {
+if ($held !== '' && $held !== $in['destination']) {
     $config->deleteBorgBackupLocationItems();
 }
-$remote = str_starts_with($in['folder'], 'ssh://');
-$config->setBorgLocationVars($remote ? '' : $in['folder'], $remote ? $in['folder'] : '');
+$remote = str_starts_with($in['destination'], 'ssh://');
+$config->setBorgLocationVars($remote ? '' : $in['destination'], $remote ? $in['destination'] : '');
 $config->setDailyBackupTime($in['time'], true, true);
 """
 
@@ -844,14 +851,14 @@ class Suite:
                 form[component] = "on"
         self._signed_in().post("/api/configuration", form)
 
-    def back_up(self, folder, time):
-        """AIO's own backup to the folder on this server, daily at the time (UTC), with its success notification and
+    def back_up(self, destination, time):
+        """AIO's own backup to the destination, a folder on this server or a remote repository, daily at the time (UTC), with its success notification and
         its automatic updates on: AIO's nightly job then restarts the containers on the pins the release holds and
         updates the store's apps (own and fork apps stay above the store's versions, and our timer runs them nightly
         anyway), so security fixes reach the suite between releases. Set through AIO's own code in its mastercontainer,
         the same calls its page makes, so a destination changed once the suite runs, when the page's login is closed,
         reaches AIO too."""
-        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"folder": folder, "time": time}))
+        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"destination": destination, "time": time}))
 
     def backup_settings(self):
         """Where AIO's nightly backup goes, a folder or a remote repository, and at what time (UTC), as AIO holds
@@ -863,16 +870,16 @@ class Suite:
     def ssh_key(self):
         """AIO's public key for remote backups, made first when AIO has none, as AIO's backup script makes it: in the
         mastercontainer's volume, by AIO's pinned borg image. The private half never leaves that volume."""
-        public = f"{AIO_DATA}/id_borg.pub"
-        if not self.mastercontainer("sh", "-c", f"test -f {public} && echo held || true").strip():
+        if not self.mastercontainer("sh", "-c", f"test -f {AIO_DATA}/id_borg && echo held || true").strip():
             self.borg("ssh-keygen", "-q", "-f", BORG_KEY, "-N", "", failed=SUITE_DOWN)
-        return self.mastercontainer("cat", public).strip()
+        return self.mastercontainer("cat", f"{AIO_DATA}/id_borg.pub").strip()
 
     def reachable(self, repo):
-        """The other computer takes AIO's backup at the remote repository: Borg alone, from AIO's pinned borg image with
-        AIO's key and passphrase, reads the repository, as AIO's first backup does before it makes one; a repository
-        that does not exist yet passes. Unreachable, with why, when it does not."""
-        user, host, port, folder = re.fullmatch(r"ssh://([^@]+)@([^:]+):(\d+)(/.*)", repo).groups()
+        """The other computer takes AIO's backup at the remote repository, Borg alone, from AIO's pinned borg image with
+        AIO's key and passphrase: a repository AIO's passphrase opens passes; where there is none yet, one is made as
+        AIO's first backup makes it and then deleted, which proves the folder takes it; a computer that keeps it, as
+        an append-only hosting account does, keeps AIO's own first repository, marked as AIO marks a remote one it
+        made. Unreachable, with why, when the computer does not take it."""
         env = {"BORG_REPO": repo, "BORG_PASSPHRASE": self.secrets()["backup_password"],
                "BORG_RSH": f"ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=20 -i {BORG_KEY}"}
         answer = self.borg("borg", "info", env=env, failed=None)
@@ -882,23 +889,32 @@ class Suite:
         why = ("key" if "permission denied (publickey" in said
                else "unreachable" if any(sign in said for sign in UNREACHABLE_SIGNS)
                else "borg" if any(sign in said for sign in ("command not found", "borg: not found", "is borg working"))
-               else None if "does not exist" in said
+               else None if "does not exist" in said or "is not a valid repository" in said
                else "folder")
         if why:
-            raise Unreachable(REMOTE[why].format(user=user, host=host, port=port, folder=folder))
+            raise remote_refusal(why, repo)
+        if self.borg("borg", "init", "--encryption=repokey-blake2", env=env, failed=None) is not None:
+            raise remote_refusal("folder", repo)
+        kept = self.borg("borg", "delete", env={**env, "BORG_DELETE_I_KNOW_WHAT_I_AM_DOING": "YES"}, failed=None)
+        if kept is not None:  # Containers/borgbackup/backupscript.sh touches it once it made a remote repository
+            self.mastercontainer("touch", f"{AIO_DATA}/borg.config")
 
     @staticmethod
-    def borg(*command, env=None, failed=None, timeout=300):
+    def borg(*command, env=None, failed=None, timeout=600):
         """A command in a throwaway container of AIO's pinned borg image, with the mastercontainer's volume where AIO's
         borg container has it and `env` passed by name, so no value reaches a command line. None when it succeeds,
         what it printed when it fails and `failed` is None, Unreachable with `failed` otherwise."""
         image = next(line.strip() for line in IMAGES.read_text(encoding="utf-8").splitlines()
                      if "/aio-borgbackup@sha256:" in line)
         names = [part for key in (env or {}) for part in ("--env", key)]
-        run = subprocess.run(["docker", "run", "--rm", "--volume", f"nextcloud_aio_mastercontainer:{AIO_VOLUME}",
-                              *names, "--entrypoint", command[0], image, *command[1:]],
-                             env={**os.environ, **(env or {})}, capture_output=True, text=True, timeout=timeout,
-                             check=False)
+        try:
+            run = subprocess.run(["docker", "run", "--rm", "--volume", f"nextcloud_aio_mastercontainer:{AIO_VOLUME}",
+                                  *names, "--entrypoint", command[0], image, *command[1:]],
+                                 env={**os.environ, **(env or {})}, capture_output=True, text=True, timeout=timeout,
+                                 check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:  # the first run also pulls the image, which may be slow
+            print(f"{command[0]} in AIO's borg image: {error}", file=sys.stderr)
+            raise Unreachable(failed or SUITE_DOWN) from error
         if run.returncode == 0:
             return None
         if failed is None:
@@ -1024,7 +1040,7 @@ class FakeSuite:
         self.switched = None  # the optional containers AIO was set to run; every other one is off
         self.backup = None  # AIO's nightly backup: (folder, time)
         self.unwritable = set()  # backup destinations a file cannot be written to
-        self.tested = []  # each backup destination a test file was written to, in turn
+        self.tested = []  # each backup destination tested, in turn: a folder written to or a repository reached
         self.repository = None  # where AIO's borg.config holds the repository its backups went to, None before any
         self.ssh_key_made = False  # whether AIO's key for remote backups was made
         self.remote_answer = None  # why the other computer refuses AIO's backup, a key of REMOTE, or None: it takes it
@@ -1154,11 +1170,11 @@ class FakeSuite:
         self._signed_in()
         self.switched = set(components)
 
-    def back_up(self, folder, time):
+    def back_up(self, destination, time):
         self._outage_guard()
-        if self.backup and self.backup[0] != folder:  # AIO's reset: its next backup starts a repository afresh
+        if self.backup and self.backup[0] != destination:  # AIO's reset: its next backup starts a repository afresh
             self.repository = None
-        self.backup, self.automatic_updates = (folder, time), True
+        self.backup, self.automatic_updates = (destination, time), True
 
     def backup_settings(self):
         self._outage_guard()
@@ -1175,9 +1191,9 @@ class FakeSuite:
         return self.SSH_KEY
 
     def reachable(self, repo):
+        self._outage_guard()
         if self.remote_answer:
-            user, host, port, folder = re.fullmatch(r"ssh://([^@]+)@([^:]+):(\d+)(/.*)", repo).groups()
-            raise Unreachable(REMOTE[self.remote_answer].format(user=user, host=host, port=port, folder=folder))
+            raise remote_refusal(self.remote_answer, repo)
         self.tested.append(repo)
 
     def start(self, downloading):

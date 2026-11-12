@@ -406,6 +406,7 @@ async function choosePlace(event) {
     $("storage-ssh").hidden = false;
     return;
   }
+  if (name === "backups") delete $("storage-ssh").dataset.open;
   const body = name === "files" ? {files: value} : {backups: value === "folder" ? {folder: true} : {disk: value}};
   try {
     showStorage(await api("POST", "/api/storage", body));

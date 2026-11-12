@@ -37,6 +37,7 @@ def remote(ssh):
             and isinstance(user, str) and USER.fullmatch(user) and isinstance(folder, str) and REPOSITORY.fullmatch(folder)
             and ".." not in folder.split("/")):
         raise ValueError(NOT_A_COMPUTER)
+    folder = folder if folder.startswith(("/", "./", "~")) else f"./{folder}"  # a bare folder is in the user's home
     return f"ssh://{user}@{host}:{port}{folder if folder.startswith('/') else '/' + folder}"
 
 
@@ -56,6 +57,7 @@ def run(context):
     except LookupError:
         return [BACKUP_GONE]
     if target.startswith("ssh://"):
+        context.suite.ssh_key()  # made when AIO has none yet, so the test and AIO's backup use it
         context.suite.reachable(target)
         context.log(REACHED.format(context.backups["ssh"]["host"]))
     else:

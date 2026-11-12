@@ -169,6 +169,7 @@ with tempfile.TemporaryDirectory() as tmp, chromium(pinned=[verified(url.hostnam
     expect(page.locator("#storage-continue")).to_be_disabled()
     other_computer(page)
     page.check('#storage-backups input[value="folder"]')
+    expect(page.locator("#storage-ssh")).to_be_hidden()
     expect(page.locator('#storage-backups li[data-id="folder"] span')).to_have_text("Se usará")
     expect(page.locator("#storage-continue")).to_be_enabled()
     expect(page.locator("#storage-warning")).to_be_hidden()
