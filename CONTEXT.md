@@ -104,12 +104,20 @@ a first backup's too when the backup has nowhere else to go; it keeps them in AI
 xfs or btrfs and room for the install's own files, a USB disk never may, and the install mounts it for good and has AIO
 keep the files in its aps-conecta/archivos folder.
 
+**Backup disk** (disco de copias):
+A disk other than the system disk that the operator chose on «Almacenamiento» as the backup destination: the backup goes
+in its aps-conecta/copias folder, and the install mounts it for good, as it mounts the files disk. A USB disk may be
+one.
+
 **Backup destination** (destino de las copias):
-The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento». On a server where no other disk
-may hold it, the backup folder, chosen already when the system disk has room for it.
+The one place AIO's nightly backup goes, which the operator chooses on «Almacenamiento» until «Listo»: the backup
+folder, or the aps-conecta/copias folder of another disk, USB included, which the install mounts for good. On a server
+where no other disk may hold it, one drive being one disk, the backup folder, chosen already when the system disk has
+room for it. The install writes a test file there before handing it to AIO, and warns when it sits on the files disk's
+drive.
 
 **Backup folder** (carpeta de copias de seguridad):
-`/var/backups/aps-conecta` on the server, where AIO's own backup keeps its repository every night.
+`/var/backups/aps-conecta` on the server: the backup destination on the system disk.
 
 **Team** (equipo):
 A sector or program of the establishment: a shared folder with no member list, where every staff member works.

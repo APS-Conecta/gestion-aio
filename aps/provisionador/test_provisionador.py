@@ -574,9 +574,10 @@ class InstallTest(WizardTest):
     def install(self, **body):
         return self.browser.request("POST", "/api/install", body)
 
-    def choose(self, files):
-        """«Almacenamiento»: the files disk, by its id."""
-        return self.browser.request("POST", "/api/storage", {"files": files})
+    def choose(self, files=None, backups=None):
+        """«Almacenamiento»: the files disk, by its id, and the backup destination, {"disk": id} or {"folder": True}."""
+        body = {key: value for key, value in (("files", files), ("backups", backups)) if value is not None}
+        return self.browser.request("POST", "/api/storage", body)
 
     def progress(self):
         return self.browser.get("/api/state")[1]["install"]
@@ -645,9 +646,9 @@ def bootstrap_floors(**variables):
 
 def disk(disk_id, **facts):
     """A disk beside the fake's system disk: by default an ext4 data disk of 1 TB, nearly empty and not mounted."""
-    return {"id": disk_id, "device": f"/dev/{disk_id}", "model": "Disco de datos", "size": 10 ** 12,
-            "free": 990 * 10 ** 9, "filesystem": "ext4", "system": False, "usb": False, "mounted": None, "at_boot": False,
-            **facts}
+    return {"id": disk_id, "device": f"/dev/{disk_id}", "drive": f"/dev/{disk_id}", "model": "Disco de datos",
+            "size": 10 ** 12, "free": 990 * 10 ** 9, "filesystem": "ext4", "system": False, "usb": False, "mounted": None,
+            "at_boot": False, **facts}
 
 
 class Almacenamiento(InstallTest):
@@ -663,8 +664,8 @@ class Almacenamiento(InstallTest):
 
     def test_a_one_disk_server_keeps_the_files_and_the_backup_folder_on_the_system_disk(self):
         storage = self.storage()
-        self.assertEqual([(d["id"], d["system"], d["files"], d["backups"], d["reason"]) for d in storage["disks"]],
-                         [(FakeSuite.SYSTEM_DISK["id"], True, True, True, None)])
+        self.assertEqual([(d["id"], d["system"], d["files"], d["backups"], d["reasons"]) for d in storage["disks"]],
+                         [(FakeSuite.SYSTEM_DISK["id"], True, True, True, {"files": None, "backups": None})])
         self.assertEqual((storage["files"], storage["backups"], storage["folder"], storage["same_disk"]),
                          (FakeSuite.SYSTEM_DISK["id"], {"folder": True}, "/var/backups/aps-conecta", True))
 
@@ -674,8 +675,8 @@ class Almacenamiento(InstallTest):
     def test_a_bigger_data_disk_takes_the_files_and_the_backup_waits_for_the_operator(self):
         self.add("data")
         storage = self.storage()
-        self.assertEqual([(d["id"], d["files"], d["backups"], d["reason"]) for d in storage["disks"]],
-                         [(FakeSuite.SYSTEM_DISK["id"], True, True, None), ("data", True, True, None)])
+        self.assertEqual([(d["id"], d["files"], d["backups"]) for d in storage["disks"]],
+                         [(FakeSuite.SYSTEM_DISK["id"], True, True), ("data", True, True)])
         self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]), ("data", None, False))
 
     def test_beside_a_smaller_data_disk_the_files_stay_on_the_system_disk_and_the_backup_waits_for_the_operator(self):
@@ -691,12 +692,13 @@ class Almacenamiento(InstallTest):
         self.add("mac", filesystem="hfsplus")
         self.add("unread", free=None)
         storage = self.storage()
-        self.assertEqual({d["id"]: (d["files"], d["backups"], d["reason"]) for d in storage["disks"][1:]}, {
+        self.assertEqual({d["id"]: (d["files"], d["backups"], d["reasons"]["files"]) for d in storage["disks"][1:]}, {
             "blank": (False, False, "sin formato"),
             "windows": (False, False, "formato de Windows"),
             "camera": (False, False, "formato de Windows"),
             "mac": (False, False, "formato hfsplus, no compatible"),
             "unread": (False, False, "no se pudo leer su espacio libre")})
+        self.assertTrue(all(d["reasons"]["files"] == d["reasons"]["backups"] for d in storage["disks"][1:]))
         self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]),
                          (FakeSuite.SYSTEM_DISK["id"], {"folder": True}, True))
 
@@ -704,15 +706,14 @@ class Almacenamiento(InstallTest):
         self.add("xfs", filesystem="xfs")
         self.add("btrfs", filesystem="btrfs", free=995 * 10 ** 9)
         storage = self.storage()
-        self.assertEqual([(d["files"], d["backups"], d["reason"]) for d in storage["disks"][1:]],
-                         [(True, True, None), (True, True, None)])
+        self.assertEqual([(d["files"], d["backups"]) for d in storage["disks"][1:]], [(True, True), (True, True)])
         self.assertEqual((storage["files"], storage["backups"]), ("btrfs", None))
 
     def test_a_usb_disk_is_offered_for_backups_only_however_big(self):
         self.add("usb", usb=True, size=4 * 10 ** 12, free=4 * 10 ** 12)
         storage = self.storage()
-        self.assertEqual([(d["files"], d["backups"], d["reason"]) for d in storage["disks"][1:]],
-                         [(False, True, "disco USB: solo para copias")])
+        self.assertEqual([(d["files"], d["backups"], d["reasons"]) for d in storage["disks"][1:]],
+                         [(False, True, {"files": "disco USB: solo para copias", "backups": None})])
         self.assertEqual((storage["files"], storage["backups"], storage["same_disk"]),
                          (FakeSuite.SYSTEM_DISK["id"], None, False))
 
@@ -733,19 +734,19 @@ class Almacenamiento(InstallTest):
     ROOM = "sin espacio suficiente"
 
     def roles(self):
-        """Each disk beside the system disk: (may hold the files, may hold the backup, its reason)."""
-        return {d["id"]: (d["files"], d["backups"], d["reason"]) for d in self.storage()["disks"][1:]}
+        """Why each disk beside the system disk may not hold (the files, the backup), None where it may."""
+        return {d["id"]: (d["reasons"]["files"], d["reasons"]["backups"]) for d in self.storage()["disks"][1:]}
 
     def system(self, free):
-        """The system disk with that much free space, and what it may hold: (the files, the backup, its reason)."""
+        """The system disk with that much free space: why it may not hold (the files, the backup), None where it may."""
         self.suite.found_disks[0]["free"] = free
         found = self.storage()["disks"][0]
-        return found["files"], found["backups"], found["reason"]
+        return found["reasons"]["files"], found["reasons"]["backups"]
 
     def test_a_disk_without_room_for_the_install_s_own_files_holds_nothing_and_is_refused(self):
         self.add("full", free=self.FLOORS["files"] - 1)
         self.add("files", free=self.FLOORS["files"])
-        self.assertEqual(self.roles(), {"full": (False, False, self.ROOM), "files": (True, False, self.ROOM)})
+        self.assertEqual(self.roles(), {"full": (self.ROOM, self.ROOM), "files": (None, self.ROOM)})
         status, body = self.choose("full")
         self.assertEqual(status, 400)
         self.assertIn(self.ROOM, body["error"])
@@ -754,14 +755,14 @@ class Almacenamiento(InstallTest):
     def test_a_disk_holds_the_backup_once_it_has_room_for_a_first_one(self):
         self.add("short", free=self.FLOORS["backup"] - 1)
         self.add("room", free=self.FLOORS["backup"])
-        self.assertEqual(self.roles(), {"short": (True, False, self.ROOM), "room": (True, True, None)})
+        self.assertEqual(self.roles(), {"short": (None, self.ROOM), "room": (None, None)})
 
     def test_beside_a_disk_for_the_backup_the_system_disk_holds_the_files_with_room_for_the_program_and_them(self):
         self.add("backups", usb=True, free=self.FLOORS["backup"])
         need = self.FLOORS["program"] + self.FLOORS["files"]
-        self.assertEqual(self.system(need)[0], True)
+        self.assertEqual(self.system(need)[0], None)
         self.assertEqual(self.choose(FakeSuite.SYSTEM_DISK["id"])[0], 200)
-        self.assertEqual(self.system(need - 1), (False, False, self.ROOM))
+        self.assertEqual(self.system(need - 1), (self.ROOM, self.ROOM))
         status, body = self.choose(FakeSuite.SYSTEM_DISK["id"])
         self.assertEqual(status, 400)
         self.assertIn(self.ROOM, body["error"])
@@ -770,21 +771,22 @@ class Almacenamiento(InstallTest):
         self.add("data")
         need = self.FLOORS["program"] + self.FLOORS["backup"]
         self.assertEqual(self.storage()["files"], "data")
-        self.assertEqual(self.system(need)[1], True)
-        self.assertEqual(self.system(need - 1)[1], False)
+        self.assertEqual(self.system(need)[1], None)
+        self.assertEqual(self.system(need - 1)[1], self.ROOM)
 
     def test_holding_the_files_the_system_disk_holds_the_backup_only_with_room_for_the_files_too(self):
         self.add("backups", usb=True, free=self.FLOORS["backup"])
         need = self.FLOORS["program"] + self.FLOORS["files"] + self.FLOORS["backup"]
-        self.assertEqual(self.system(need - 1)[:2], (True, False))
+        self.assertEqual(self.system(need - 1), (None, self.ROOM))
         self.assertEqual(self.storage()["files"], FakeSuite.SYSTEM_DISK["id"])
-        self.assertEqual(self.system(need)[:2], (True, True))
+        self.assertEqual(self.system(need), (None, None))
 
     def test_alone_the_system_disk_holds_both_with_room_for_the_program_the_files_and_the_backup(self):
         need = self.FLOORS["program"] + self.FLOORS["files"] + self.FLOORS["backup"]
-        self.assertEqual(self.system(need), (True, True, None))
-        self.assertEqual((self.storage()["files"], self.storage()["backups"]), (FakeSuite.SYSTEM_DISK["id"], {"folder": True}))
-        self.assertEqual(self.system(need - 1)[0], False)
+        self.assertEqual(self.system(need), (None, None))
+        self.assertEqual((self.storage()["files"], self.storage()["backups"]),
+                         (FakeSuite.SYSTEM_DISK["id"], {"folder": True}))
+        self.assertEqual(self.system(need - 1)[0], self.ROOM)
         self.assertEqual(self.storage()["files"], None)
 
     def test_once_instalar_was_pressed_the_floors_no_longer_apply_for_the_suite_already_takes_its_room(self):
@@ -828,7 +830,7 @@ class Almacenamiento(InstallTest):
     def test_once_instalar_was_pressed_the_files_disk_stays(self):
         self.add("data")
         self.claim()
-        self.choose("data")
+        self.choose("data", {"folder": True})
         self.assertFalse(self.storage()["files_locked"])
         self.install()
         self.until("done")
@@ -841,6 +843,7 @@ class Almacenamiento(InstallTest):
     def test_a_server_installed_before_almacenamiento_may_post_the_system_disk_it_shows(self):
         self.add("data")
         self.claim()
+        self.choose(backups={"folder": True})
         self.install()
         self.until("done")
         with provisionador.State(self.state).change() as held:
@@ -853,10 +856,177 @@ class Almacenamiento(InstallTest):
     def test_the_first_instalar_keeps_the_files_disk_revisar_showed(self):
         self.add("data")
         self.claim()
+        self.choose(backups={"folder": True})
         self.install()
         self.until("done")
         self.assertEqual(self.storage()["files"], "data")
         self.assertEqual(self.suite.files_in, "/mnt/aps-conecta/data/aps-conecta/archivos")
+
+
+class BackupDestination(InstallTest):
+    """«Almacenamiento»'s backup part: the operator chooses where AIO's nightly backup goes, the backup folder on this
+    server or another disk, USB included, until «Listo»; the install mounts that disk for good, tests the destination
+    by writing a file there and hands it to AIO. One drive is one disk: a backup on the files disk's drive is warned
+    about, and a partition of the system drive is no other disk."""
+
+    FOLDER, COPIES = {"folder": True}, "/mnt/aps-conecta/usb/aps-conecta/copias"
+    ROOM = "sin espacio suficiente"
+    STEP = "Copias de seguridad"
+
+    def storage(self):
+        return self.browser.get("/api/storage")[1]
+
+    def test_the_operator_chooses_the_backup_folder_or_a_disk_usb_included(self):
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.assertEqual(self.storage()["backups"], None)
+        status, body = self.choose(backups=self.FOLDER)
+        self.assertEqual((status, body["backups"]), (200, self.FOLDER), body)
+        status, body = self.choose(backups={"disk": "usb"})
+        self.assertEqual((status, body["backups"]), (200, {"disk": "usb"}), body)
+        self.assertEqual(self.storage()["backups"], {"disk": "usb"})
+
+    def test_a_destination_that_may_not_hold_the_backup_is_refused_with_its_reason(self):
+        self.suite.found_disks += [disk("windows", filesystem="ntfs"), disk("short", free=10 ** 9)]
+        for backups, reason in (({"disk": "windows"}, "formato de Windows"), ({"disk": "short"}, self.ROOM),
+                                ({"disk": "gone"}, "Ese disco ya no está en el servidor"),
+                                ({"elsewhere": True}, "copia de seguridad")):
+            status, body = self.choose(backups=backups)
+            self.assertEqual(status, 400, backups)
+            self.assertIn(reason, body["error"])
+        self.suite.found_disks[0]["free"] = 10 ** 9
+        status, body = self.choose(backups=self.FOLDER)
+        self.assertEqual(status, 400)
+        self.assertIn(self.ROOM, body["error"])
+
+    def test_a_small_usb_disk_keeps_its_own_reason_for_each_part(self):
+        self.suite.found_disks.append(disk("usb", usb=True, free=10 ** 9))
+        self.assertEqual(self.storage()["disks"][1]["reasons"], {"files": "disco USB: solo para copias",
+                                                                  "backups": self.ROOM})
+
+    def test_a_partition_of_the_system_drive_is_no_other_disk_so_the_backup_folder_is_chosen_already(self):
+        self.suite.found_disks.append(disk("srv", drive=FakeSuite.SYSTEM_DISK["drive"]))
+        self.assertEqual(self.storage()["backups"], self.FOLDER)
+
+    def test_a_backup_on_the_files_disk_s_drive_is_warned_about_and_one_on_another_drive_is_not(self):
+        self.suite.found_disks += [disk("data"), disk("data2", drive="/dev/data"), disk("usb", usb=True)]
+        self.choose("data", {"disk": "data2"})
+        self.assertTrue(self.storage()["same_disk"])
+        self.choose(backups={"disk": "usb"})
+        self.assertFalse(self.storage()["same_disk"])
+        self.choose(backups=self.FOLDER)
+        self.assertFalse(self.storage()["same_disk"])
+
+    def test_a_server_installed_before_almacenamiento_shows_the_backup_folder_it_backs_up_to(self):
+        self.claim()
+        self.install()
+        self.until("done")
+        with provisionador.State(self.state).change() as held:
+            held.pop("storage")
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.assertEqual(self.storage()["backups"], self.FOLDER)
+
+    def test_with_somewhere_to_choose_the_first_instalar_waits_for_the_operator_s_choice(self):
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.claim()
+        status, body = self.install()
+        self.assertEqual(status, 409)
+        self.assertIn("«Almacenamiento»", body["error"])
+        self.choose(backups={"disk": "usb"})
+        self.assertEqual(self.install()[0], 202)
+        self.until("done")
+
+    def test_with_nowhere_with_room_for_a_backup_the_first_instalar_is_refused(self):
+        floors = bootstrap_floors(program="MIN_PROGRAM_GB", files="MIN_FILES_GB")
+        self.suite.found_disks[0]["free"] = (floors["program"] + floors["files"]) * 10 ** 9
+        self.suite.found_disks.append(disk("data", free=3 * 10 ** 9))  # room for the files, not for a backup
+        self.claim()
+        status, body = self.install()
+        self.assertEqual(status, 409)
+        self.assertIn("copia de seguridad", body["error"])
+        self.assertEqual(self.suite.starts, 0)
+
+    def test_the_install_mounts_the_backup_disk_tests_the_destination_and_hands_it_to_aio(self):
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.claim()
+        self.choose(backups={"disk": "usb"})
+        self.install()
+        install = self.until("done")
+        self.assertEqual(self.suite.mounts, [("usb", "/mnt/aps-conecta/usb")])
+        self.assertEqual((self.suite.tested, self.suite.backup), ([self.COPIES], (self.COPIES, "06:00")))
+        self.assertIn(f"Copia de seguridad: se pudo escribir en {self.COPIES}.", self.texts(install))
+
+    def test_a_destination_that_cannot_be_written_turns_the_step_red_until_reintentar(self):
+        self.suite.unwritable.add("/var/backups/aps-conecta")
+        self.claim()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[self.STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn("/var/backups/aps-conecta", reason)
+        self.assertEqual(self.suite.starts, 0)
+        self.suite.unwritable.clear()
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.backup, ("/var/backups/aps-conecta", "06:00"))
+
+    def test_until_listo_a_new_destination_runs_the_storage_and_backup_steps_again(self):
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.suite.unwritable.add("/var/backups/aps-conecta")
+        self.claim()
+        self.choose(backups=self.FOLDER)
+        self.install()
+        self.until("failed")
+        status, body = self.choose(backups={"disk": "usb"})
+        self.assertEqual(status, 200, body)
+        self.until("done")
+        self.assertEqual(self.suite.backup, (self.COPIES, "06:00"))
+        status, body = self.choose(backups=self.FOLDER)
+        self.assertEqual(status, 409)
+        self.assertIn("AIO", body["error"])
+
+    def stopped_before_listo(self):
+        """An install the ISP's certificate stopped red after «Copias de seguridad» went green: before «Listo»."""
+        self.suite.down.add("issuer")
+        self.claim()
+        self.choose(backups=self.FOLDER)
+        self.install()
+        self.until("failed")
+
+    def test_after_instalar_a_new_destination_still_needs_room_for_a_backup(self):
+        self.stopped_before_listo()
+        self.suite.found_disks.append(disk("small", usb=True, free=10 ** 9))
+        status, body = self.choose(backups={"disk": "small"})
+        self.assertEqual(status, 400)
+        self.assertIn(self.ROOM, body["error"])
+
+    def test_a_new_destination_after_aio_backed_up_starts_its_repository_afresh_there(self):
+        self.stopped_before_listo()
+        self.suite.repository = "/var/backups/aps-conecta"  # AIO backed up once: its borg.config holds the old place
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.assertEqual(self.choose(backups={"disk": "usb"})[0], 200)
+        self.until("failed")
+        self.assertEqual((self.suite.repository, self.suite.backup), (None, (self.COPIES, "06:00")))
+
+    def test_while_the_steps_run_the_destination_waits(self):
+        self.suite.found_disks.append(disk("usb", usb=True))
+        self.suite.release.clear()
+        self.claim()
+        self.choose(backups=self.FOLDER)
+        self.install()
+        self.until_step("Inicio de la suite", "running")
+        status, body = self.choose(backups={"disk": "usb"})
+        self.assertEqual(status, 409)
+        self.assertIn("Espere", body["error"])
+
+    def test_the_end_of_install_check_finds_aio_backing_up_elsewhere(self):
+        self.claim()
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        self.suite.backup = ("/srv/otra", "06:00")
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))[self.STEP]
+        self.assertEqual(status, "failed")
+        self.assertIn("/var/backups/aps-conecta", reason)
 
 
 class FilesDisk(InstallTest):
@@ -869,10 +1039,10 @@ class FilesDisk(InstallTest):
     STEP = "Almacenamiento"
 
     def chosen(self, files, *disks):
-        """These disks beside the system disk, the centre claimed and that files disk chosen."""
+        """These disks beside the system disk, the centre claimed, that files disk chosen and the backup folder."""
         self.suite.found_disks += disks
         self.claim()
-        self.assertEqual(self.choose(files)[0], 200)
+        self.assertEqual(self.choose(files, {"folder": True})[0], 200)
 
     def installed(self, files, *disks):
         """The install run with these disks beside the system disk and that files disk chosen."""
@@ -923,6 +1093,18 @@ class FilesDisk(InstallTest):
         status, reason = self.steps(self.until("failed"))[self.STEP]
         self.assertEqual(status, "failed")
         self.assertIn("/mnt/aps-conecta/data", reason)
+
+    def test_a_disk_holding_the_files_and_the_backup_is_reported_once_when_no_longer_mounted_for_good(self):
+        self.suite.found_disks.append(disk("data"))
+        self.claim()
+        self.choose("data", {"disk": "data"})
+        self.suite.answering = False
+        self.install()
+        self.until_checked("Dirección de la suite")
+        self.suite.found_disks[-1]["at_boot"] = False
+        self.suite.answering = True
+        status, reason = self.steps(self.until("failed"))[self.STEP]
+        self.assertEqual((status, reason.count("ya no queda montado")), ("failed", 1), reason)
 
     def test_the_end_of_install_check_finds_aio_keeping_the_files_elsewhere(self):
         self.chosen("data", disk("data"))

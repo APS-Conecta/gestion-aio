@@ -81,6 +81,15 @@ TEAMS_KEPT = "Los equipos ya no pueden cambiarse: se presionó «Instalar»."
 DISK_GONE = "Ese disco ya no está en el servidor. Vuelva a abrir «Almacenamiento» para ver sus discos de ahora."
 NOT_FOR_FILES = "Ese disco no puede guardar los archivos del personal: {}."
 FILES_KEPT = "El disco de los archivos del personal ya no puede cambiarse: se presionó «Instalar»."
+NOT_A_DESTINATION = "Indique dónde se guarda la copia de seguridad: la carpeta de copias de este servidor o un disco."
+NOT_FOR_BACKUP = "Ese lugar no puede guardar la copia de seguridad: {}."
+BACKUP_KEPT = ("La instalación ya terminó: el destino de la copia de seguridad ahora se cambia en la página de AIO, como "
+               "explica el manual.")
+STORAGE_BUSY = "Espere a que termine la instalación en curso para cambiar el destino de la copia de seguridad."
+BACKUP_LINE = "«Almacenamiento»: cambia el destino de la copia de seguridad."
+CHOOSE_BACKUP = "Elija en «Almacenamiento» dónde se guarda la copia de seguridad de cada noche."
+NO_BACKUP_DISK = ("Ningún disco del servidor tiene espacio suficiente para la copia de seguridad. Libere espacio o "
+                  "conecte otro disco y vuelva a abrir «Almacenamiento».")
 NO_FILES_DISK = ("Ningún disco del servidor tiene espacio suficiente para los archivos del personal. Libere espacio o "
                  "conecte otro disco y vuelva a abrir «Almacenamiento».")
 NOT_SPREADSHEET = ("Suba la planilla del personal como libro de Excel (.xlsx), con su hoja «Personal», o como CSV "
@@ -212,6 +221,12 @@ def stored_files(state):
     return state.get("storage", {}).get("files")
 
 
+def stored(state):
+    """What the operator chose on «Almacenamiento»: the files disk, by its id, and the backup destination, each None
+    until chosen."""
+    return stored_files(state), state.get("storage", {}).get("backups")
+
+
 class Provisionador:
     def __init__(self, state_dir, register, suite):
         self.state = State(state_dir)
@@ -340,24 +355,53 @@ class Provisionador:
         /api/state's, which the progress polls: reading the free space of a disk that isn't mounted mounts it read-only
         for a moment."""
         state = self.state.read()
-        return 200, disks.shown(self.suite.disks(), stored_files(state), "install" in state)
+        return 200, disks.shown(self.suite.disks(), *stored(state), "install" in state)
 
     def post_storage(self, query, body):
-        """POST /api/storage {"files": id}: the files disk, one «Almacenamiento» offers for the staff's files. Once
-        «Instalar» was pressed it stays: the one stored, or the system disk on a server installed before
-        «Almacenamiento». The answer is GET's, from the same reading of the disks."""
-        files, listed, installed = body.get("files"), self.suite.disks(), "install" in self.state.read()
-        found = next((disk for disk in disks.shown(listed, installed=installed)["disks"] if disk["id"] == files), None)
-        if found is None:
-            return 400, {"error": DISK_GONE}
-        if not found["files"]:
-            return 400, {"error": NOT_FOR_FILES.format(found["reason"])}
-        with self.install_lock, self.state.change() as s:
-            installed = "install" in s
-            if installed and files != disks.shown(listed, stored_files(s), True)["files"]:
+        """POST /api/storage {"files": id, "backups": {"disk": id} | {"folder": true}}, either or both: the files disk and
+        the backup destination, each where «Almacenamiento» offers it beside the other. The files disk stays once
+        «Instalar» was pressed: the one stored, or the system disk on a server installed before «Almacenamiento». The
+        backup destination may change until «Listo», though not while the steps run; a change after «Instalar» runs
+        «Almacenamiento» and «Copias de seguridad» again, then the end-of-install check. The answer is GET's, from the
+        same reading of the disks."""
+        backups = body.get("backups")
+        if "backups" in body and backups != {"folder": True} and not (
+                isinstance(backups, dict) and list(backups) == ["disk"] and isinstance(backups["disk"], str)):
+            return 400, {"error": NOT_A_DESTINATION}
+        listed = self.suite.disks()
+        with self.install_lock:
+            busy, state = self.snapshot()
+            installed, (files, held) = "install" in state, stored(state)
+            files, backups = body.get("files", files), body.get("backups", held)
+            found = disks.shown(listed, files, backups, installed)
+            by_id = {disk["id"]: disk for disk in found["disks"]}
+            chosen = [("files", files, NOT_FOR_FILES)] if "files" in body else []
+            if "backups" in body:
+                place = backups.get("disk") or next(disk["id"] for disk in found["disks"] if disk["system"])
+                chosen.append(("backups", place, NOT_FOR_BACKUP))
+            for part, disk_id, refused in chosen:
+                if disk_id not in by_id:
+                    return 400, {"error": DISK_GONE}
+                if not by_id[disk_id][part]:
+                    return 400, {"error": refused.format(by_id[disk_id]["reasons"][part])}
+            moved = installed and backups != held
+            if moved and by_id[place]["free"] < disks.FLOORS["backup"]:  # the floors are off once installed, but
+                return 400, {"error": NOT_FOR_BACKUP.format(disks.NO_ROOM)}  # a new destination needs a backup's room
+            if installed and "files" in body and files != disks.shown(listed, stored_files(state), held, True)["files"]:
                 return 409, {"error": FILES_KEPT}
-            s["storage"] = {**s.get("storage", {}), "files": files}
-        return 200, disks.shown(listed, files, installed)
+            if moved and state["install"].get("listo"):
+                return 409, {"error": BACKUP_KEPT}
+            if moved and busy:
+                return 409, {"error": STORAGE_BUSY}
+            with self.state.change() as s:
+                s["storage"] = {**s.get("storage", {}), "files": files, "backups": backups}
+                if moved:
+                    runner.reopen(s["install"], "storage", "backups")
+                    s["install"]["listo"] = False
+                    runner.add_line(s["install"], BACKUP_LINE)
+            if moved:
+                self.run_install()
+        return 200, found
 
     def post_teams(self, query, body):
         """POST /api/teams {"sectors": [names], "programs": [names]}: the team each name becomes, with its folder, and
@@ -446,13 +490,14 @@ class Provisionador:
         """The install's steps, in the background, with what they need to know."""
         state = self.state.read()
         loaded, retired = declared(state)
+        files, backups = stored(state)
         context = SimpleNamespace(suite=self.suite, centre=state["centre"], name=state["address"]["name"],
                                   inside=lan_ip(), folder=self.state.dir, interrupted=frozenset(interrupted),
                                   optional=frozenset(state.get("optional", ())), ai=bool(state.get("ai")),
                                   teams=state.get("teams", []),
                                   people=loaded, retired=retired, declared=lambda: declared(self.state.read()),
                                   upgrade=bool(state.get("install", {}).get("upgrade")),
-                                  files=stored_files(state),
+                                  files=files, backups=backups,
                                   log=lambda text: runner.log(self.state, text))
         self.worker = threading.Thread(target=runner.run, args=(self.state, context), daemon=True)
         self.worker.start()
@@ -472,14 +517,18 @@ class Provisionador:
             if not plan(state)["people"]:
                 return 409, {"error": PEOPLE_WRONG if plan(state)["errors"] else NO_PEOPLE}
             first = not state.get("install")
-            files = stored_files(state) or (disks.shown(self.suite.disks())["files"] if first else None)
-            if first and not files:
-                return 409, {"error": NO_FILES_DISK}
+            if first:
+                found = disks.shown(self.suite.disks(), *stored(state))
+                if not found["files"]:
+                    return 409, {"error": NO_FILES_DISK}
+                if not found["backups"]:
+                    may_hold = any(disk["backups"] for disk in found["disks"])
+                    return 409, {"error": CHOOSE_BACKUP if may_hold else NO_BACKUP_DISK}
             if not (busy or state.get("install", {}).get("listo")):
                 if first:
                     with self.state.change() as s:
                         s["optional"] = sorted(set(optional))
-                        s.setdefault("storage", {})["files"] = files
+                        s["storage"] = {"files": found["files"], "backups": found["backups"]}
                 runner.begin(self.state)
                 self.run_install()
         return 202, {"install": self.progress(*self.snapshot())}
