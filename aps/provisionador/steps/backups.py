@@ -9,6 +9,7 @@ containers on the release's pins and updates the store's apps, which our host ti
 night."""
 
 import re
+from urllib.parse import urlsplit
 
 from steps.storage import BACKUP_GONE, backup_disk, point
 
@@ -42,8 +43,12 @@ def remote(ssh):
 
 
 def destination(context):
-    """Where AIO's nightly backup goes: a folder on this server or a remote repository; raises LookupError when the
-    backup disk is gone."""
+    """Where AIO's nightly backup goes: a folder on this server or a remote repository. At an upgrade, the one AIO holds
+    now, for after «Listo» AIO's page owns it; otherwise, and when AIO holds none, the one chosen on «Almacenamiento».
+    Raises LookupError when the backup disk is gone."""
+    held = context.suite.backup_settings()[0] if context.upgrade else None
+    if held:
+        return held
     ssh = (context.backups or {}).get("ssh")
     if ssh:
         return remote(ssh)
@@ -60,7 +65,7 @@ def run(context):
     if target.startswith("ssh://"):
         context.suite.ssh_key()  # made when AIO has none yet, so the test and AIO's backup use it
         kept = context.suite.reachable(target)
-        context.log(REACHED.format(context.backups["ssh"]["host"]))
+        context.log(REACHED.format(urlsplit(target).hostname))
     else:
         context.suite.writable(target)
         context.log(WRITTEN.format(target))
