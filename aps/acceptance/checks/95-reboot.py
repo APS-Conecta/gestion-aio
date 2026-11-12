@@ -64,7 +64,8 @@ folder, held = data_folder()
 destination = aio_config()["borg_backup_host_location"]
 print(f"running AIO's backup to {destination}, as its nightly job does, then starting the suite again")
 machine("sudo docker exec --env DAILY_BACKUP=1 --env START_CONTAINERS=1 nextcloud-aio-mastercontainer /daily-backup.sh")
-archives = [line for line in aio_file("backup_archives.list").splitlines() if line.startswith("nextcloud-aio")]
+# AIO's archive list, written after each borg run: "<date>_<time>-nextcloud-aio,<when>" per suite archive
+archives = [line for line in aio_file("backup_archives.list").splitlines() if "-nextcloud-aio," in line]
 machine(f"sudo test -f {destination}/borg/config")
 if not archives:
     sys.exit(f"AIO's backup to {destination} left no archive")
