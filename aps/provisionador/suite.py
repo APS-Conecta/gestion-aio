@@ -1032,6 +1032,8 @@ class FakeSuite:
     BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
     SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAPSConectaGestionFakeKeyForRemoteBackups root@nextcloud-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
+    ADDED = 31  # the permissions Groupfolders gives a group it adds to a folder: every one
+    INTRAVOX_GRANTS = {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7, "IntraVox Users": 1}  # first setup's
     # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
     SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda",
                    "model": "", "size": 60 * 10 ** 9, "free": 40 * 10 ** 9, "filesystem": "ext4", "system": True,
@@ -1410,12 +1412,14 @@ class FakeSuite:
         elif (command, args) == ("intravox:setup", ("--skip-demo",)):
             if self.apps.get("groupfolders", {}).get("enabled") != "yes":
                 raise failed
-            for group in ("IntraVox Admins", "IntraVox Editors", "IntraVox Users"):
+            for group in self.INTRAVOX_GRANTS.keys() - {"admin"}:
                 self.groups.setdefault(group, {"name": group, "members": set()})
             mount = self.apps[app].get("groupfolder_name", "IntraVox")
             if mount not in mounts:
-                self._group_folder(mount, {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7,
-                                           "IntraVox Users": 1})
+                self._group_folder(mount, dict(self.INTRAVOX_GRANTS))
+            else:  # each rerun grants the folder its groups again where it lacks them, as Groupfolders adds a group
+                for group in self.INTRAVOX_GRANTS:
+                    self.group_folders[mounts[mount]]["groups"].setdefault(group, self.ADDED)
         elif (command, args) == ("intravox:reindex", ()):  # as Nextcloud's admin, whom the admin group's grant lets read
             mount = self.apps[app].get("groupfolder_name", "IntraVox")
             if not self.group_folders.get(mounts.get(mount), {}).get("groups", {}).get("admin", 0) & 1:

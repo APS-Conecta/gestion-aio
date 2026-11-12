@@ -35,7 +35,7 @@ import brand
 import provisionador
 import runner
 import steps
-from steps import apps, cargo_accounts, folders, people, start
+from steps import apps, cargo_accounts, folders, people, start, welcome
 from suite import FakeSuite
 
 HERE = Path(__file__).resolve().parent
@@ -1549,6 +1549,14 @@ class Upgrade(UpgradeTest):
         self.assertEqual(self.grants(), {
             **UNITS_AND_INTRANET, "Unidades/Dirección": {**DIRECTORATE, "role-jefe-some": 1},
             "Intranet": {**FOLDERS["Intranet"], "cat-clinicos": MANAGE}})
+
+    def test_an_upgrade_never_keeps_the_grants_intravox_gives_its_own_groups(self):
+        self.installed()
+        intranet = self.grants()["Intranet"]  # after «Listo», an IntraVox or Nextcloud update reran IntraVox's setup,
+        intranet.update(dict.fromkeys(welcome.INTRAVOX_GROUPS, MANAGE))  # which
+        intranet["cat-clinicos"] = MANAGE  # granted its own groups the Intranet again, and an administrator a category
+        self.upgraded()
+        self.assertEqual(self.grants()["Intranet"], {**FOLDERS["Intranet"], "cat-clinicos": MANAGE})
 
     def test_the_first_upgrade_of_a_server_whose_release_kept_no_record_ends_with_exactly_the_declared_set(self):
         self.installed()
