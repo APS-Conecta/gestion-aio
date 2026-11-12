@@ -22,7 +22,8 @@ by its id, None when none was (`files`), the backup destination chosen there, {"
 when none was (`backups`), and the teams declared on «Equipos» (`teams`, as teams.py names them), the people its
 spreadsheet loads (`people`, as spreadsheet.py reads them) and the usernames retired there (`retired`), as they were
 when «Instalar» or «Reintentar» was pressed; `declared()` answers those people and usernames as «Equipos» declares them
-now, and `log(text)` adds our own Spanish line, never a secret nor what occ or AIO printed, to the install's log. A new step is a new module: no other file lists the steps.
+now, and `log(text)` adds our own Spanish line, never a secret nor what occ or AIO printed, to the install's log. A new
+step is a new module: no other file lists the steps.
 A step that configures an app gets it through `steps.apps.ensure`
 rather than NEEDS "apps". A step that sets what administrators may change after «Listo» answers its check through
 `record`, which keeps what the step set once the check is clean, and asks `kept` what an upgrade leaves of the rest.
