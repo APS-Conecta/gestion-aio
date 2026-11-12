@@ -15,19 +15,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO / "aps" / "acceptance"), str(REPO / "aps" / "provisionador")]
-from browser import aio_config, aio_file, as_person, files_folder, machine, person, suite_name  # noqa: E402
+from browser import aio_config, aio_file, as_person, data_folder, machine, person, suite_name  # noqa: E402
 
 USER, FILE = "prueba.reinicio", "reinicio.txt"
 BODY = "Guardado antes de reiniciar el servidor.\n".encode()
 BACK = 15 * 60  # seconds the machine, then the suite, may take to answer again
 BOOT_ID = "/proc/sys/kernel/random/boot_id"  # new at every boot
-
-
-def data_folder():
-    """AIO's data folder, the staff's files folder, with the disk and the mount point that hold it."""
-    folder = files_folder() or machine("sudo docker volume inspect --format '{{.Mountpoint}}' "
-                                       "nextcloud_aio_nextcloud_data").strip()
-    return folder, machine(f"sudo findmnt --noheadings --output SOURCE,TARGET --target {folder}").split()
 
 
 def stored():
