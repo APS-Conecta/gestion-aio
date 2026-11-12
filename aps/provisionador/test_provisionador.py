@@ -635,6 +635,13 @@ class InstallTest(WizardTest):
             time.sleep(0.02)
         return install
 
+    def until_pressed(self):
+        """Once the step pressed AIO's start, after it logged each container whose image AIO downloads."""
+        deadline = time.monotonic() + 10
+        while not self.suite.starts:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
+
 
 def bootstrap_floors(**variables):
     """The floors the bootstrap requires, as aps/bootstrap/install.sh alone sets them, each by its key: `variables` names
@@ -3138,10 +3145,7 @@ class InterruptedInstall(InstallTest):
         self.suite.states = states
         self.install()
         self.until_step("Inicio de la suite", "running")
-        deadline = time.monotonic() + 10  # the step runs a moment before it presses AIO's start
-        while not self.suite.starts:
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(0.02)
+        self.until_pressed()  # the step runs a moment before it presses AIO's start
         self.assertEqual(self.suite.starts, 1)
 
     def test_a_restart_while_aio_starts_waits_for_it_and_never_sends_its_start_again(self):
@@ -3156,17 +3160,19 @@ class InterruptedInstall(InstallTest):
 
     def test_once_aio_started_the_suite_a_silent_log_names_the_containers_not_running_yet(self):
         """Apache runs as the resumed step reads the containers: AIO started them all, and the step waits for the rest."""
-        clock = [0.0]
+        clock = Clock()
+        late = "Inicio de la suite: aún no están en ejecución: Talk."
         self.interrupted_start({"nextcloud-aio-apache": ("Apache", "stopped"), "nextcloud-aio-talk": ("Talk", "stopped")})
         self.suite.states = {"nextcloud-aio-apache": ("Apache", "running"), "nextcloud-aio-talk": ("Talk", "starting")}
         # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
-        with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+        with mock.patch.object(start, "time", clock):
             self.restart()
             install = self.until_logged("Inicio de la suite: AIO inició todos los contenedores.")
             resumed = self.texts(install).index("El Provisionador se reinició y continúa la instalación.")
             self.assertIn("Inicio de la suite: AIO inició todos los contenedores.", self.texts(install)[resumed:])
-            clock[0] = start.HEARTBEAT
-            self.until_logged("Inicio de la suite: aún no están en ejecución: Talk.")
+            self.assertTrue(clock.until_read(0))  # the step logged that line at 0
+            self.assertTrue(clock.until_read(start.HEARTBEAT))
+            self.assertIn(late, self.texts(self.progress()))
             self.suite.states["nextcloud-aio-talk"] = ("Talk", "running")
             self.until("done")
         self.assertEqual(self.suite.starts, 1)
@@ -3189,6 +3195,28 @@ class InterruptedInstall(InstallTest):
         self.restart()
         self.assertEqual(self.steps(self.until("done"))["Inicio de la suite"], ("green", None))
         self.assertEqual(self.suite.starts, 1)
+
+
+class Clock:
+    """The heartbeat's clock, which the test moves. It counts the step's readings of it, so the test waits on the step,
+    never on real time."""
+
+    def __init__(self):
+        self.now, self.reads, self.changed = 0.0, 0, threading.Condition()
+
+    def monotonic(self):
+        with self.changed:
+            self.reads += 1
+            self.changed.notify_all()
+            return self.now
+
+    def until_read(self, now):
+        """Set the time to `now`, then wait until the step read it twice: True once it did. While a container does not
+        run, the step reads the clock once each reading of the containers and again after each line it logs, so with one
+        thread reading, a line it logged before and its first reading at `now` are both over by then."""
+        with self.changed:
+            self.now, wanted = now, self.reads + 2
+            return self.changed.wait_for(lambda: self.reads >= wanted, timeout=10)
 
 
 class InstallLog(InstallTest):
@@ -3238,10 +3266,7 @@ class InstallLog(InstallTest):
                              "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
                              "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
         self.install()
-        deadline = time.monotonic() + 10  # the step reads the containers once, then presses AIO's start
-        while not self.suite.starts:
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(0.02)
+        self.until_pressed()  # the step reads the containers once, then presses AIO's start
         self.suite.states["nextcloud-aio-fulltextsearch"] = ("Fulltextsearch", "starting")
         self.until_logged("Contenedor «Búsqueda de texto completo»: iniciando.")
         self.suite.release.set()
@@ -3278,7 +3303,7 @@ class InstallLog(InstallTest):
 
     def test_while_aio_starts_the_suite_a_silent_log_says_how_many_containers_run(self):
         """Once the step wrote nothing for HEARTBEAT seconds while a container does not run yet."""
-        clock = [0.0]
+        clock = Clock()
         counted = f"{self.START}: AIO descarga e inicia los contenedores; 1 de 3 en ejecución."
         self.claim()
         self.suite.release.clear()
@@ -3286,14 +3311,13 @@ class InstallLog(InstallTest):
                              "nextcloud-aio-nextcloud": ("Servidor de aplicaciones", "starting"),
                              "nextcloud-aio-fulltextsearch": ("Fulltextsearch", "stopped")}
         # No seam reaches the heartbeat's clock: the step's readings run on the fake one.
-        with mock.patch.object(start, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+        with mock.patch.object(start, "time", clock):
             self.install()
-            self.until_logged("Contenedor «Búsqueda de texto completo»: AIO descarga su imagen.")
-            clock[0] = start.HEARTBEAT - 1
-            time.sleep(start.POLL * 1.5)
+            self.until_pressed()  # its last line logged at 0, the step waits for AIO's start
+            self.assertTrue(clock.until_read(start.HEARTBEAT - 1))
             self.assertNotIn(counted, self.texts(self.progress()))
-            clock[0] = start.HEARTBEAT
-            self.until_logged(counted)
+            self.assertTrue(clock.until_read(start.HEARTBEAT))
+            self.assertIn(counted, self.texts(self.progress()))
             self.suite.release.set()
             texts = self.texts(self.until("done"))
         self.assertEqual(texts.count(counted), 1)
