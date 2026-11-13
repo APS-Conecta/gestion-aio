@@ -1557,11 +1557,11 @@ class Upgrade(UpgradeTest):
             **UNITS_AND_INTRANET, "Unidades/Dirección": {**DIRECTORATE, "role-jefe-some": 1},
             "Intranet": {**FOLDERS["Intranet"], "cat-clinicos": MANAGE}})
 
-    def test_an_upgrade_never_keeps_the_grants_intravox_gives_its_own_groups(self):
+    def test_an_upgrade_never_keeps_the_grants_of_intravoxs_own_groups_whoever_gave_them(self):
         self.installed()
-        intranet = self.grants()["Intranet"]  # after «Listo», an IntraVox or Nextcloud update reran IntraVox's setup,
-        intranet.update(dict.fromkeys(welcome.INTRAVOX_GROUPS, MANAGE))  # which
-        intranet["cat-clinicos"] = MANAGE  # granted its own groups the Intranet again, and an administrator a category
+        intranet = self.grants()["Intranet"]  # after «Listo», IntraVox's own groups, which the suite never uses,
+        intranet.update(dict.fromkeys(welcome.INTRAVOX_GROUPS, MANAGE))  # got the Intranet,
+        intranet["cat-clinicos"] = MANAGE  # and an administrator gave a category the Intranet
         self.upgraded()
         self.assertEqual(self.grants()["Intranet"], {**FOLDERS["Intranet"], "cat-clinicos": MANAGE})
 
