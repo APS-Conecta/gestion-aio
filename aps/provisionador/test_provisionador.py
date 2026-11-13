@@ -1559,7 +1559,7 @@ class Upgrade(UpgradeTest):
 
     def test_an_upgrade_never_keeps_the_grants_intravox_gives_its_own_groups(self):
         self.installed()
-        intranet = self.grants()["Intranet"]  # after «Listo», an IntraVox or Nextcloud update reran IntraVox's setup,
+        intranet = self.grants()["Intranet"]  # after «Listo», IntraVox 3.2.1's setup ran again (an update or a repair),
         intranet.update(dict.fromkeys(welcome.INTRAVOX_GROUPS, MANAGE))  # which
         intranet["cat-clinicos"] = MANAGE  # granted its own groups the Intranet again, and an administrator a category
         self.upgraded()
