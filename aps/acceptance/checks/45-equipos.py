@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Equipos» in the installed suite, from the sectors and programs typed on «Equipos» (17-install): Nextcloud holds
 every group the wizard declared with its name, one per cargo among them, and each group folder, the Intranet among them,
-with exactly the declared groups' permissions; each cargo account is enabled and in its groups, and the passwords file
+with exactly the declared groups' permissions, the Intranet's still after IntraVox's setup runs again, as each IntraVox
+update and Nextcloud's repair run it; each cargo account is enabled and in its groups, and the passwords file
 lists it. A sector's jefatura, as a staff member who never logged in, sees the welcome page, where every login lands
 (46-folders checks what staff do in the folders)."""
 
@@ -17,6 +18,12 @@ from browser import first_password, occ, provisionador_file, provisionador_state
 from steps.passwords import FILE  # noqa: E402
 from steps.welcome import APP, GRANTS, MOUNT  # noqa: E402
 
+
+def folder_grants():
+    """Each group folder's groups with their permissions, by mount point."""
+    return {f["mountPoint"]: f.get("groups_list") or {} for f in json.loads(occ("groupfolders:list --output=json"))}
+
+
 state = provisionador_state()
 declared, centre_type = state.get("teams", []), state["centre"]["type"]
 print("teams: " + ", ".join(team["name"] for team in declared))
@@ -27,12 +34,17 @@ print(f"{len(teams.ROLES)} cargo groups: " + ", ".join(groups.get(role, f"{role}
 wrong = [f"group {group} is {groups.get(group, 'missing')}, not «{name}»"
          for group, name in teams.groups(centre_type).items() if groups.get(group) != name]
 
-held = {f["mountPoint"]: f.get("groups_list") or {} for f in json.loads(occ("groupfolders:list --output=json"))}
+held = folder_grants()
 for mount, grants in {**teams.folders(declared), **GRANTS}.items():
     wanted = {group: teams.bits(words) for group, words in grants.items()}
     print(f"{mount}: {held.get(mount)}")
     if held.get(mount) != wanted:
         wrong.append(f"{mount} grants {held.get(mount)}, not {wanted}")
+occ("intravox:setup --skip-demo")  # what IntraVox's update hook runs (its post-migration repair step)
+again = folder_grants().get(MOUNT)
+print(f"{MOUNT} after IntraVox's setup ran again: {again}")
+if again != held.get(MOUNT):
+    wrong.append(f"IntraVox's setup changed the {MOUNT} grants to {again}")
 
 passwords = provisionador_file(FILE)  # never printed
 accounts = teams.cargo_accounts(declared, centre_type)

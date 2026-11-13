@@ -32,8 +32,9 @@ LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folde
          ("Talk", "Mensajes y videollamadas", "/apps/spreed/", "chat"))
 GRANTS = {MOUNT: {**teams.SHARED, ADMINS: teams.MANAGE}}
 KIND = "intranet_grants"  # in the record: the groups the step granted permissions in the Intranet
-# IntraVox's own groups, which the suite never uses. IntraVox's setup grants them the Intranet again on every run, and
-# IntraVox's updates and Nextcloud's repair run it too, so an upgrade never keeps their grants as an administrator's.
+# IntraVox's own groups, which the suite never uses. IntraVox's first setup grants them the Intranet, and up to IntraVox
+# 3.2.1 every later run did too (its updates and Nextcloud's repair run it), so an upgrade never keeps their grants as
+# an administrator's.
 INTRAVOX_GROUPS = ("IntraVox Admins", "IntraVox Editors", "IntraVox Users")
 
 
