@@ -1032,7 +1032,6 @@ class FakeSuite:
     BACKUP_PASSWORD = "clave-de-cifrado-de-aio"
     SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAPSConectaGestionFakeKeyForRemoteBackups root@nextcloud-aio"
     PERMISSIONS = {"read": 1, "write": 6, "delete": 8, "share": 16}  # Groupfolders' words for its permission bits
-    ADDED = 31  # the permissions Groupfolders gives a group it adds to a folder: every one
     INTRAVOX_GRANTS = {"admin": 31, "IntraVox Admins": 31, "IntraVox Editors": 7, "IntraVox Users": 1}  # first setup's
     # The fake's one disk until a test adds others: the system disk, which holds Docker's storage.
     SYSTEM_DISK = {"id": "0b1e5c2a-7d3f-4c8e-9a61-2f4d8b7c9e10", "device": "/dev/vda1", "drive": "/dev/vda",
@@ -1055,6 +1054,7 @@ class FakeSuite:
         self.groups = {"admin": {"name": "admin", "members": {"admin"}}}  # each group, by its id: its name and members
         self.sub_admins = {}  # each group admin's groups, by its username: Nextcloud's sub-admins
         self.group_folders = {}  # by id: each group folder's mount point, its groups' permissions and its seeded files
+        self.intravox_provisioned = False  # whether IntraVox's setup ran to the end once
         self.answering = True  # whether the suite's reverse proxy answers at its name
         self.machine = {"cpus": 2, "memory_gib": 6}  # the server's hardware: install.sh's floors (Recording tests)
         self.found_gpu = None  # the GPU the server offers Ollama: "nvidia", "dri" (AMD or Intel) or None, the CPU
@@ -1415,11 +1415,11 @@ class FakeSuite:
             for group in self.INTRAVOX_GRANTS.keys() - {"admin"}:
                 self.groups.setdefault(group, {"name": group, "members": set()})
             mount = self.apps[app].get("groupfolder_name", "IntraVox")
-            if mount not in mounts:
+            if mount not in mounts:  # a folder it makes gets its groups, provisioned or not
                 self._group_folder(mount, dict(self.INTRAVOX_GRANTS))
-            else:  # each rerun grants the folder its groups again where it lacks them, as Groupfolders adds a group
-                for group in self.INTRAVOX_GRANTS:
-                    self.group_folders[mounts[mount]]["groups"].setdefault(group, self.ADDED)
+            elif not self.intravox_provisioned:  # once provisioned, a folder's groups are the administrator's
+                self.group_folders[mounts[mount]]["groups"].update(self.INTRAVOX_GRANTS)
+            self.intravox_provisioned = True
         elif (command, args) == ("intravox:reindex", ()):  # as Nextcloud's admin, whom the admin group's grant lets read
             mount = self.apps[app].get("groupfolder_name", "IntraVox")
             if not self.group_folders.get(mounts.get(mount), {}).get("groups", {}).get("admin", 0) & 1:
