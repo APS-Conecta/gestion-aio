@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """«Equipos» in the installed suite, from the sectors and programs typed on «Equipos» (17-install): Nextcloud holds
 every group the wizard declared with its name, one per cargo among them, and each group folder, the Intranet among them,
-with exactly the declared groups' permissions, the Intranet's still after IntraVox's setup runs again, as each IntraVox
-update and Nextcloud's repair run it; each cargo account is enabled and in its groups, and the passwords file
-lists it. A sector's jefatura, as a staff member who never logged in, sees the welcome page, where every login lands
-(46-folders checks what staff do in the folders)."""
+with exactly the declared groups' permissions, the Intranet's still after the check runs IntraVox's setup again, as each
+IntraVox update and Nextcloud's repair run it (only a red leaves the suite changed); each cargo account is enabled and
+in its groups, and the passwords file lists it. A sector's jefatura, as a staff member who never logged in, sees the
+welcome page, where every login lands (46-folders checks what staff do in the folders)."""
 
 import json
 import sys
@@ -16,7 +16,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).res
 import teams  # noqa: E402
 from browser import first_password, occ, provisionador_file, provisionador_state  # noqa: E402
 from steps.passwords import FILE  # noqa: E402
-from steps.welcome import APP, GRANTS, MOUNT  # noqa: E402
+from steps.welcome import APP, GRANTS, MOUNT, SETUP  # noqa: E402
 
 
 def folder_grants():
@@ -40,7 +40,7 @@ for mount, grants in {**teams.folders(declared), **GRANTS}.items():
     print(f"{mount}: {held.get(mount)}")
     if held.get(mount) != wanted:
         wrong.append(f"{mount} grants {held.get(mount)}, not {wanted}")
-occ("intravox:setup --skip-demo")  # what IntraVox's update hook runs (its post-migration repair step)
+occ(" ".join(SETUP))
 again = folder_grants().get(MOUNT)
 print(f"{MOUNT} after IntraVox's setup ran again: {again}")
 if again != held.get(MOUNT):

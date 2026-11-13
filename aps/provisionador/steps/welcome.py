@@ -32,10 +32,10 @@ LINKS = (("Archivos", "Las carpetas del establecimiento", "/apps/files/", "folde
          ("Talk", "Mensajes y videollamadas", "/apps/spreed/", "chat"))
 GRANTS = {MOUNT: {**teams.SHARED, ADMINS: teams.MANAGE}}
 KIND = "intranet_grants"  # in the record: the groups the step granted permissions in the Intranet
-# IntraVox's own groups, which the suite never uses. IntraVox's first setup grants them the Intranet, and up to IntraVox
-# 3.2.1 every later run did too (its updates and Nextcloud's repair run it), so an upgrade never keeps their grants as
-# an administrator's.
+# IntraVox's own groups, which the suite never uses. IntraVox's first setup grants them the Intranet; the step takes
+# back their grants whoever gave them, so an upgrade never keeps them as an administrator's.
 INTRAVOX_GROUPS = ("IntraVox Admins", "IntraVox Editors", "IntraVox Users")
+SETUP = ("intravox:setup", "--skip-demo")  # IntraVox's setup as its update hook runs it: folder and groups, no pages
 
 
 def row(*widgets, **style):
@@ -71,7 +71,7 @@ def run(context):
     suite = context.suite
     suite.occ("config:import", stdin=json.dumps(IMPORTED))  # IntraVox names its folder before it makes it
     suite.occ("app:disable", DASHBOARD)
-    suite.occ("intravox:setup", "--skip-demo")
+    suite.occ(*SETUP)
     held = listed(suite)
     if MOUNT not in held:
         return reasons(context, KIND, GRANTS, app_groups=INTRAVOX_GROUPS)
