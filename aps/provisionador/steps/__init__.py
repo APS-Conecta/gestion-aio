@@ -6,14 +6,16 @@ A step module, whose name is its id, declares:
   NAME            its Spanish name, as the progress and the red list show it
   NEEDS           the ids of the steps that must be green before it runs
   OWNED           optional, True when the suite's own pages own what the step made once «Listo» is reached: an upgrade
-                  of the server keeps such a step green, never re-running it nor re-checking it
+                  of the server keeps such a step green, never running it, its check nor its finish again
   run(context)    its work, idempotent; it returns what went wrong as Spanish reasons, which the red list shows, and
                   None or [] once the work is done: no step reports success without doing its work
   check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
                   differences between what the step declared and what holds now (the running suite, and for people
                   also what «Equipos» declares now), None or [] when it is clean
-Both answer the same way; only the suite port raises, Unreachable with its Spanish reason, and the runner turns that
-into the step's reason too.
+  finish(context) optional, its work once the end-of-install check is clean, as «Listo» comes: what no install may run
+                  under, such as AIO's nightly backup, which stops the suite; it answers as its check does
+All three answer the same way; only the suite port raises, Unreachable with its Spanish reason, and the runner turns
+that into the step's reason too.
 The context holds the suite port (`suite`), the centre (`centre`), its claimed name (`name`), the server's inside
 address (`inside`), the folder the Provisionador keeps its files in (`folder`), whether the run is an upgrade's
 (`upgrade`), the ids of the steps a Provisionador restart cut short (`interrupted`) and of the optional apps the

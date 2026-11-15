@@ -978,6 +978,22 @@ class BackupDestination(InstallTest):
         self.assertEqual((self.suite.tested, self.suite.backup), ([self.COPIES], (self.COPIES, "06:00")))
         self.assertIn(f"Copia de seguridad: se pudo escribir en {self.COPIES}.", self.texts(install))
 
+    def test_no_nightly_backup_runs_before_the_suite_is_installed(self):
+        """AIO's nightly backup stops the suite: at 06:00 UTC during an install, one would cut Nextcloud's first install
+        short for good, or stop Nextcloud under the steps that run then. AIO holds the destination as its containers
+        start, and the backup's time only once the end-of-install check is clean, as «Listo» comes."""
+        held = []  # the time AIO's nightly backup held as each of Nextcloud's commands ran
+        occ = self.suite.occ
+        self.suite.occ = lambda *args, **kwargs: held.append(self.suite.backup_settings()[1]) or occ(*args, **kwargs)
+        self.suite.release.clear()
+        self.claim()
+        self.install()
+        self.until_pressed()
+        self.assertEqual(self.suite.backup_settings(), ("/var/backups/aps-conecta", None))
+        self.suite.release.set()
+        self.until("done")
+        self.assertEqual((set(held), self.suite.backup), ({None}, ("/var/backups/aps-conecta", "06:00")))
+
     def test_a_destination_that_cannot_be_written_turns_the_step_red_until_reintentar(self):
         self.suite.unwritable.add("/var/backups/aps-conecta")
         self.claim()
@@ -1027,7 +1043,7 @@ class BackupDestination(InstallTest):
         self.suite.found_disks.append(disk("usb", usb=True))
         self.assertEqual(self.choose(backups={"disk": "usb"})[0], 200)
         self.until("failed")
-        self.assertEqual((self.suite.repository, self.suite.backup), (None, (self.COPIES, "06:00")))
+        self.assertEqual((self.suite.repository, self.suite.backup), (None, (self.COPIES, None)))  # no time before «Listo»
 
     def test_while_the_steps_run_the_destination_waits(self):
         self.suite.found_disks.append(disk("usb", usb=True))

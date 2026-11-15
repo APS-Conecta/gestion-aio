@@ -5,7 +5,8 @@ after the steps it needs. A step that fails gets its Spanish reason; its depende
 does not need it still runs. «Reintentar» runs the failed and waiting steps again, never a green one. Once every step
 is green, the end-of-install check gives, step by step, the differences between what the step declared and what holds
 now: the running suite, and for people also what «Equipos» declares now. A step whose part differs turns red again.
-«Listo» needs every step green and a clean check.
+Once the check is clean, each step's finish does the work no install may run under; a step whose finish fails turns red
+too. «Listo» needs every step green, a clean check and every finish done.
 
 Each step's status is kept in the wizard's state as it changes: pending, running, green, failed or waiting. A step still
 running when the Provisionador starts was cut short by a restart, and the install resumes by itself.
@@ -127,8 +128,23 @@ def record(state, name, status, reasons=(), logged=True):
         set_status(s["install"], name, status, reasons, logged)
 
 
+def green(install):
+    return all(step["status"] == "green" for step in install["steps"].values())
+
+
+def settle(state, context, part):
+    """Each step's `part`, "check" or "finish", where it has one, but an owned step's at an upgrade: the step turns red
+    with what it found, green otherwise."""
+    for name, step in STEPS.items():
+        if hasattr(step, part) and not (context.upgrade and getattr(step, "OWNED", False)):
+            record(state, name, "running", logged=False)
+            found = problems(getattr(step, part), context)
+            record(state, name, "failed" if found else "green", found, logged=bool(found))
+
+
 def run(state, context):
-    """Run every pending step in order, then, once all are green, the end-of-install check."""
+    """Run every pending step in order, then, once all are green, the end-of-install check, and once it is clean the
+    steps' finishes."""
     for name, step in STEPS.items():
         install = state.read()["install"]
         if name not in unfinished(install):
@@ -141,17 +157,15 @@ def run(state, context):
         record(state, name, "running")
         found = problems(step.run, context)
         record(state, name, "failed" if found else "green", found)
-    if any(r["status"] != "green" for r in state.read()["install"]["steps"].values()):
+    if not green(state.read()["install"]):
         return
     log(state, CHECK)
-    for name, step in STEPS.items():
-        if hasattr(step, "check") and not (context.upgrade and getattr(step, "OWNED", False)):
-            record(state, name, "running", logged=False)
-            found = problems(step.check, context)
-            record(state, name, "failed" if found else "green", found, logged=bool(found))
+    settle(state, context, "check")
+    if green(state.read()["install"]):
+        settle(state, context, "finish")
     with state.change() as s:  # a step the wizard reopened meanwhile keeps «Listo» away
         install = s["install"]
-        install["listo"] = all(step["status"] == "green" for step in install["steps"].values())
+        install["listo"] = green(install)
         if install["listo"]:
             add_line(install, LISTO)
 
