@@ -581,10 +581,12 @@ class Suite:
     def execute(container, command, stdin="", failed=None, timeout=120):
         """What a command run in the container as its web user printed, within `timeout` seconds. What it printed may
         be a secret and is never logged; a failure logs its errors only and is Unreachable: the container's own message
-        when it does not answer, `failed` when the command fails."""
+        when it does not answer, `failed` when the command fails. A command without input gets no stdin: Docker's attach
+        now and then loses an empty stdin's close, and a command reading it waits forever (#149)."""
+        interactive = ("--interactive",) if stdin else ()
         try:
-            run = subprocess.run(["docker", "exec", "--interactive", "--user", "www-data", container, *command],
-                                 input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
+            run = subprocess.run(["docker", "exec", *interactive, "--user", "www-data", container, *command],
+                                 input=stdin or None, capture_output=True, text=True, timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             print(f"{container} {command[0]}: {error}", file=sys.stderr)
             raise Unreachable(DOWN[container]) from error
