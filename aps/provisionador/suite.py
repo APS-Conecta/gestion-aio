@@ -190,8 +190,8 @@ $config->setDomain($in['domain'], true);
 """
 
 
-# AIO's backup destination, a folder or an ssh:// repository, and time, set as its page sets them
-# (ConfigurationController), from stdin's JSON. A new destination once one was set goes through AIO's own reset first,
+# AIO's backup destination, a folder or an ssh:// repository, set as its page sets it (ConfigurationController), from
+# stdin's JSON. A new destination once one was set goes through AIO's own reset first,
 # which also removes borg.config, so its first backup starts a repository there, as AIO's page does after «Reset backup
 # location».
 BACK_UP = r"""
@@ -205,10 +205,20 @@ if ($held !== '' && $held !== $in['destination']) {
 }
 $remote = str_starts_with($in['destination'], 'ssh://');
 $config->setBorgLocationVars($remote ? '' : $in['destination'], $remote ? $in['destination'] : '');
-$config->setDailyBackupTime($in['time'], true, true);
 if ($in['kept']) {  // a remote repository already in place: marked as backupscript.sh marks one it made
     touch(\AIO\Data\DataConst::GetBackupKeyFile());
 }
+"""
+
+
+# AIO's nightly backup's time, from stdin's JSON, set as its page sets it, with the success notification and the
+# automatic updates on.
+NIGHTLY_BACKUP = r"""
+ini_set('display_errors', 'stderr');
+require '/var/www/docker-aio/php/vendor/autoload.php';
+$in = json_decode(stream_get_contents(STDIN), true, 4, JSON_THROW_ON_ERROR);
+\AIO\DependencyInjection::GetContainer()->get(\AIO\Data\ConfigurationManager::class)
+    ->setDailyBackupTime($in['time'], true, true);
 """
 
 
@@ -875,16 +885,19 @@ class Suite:
                 form[component] = "on"
         self._signed_in().post("/api/configuration", form)
 
-    def back_up(self, destination, time, kept=False):
-        """AIO's own backup to the destination, a folder on this server or a remote repository, daily at the time (UTC),
-        with its success notification and its automatic updates on: AIO's nightly job then restarts the containers on
-        the pins the release holds and updates the store's apps (own and fork apps stay above the store's versions, and
-        our timer runs them nightly anyway), so security fixes reach the suite between releases. Set through AIO's own
+    def back_up(self, destination, kept=False):
+        """AIO's own backup to the destination, a folder on this server or a remote repository. Set through AIO's own
         code in its mastercontainer, the same calls its page makes, so a destination changed once the suite runs, when
         the page's login is closed, reaches AIO too. `kept`: the remote repository is already in place, AIO's own, which
         BACK_UP marks as AIO marks one its backup made."""
-        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"destination": destination, "time": time,
-                                                                     "kept": kept}))
+        self.mastercontainer("php", "-r", BACK_UP, stdin=json.dumps({"destination": destination, "kept": kept}))
+
+    def nightly_backup(self, time):
+        """AIO's backup daily at the time (UTC), with its success notification and its automatic updates on: AIO's
+        nightly job then stops the suite for the backup, restarts the containers on the pins the release holds and
+        updates the store's apps (own and fork apps stay above the store's versions, and our timer runs them nightly
+        anyway), so security fixes reach the suite between releases. Set through AIO's own code, as `back_up`."""
+        self.mastercontainer("php", "-r", NIGHTLY_BACKUP, stdin=json.dumps({"time": time}))
 
     def backup_settings(self):
         """Where AIO's nightly backup goes, a folder or a remote repository, and at what time (UTC), as AIO holds
@@ -1069,7 +1082,7 @@ class FakeSuite:
         self.pulled = {}  # the models Ollama holds in its volume, each tag with its digest
         self.pulls = []  # each model Ollama was asked to pull, in turn
         self.switched = None  # the optional containers AIO was set to run; every other one is off
-        self.backup = None  # AIO's nightly backup: (folder, time)
+        self.backup = None  # AIO's nightly backup: (destination, time), the time None until one is set
         self.unwritable = set()  # backup destinations a file cannot be written to
         self.tested = []  # each backup destination tested, in turn: a folder written to or a repository reached
         self.repository = None  # where AIO's borg.config holds the repository its backups went to, None before any
@@ -1204,13 +1217,17 @@ class FakeSuite:
         self._signed_in()
         self.switched = set(components)
 
-    def back_up(self, destination, time, kept=False):
+    def back_up(self, destination, kept=False):
         self._outage_guard()
         if self.backup and self.backup[0] != destination:  # AIO's reset: its next backup starts a repository afresh
             self.repository = None
         if kept:
             self.repository = destination
-        self.backup, self.automatic_updates = (destination, time), True
+        self.backup = (destination, self.backup and self.backup[1])
+
+    def nightly_backup(self, time):
+        self._outage_guard()
+        self.backup, self.automatic_updates = ((self.backup or (None, None))[0], time), True
 
     def backup_settings(self):
         self._outage_guard()
