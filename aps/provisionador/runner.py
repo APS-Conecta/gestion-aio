@@ -128,8 +128,8 @@ def record(state, name, status, reasons=(), logged=True):
         set_status(s["install"], name, status, reasons, logged)
 
 
-def green(state):
-    return all(step["status"] == "green" for step in state.read()["install"]["steps"].values())
+def green(install):
+    return all(step["status"] == "green" for step in install["steps"].values())
 
 
 def settle(state, context, part):
@@ -157,15 +157,15 @@ def run(state, context):
         record(state, name, "running")
         found = problems(step.run, context)
         record(state, name, "failed" if found else "green", found)
-    if not green(state):
+    if not green(state.read()["install"]):
         return
     log(state, CHECK)
     settle(state, context, "check")
-    if green(state):
+    if green(state.read()["install"]):
         settle(state, context, "finish")
     with state.change() as s:  # a step the wizard reopened meanwhile keeps «Listo» away
         install = s["install"]
-        install["listo"] = all(step["status"] == "green" for step in install["steps"].values())
+        install["listo"] = green(install)
         if install["listo"]:
             add_line(install, LISTO)
 
