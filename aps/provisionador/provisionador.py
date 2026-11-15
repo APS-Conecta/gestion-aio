@@ -65,6 +65,7 @@ CSP = ("default-src 'self'; img-src 'self' data: https://tile.openstreetmap.org;
        "connect-src 'self' https://*.gestion.apsconecta.cl; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 STATE_DIR = Path("/var/lib/aps-conecta/provisionador")
 SERVICES = HERE.parent / "services.json"  # the release's name service and ACME directory
+VERSION = HERE.parent / "VERSION"  # the release's tag
 PORT = 8081  # clear of AIO's 80, 8080 and 8443 and the suite's 443 (Talk's TURN included)
 COOKIE = "__Host-session"
 MAX_BODY = 1024 * 1024 * 4 // 3  # a people spreadsheet of about 8,000 people, in base64
@@ -839,7 +840,7 @@ def main(argv=None):
     if args.command == "update-apps":
         return update_apps(Suite(SERVICES), 60 * 60)
     if args.command == "upgrade":
-        version = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
+        version = VERSION.read_text(encoding="utf-8").strip()
         upgrade(Suite(SERVICES), State(args.state), version)
         return 0
     if done := closed(State(args.state)):
