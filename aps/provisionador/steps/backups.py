@@ -5,6 +5,8 @@ server, the aps-conecta/copias folder of the backup disk, which «Almacenamiento
 another computer over SSH. The destination is tested first, so «Listo» never comes with a backup that cannot be made: a
 file written in the folder and removed at once, or the other computer reached with AIO's key and Borg alone. After
 «Listo» AIO's page owns the destination: an upgrade keeps the one AIO holds, untested, and sets only the time.
+AIO gets the time only once the install is done, as «Listo» comes: its nightly backup stops the suite, so at 06:00 UTC
+during an install it would cut Nextcloud's first install short for good, or stop Nextcloud under the steps then running.
 AIO's automatic updates are on too: AIO's nightly job (Containers/mastercontainer/daily-backup.sh) then keeps the
 containers on the release's pins and updates the store's apps, which our host timer (install.sh) also does every
 night."""
@@ -62,7 +64,6 @@ def destination(context):
 def run(context):
     if held := held_destination(context.suite, context.upgrade):
         context.log(KEPT.format(held))
-        context.suite.back_up(held, BACKUP_TIME)
         return None
     try:
         target = destination(context)
@@ -76,14 +77,15 @@ def run(context):
     else:
         context.suite.writable(target)
         context.log(WRITTEN.format(target))
-    context.suite.back_up(target, BACKUP_TIME, kept)
+    context.suite.back_up(target, kept)
     return None
 
 
-def check(context):
+def finish(context):
     try:
         target = held_destination(context.suite, context.upgrade) or destination(context)
     except LookupError:
         return [BACKUP_GONE]
+    context.suite.nightly_backup(BACKUP_TIME)
     held = context.suite.backup_settings()
     return [DIFFERS.format(*held, target, BACKUP_TIME)] if held != (target, BACKUP_TIME) else None
