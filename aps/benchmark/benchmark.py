@@ -37,7 +37,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MODEL = json.loads((HERE.parent / "provisionador" / "model.json").read_text(encoding="utf-8"))  # the Model: tag, digest
-GPU_VENDORS = {"0x1002": "AMD", "0x8086": "Intel"}  # PCI vendor ids in /sys/class/drm/card*/device/vendor
+sys.path.append(str(HERE.parent / "provisionador"))
+from suite import VENDORS  # noqa: E402  the Suite's PCI vendor ids, as /sys/class/drm/card*/device/vendor holds them
 BAR = {"right_call_rate": 0.95, "p95_seconds": 15, "vram_gib": 6}  # it judges only a machine whose GPU has vram_gib
 TIMEOUT = 900  # seconds a request may take, the cold first one on a CPU included
 
@@ -75,8 +76,8 @@ def hardware():
                           if re.fullmatch(r"card\d+", card.parent.name)})
         for device in devices:
             vendor, vram = sysfs(device / "vendor"), sysfs(device / "mem_info_vram_total")
-            if vendor in GPU_VENDORS:
-                gpus.append({"name": GPU_VENDORS[vendor], "vram_mib": int(vram) // 1048576 if vram else None})
+            if vendor in VENDORS:
+                gpus.append({"name": VENDORS[vendor], "vram_mib": int(vram) // 1048576 if vram else None})
     ram = re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text())
     cpu = re.search(r"model name\s*:\s*(.+)", Path("/proc/cpuinfo").read_text())
     return {"gpus": gpus, "ram_gib": round(int(ram[1]) / 1048576, 1) if ram else None,

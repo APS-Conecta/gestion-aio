@@ -5,7 +5,7 @@
 # Run from anywhere inside the repo.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-python3 -I aps/gates/test_gates.py
+python3 -I -B aps/gates/test_gates.py
 python3 -I aps/gates/conformance.py
 python3 -I aps/gates/deis_codes.py
 python3 -I aps/gates/manifest.py

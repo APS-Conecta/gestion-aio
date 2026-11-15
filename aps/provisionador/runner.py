@@ -144,9 +144,8 @@ def run(state, context):
     if any(r["status"] != "green" for r in state.read()["install"]["steps"].values()):
         return
     log(state, CHECK)
-    upgrade = getattr(context, "upgrade", False)
     for name, step in STEPS.items():
-        if hasattr(step, "check") and not (upgrade and getattr(step, "OWNED", False)):
+        if hasattr(step, "check") and not (context.upgrade and getattr(step, "OWNED", False)):
             record(state, name, "running", logged=False)
             found = problems(step.check, context)
             record(state, name, "failed" if found else "green", found, logged=bool(found))

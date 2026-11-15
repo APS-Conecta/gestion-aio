@@ -131,10 +131,11 @@ IMAGES = Path(__file__).resolve().parent.parent / "images.lock"  # the bundle's 
 AIO_AUTHORITY = "/mnt/docker-aio-config/caddy-internal/pki/authorities/local/root.crt"  # signs AIO's page certificate
 OFFICE_SUITES = {"collabora", "onlyoffice", "eurooffice"}  # AIO's office suites, one choice among them
 OLLAMA = "nextcloud-aio-ollama"  # «IA local»'s container, as community-containers/ollama names it
-OLLAMA_API = "http://nextcloud-aio-ollama:11434/api/"  # Ollama's API, as Nextcloud reaches it inside the suite
+OLLAMA_URL = f"http://{OLLAMA}:11434/"  # Ollama, as Nextcloud reaches it inside the suite
+OLLAMA_API = OLLAMA_URL + "api/"  # Ollama's own API
 OLLAMA_FAILED = ("La IA local no pudo {}. Presione «Reintentar»; si vuelve a ocurrir, contacte a APS Conecta.")
 PULL_WAIT = 2 * 60 * 60  # seconds a model's pull may take
-VENDORS = {"0x1002", "0x8086"}  # the PCI vendors of AMD and Intel, whose GPUs Ollama reaches through the DRI devices
+VENDORS = {"0x1002": "AMD", "0x8086": "Intel"}  # the PCI vendors whose GPUs Ollama reaches through the DRI devices
 # The folder whose filesystem is the system disk: Docker's storage, or /var/lib before Docker exists, as the bootstrap's
 # disk check reads it.
 DOCKER_STORAGE = ("/var/lib/docker", "/var/lib")
@@ -725,7 +726,7 @@ class Suite:
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 pass
         devices = Path("/sys/class/drm").glob("renderD*/device/vendor")
-        return "dri" if {path.read_text(encoding="ascii").strip() for path in devices} & VENDORS else None
+        return "dri" if {path.read_text(encoding="ascii").strip() for path in devices} & VENDORS.keys() else None
 
     @staticmethod
     def disks():

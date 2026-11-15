@@ -8,9 +8,9 @@ community-container switch, as Caddy does, with the GPU the suite port found: an
 Toolkit, an AMD or Intel one through the DRI devices, otherwise the CPU. Ollama answers one request at a time (its
 definition says so) under a memory cap: what the server's memory leaves beside the suite's own floor. The model, the
 release's pin in model.json, is pulled by its tag and kept only at its pinned digest, and Nextcloud's OpenAI-compatible
-connector (integration_openai, a store app the step enables, as a component's app comes with its switch) points at
-Ollama with that model and its chat endpoint on: the suite then has a text-generation provider, and Estadística's nota
-appears.
+connector (integration_openai, a store app outside the Suite manifest, which the step gets through `apps.ensure`)
+points at Ollama with that model and its chat endpoint on: the suite then has a text-generation provider, and
+Estadística's nota appears.
 
 Off, the connector is disabled, so there is no provider, and the container stops and leaves AIO's list; its volume, with
 the model, stays. A Suite release pins Ollama's image (its definition's image_tag) and the model by digest, and only a
@@ -22,13 +22,14 @@ import json
 from pathlib import Path
 
 from steps import apps, configure, differences, until
-from suite import OLLAMA, Unreachable
+from suite import OLLAMA, OLLAMA_URL, Unreachable
 
 NAME = "IA local"
 NEEDS = ("start",)
 MODEL = json.loads((Path(__file__).resolve().parents[1] / "model.json").read_text(encoding="utf-8"))  # tag, digest
 APP = "integration_openai"  # Nextcloud's OpenAI-compatible connector, a store app
-SETTINGS = {"apps": {APP: {"url": "http://nextcloud-aio-ollama:11434/v1", "default_completion_model_id": MODEL["model"],
+CONNECTOR = {"id": APP, "name": "Conector de la IA local", "source": "store"}  # as the Suite manifest would list it
+SETTINGS = {"apps": {APP: {"url": OLLAMA_URL + "v1", "default_completion_model_id": MODEL["model"],
                            "chat_endpoint_enabled": "1"}}}
 # The suite's own memory in GiB beside the AI: the bootstrap's floor (aps/bootstrap/install.sh, MIN_MEMORY_GIB; the
 # «IA local» tests hold this to it), the suite's peak with every component on.
@@ -100,7 +101,8 @@ def run(context):
         suite.pull(MODEL["model"])
         if not pinned(suite.models()):
             return [MOVED.format(MODEL["model"])]
-    suite.occ("app:enable", APP)
+    if failed := apps.ensure(context, CONNECTOR):
+        return failed
     return configure(suite, SETTINGS)
 
 
