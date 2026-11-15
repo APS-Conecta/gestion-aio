@@ -662,15 +662,15 @@ class BootstrapRefusals(unittest.TestCase):
     def test_a_newer_release_of_ours_is_refused_naming_the_latest_installer(self):
         code, out, calls, made = self.bootstrap({self.INSPECT: (0, f"{self.IMAGE}:v1.0.2")})
         self.assertEqual((code, calls, made), (1, ["id -u", self.INSPECT], []), out)
-        self.assertIn("ya tiene APS Conecta Gestión v1.0.2, una versión más nueva que v1.0.1. Use el instalador de la "
-                      "versión vigente:\n  curl -fsSL https://github.com/APS-Conecta/gestion-aio/releases/latest/"
-                      "download/install.sh | sudo bash\nNo se modificó nada.", out)
+        self.assertIn(f"ya tiene APS Conecta Gestión v1.0.2, una versión más nueva que {self.TAG}. Use el "
+                      "instalador de la versión vigente:\n  curl -fsSL https://github.com/APS-Conecta/gestion-aio/"
+                      "releases/latest/download/install.sh | sudo bash\nNo se modificó nada.", out)
 
     def test_an_older_release_of_ours_is_upgraded_not_refused(self):
         code, out, calls, made = self.bootstrap({self.INSPECT: (0, f"{self.IMAGE}:v1.0.0")})
         self.assertNotEqual(code, 0, out)
-        self.assertIn("Actualizando APS Conecta Gestión de v1.0.0 a v1.0.1...", out)
-        self.assertIn("Descargando y verificando APS Conecta Gestión v1.0.1...", out)
+        self.assertIn(f"Actualizando APS Conecta Gestión de v1.0.0 a {self.TAG}...", out)
+        self.assertIn(f"Descargando y verificando APS Conecta Gestión {self.TAG}...", out)
         self.assertEqual(made, [], "something was unpacked before the bundle's checksum verified")
         self.assertTrue(any(call.startswith("curl -fsSL --retry 3 -o ") for call in calls), calls)
 
