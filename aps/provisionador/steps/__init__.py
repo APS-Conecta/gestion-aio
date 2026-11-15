@@ -6,7 +6,7 @@ A step module, whose name is its id, declares:
   NAME            its Spanish name, as the progress and the red list show it
   NEEDS           the ids of the steps that must be green before it runs
   OWNED           optional, True when the suite's own pages own what the step made once «Listo» is reached: an upgrade
-                  of the server keeps such a step green, never re-running it nor re-checking it
+                  of the server keeps such a step green, never running it, its check nor its finish again
   run(context)    its work, idempotent; it returns what went wrong as Spanish reasons, which the red list shows, and
                   None or [] once the work is done: no step reports success without doing its work
   check(context)  optional, its part of the end-of-install check, which runs once every step is green: the Spanish
@@ -26,10 +26,11 @@ names them), the people its spreadsheet loads (`people`, as spreadsheet.py reads
 (`retired`), as they were when «Instalar» or «Reintentar» was pressed; `declared()` answers those people and usernames
 as «Equipos» declares them now, and `log(text)` adds our own Spanish line, never a secret nor what occ or AIO printed,
 to the install's log. A new step is a new module: no other file lists the steps.
-A step that configures an app gets it through `steps.apps.ensure`
-rather than NEEDS "apps". A step that sets what administrators may change after «Listo» answers its check through
-`record`, which keeps what the step set once the check is clean, and asks `kept` what an upgrade leaves of the rest;
-a step whose one setting AIO's page owns after «Listo» reads it from the suite at an upgrade instead.
+A step that configures an app gets it through `steps.apps.ensure`, a manifest app by its id and one outside the manifest
+(«IA local»'s connector) by its record: that orders the step after its app, never NEEDS "apps". A step that sets what
+administrators may change after «Listo» answers its check through `record`, which keeps what the step set once the
+check is clean, and asks `kept` what an upgrade leaves of the rest; a step whose one setting AIO's page owns after
+«Listo» reads it from the suite at an upgrade instead.
 """
 
 import json

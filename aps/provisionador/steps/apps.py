@@ -174,10 +174,11 @@ def install_missing(context, wanted):
     return reasons
 
 
-def ensure(context, *ids):
-    """For a step that configures apps: the manifest's apps with these ids, installed as this step installs them if
-    they are missing; the «name»: reason of each that failed, none when they are installed."""
-    return install_missing(context, [BY_ID[app] for app in ids])
+def ensure(context, *wanted):
+    """For a step that configures apps: these apps, a manifest app by its id and an app outside the manifest by its own
+    record, as the manifest would list it, installed as this step installs them if they are missing; the «name»: reason
+    of each that failed, none when they are installed."""
+    return install_missing(context, [BY_ID[app] if isinstance(app, str) else app for app in wanted])
 
 
 def run(context):

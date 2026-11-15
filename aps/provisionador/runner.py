@@ -135,9 +135,8 @@ def green(state):
 def settle(state, context, part):
     """Each step's `part`, "check" or "finish", where it has one, but an owned step's at an upgrade: the step turns red
     with what it found, green otherwise."""
-    upgrade = getattr(context, "upgrade", False)
     for name, step in STEPS.items():
-        if hasattr(step, part) and not (upgrade and getattr(step, "OWNED", False)):
+        if hasattr(step, part) and not (context.upgrade and getattr(step, "OWNED", False)):
             record(state, name, "running", logged=False)
             found = problems(getattr(step, part), context)
             record(state, name, "failed" if found else "green", found, logged=bool(found))

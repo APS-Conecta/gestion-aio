@@ -546,6 +546,15 @@ def publish(suite):
     suite.registry = {PIN["model"]: PIN["digest"]}
 
 
+RELEASE = "v0.0.0-ci.1"  # the release an upgrade brings, as its bundle's VERSION names it: a test build's tag
+
+
+def command(suite, *args):
+    """`provisionador.py <args>`, as the host runs it, over the fake suite port: its exit code."""
+    with mock.patch.object(provisionador, "Suite", return_value=suite):
+        return provisionador.main(list(args))
+
+
 class InstallTest(WizardTest):
     """A wizard whose operator has a session, with what «Revisar» and «Instalar» need."""
 
@@ -573,6 +582,13 @@ class InstallTest(WizardTest):
 
     def install(self, **body):
         return self.browser.request("POST", "/api/install", body)
+
+    def upgrade(self):
+        """`provisionador.py upgrade`, as install.sh runs it once the bundle of RELEASE is in place: its exit code."""
+        bundled = self.state.parent / "VERSION"
+        bundled.write_text(f"{RELEASE}\n", encoding="utf-8")
+        with mock.patch.object(provisionador, "VERSION", bundled):
+            return command(self.suite, "upgrade", "--state", str(self.state))
 
     def choose(self, files=None, backups=None):
         """«Almacenamiento»: the files disk, by its id, and the backup destination, {"disk": id} or {"folder": True}."""
@@ -1516,25 +1532,24 @@ class StepRunner(InstallTest):
 class UpgradeTest(InstallTest):
     """An installed server, closed at «Listo», and the one command's upgrade of it, run to «Listo» again."""
 
-    def upgrade(self, version="v1.1.0"):
-        return provisionador.upgrade(self.suite, provisionador.State(self.state), version)
-
     def installed(self, files=None, backups=None):
         """A finished, closed install, as the server holds it once the wizard ended: the Provisionador is stopped. With
         `files`, the staff's files went to that disk, by its id, and the backup to `backups`, the backup folder unless
-        given."""
+        given. Returns the wizard's state as GET /api/state answered it at «Listo»."""
         self.claim()
         if files:
             self.assertEqual(self.choose(files, backups or {"folder": True})[0], 200)
         self.assertEqual(self.install()[0], 202)
         self.until("done")
+        shown = self.browser.get("/api/state")[1]
         self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
         self.stop()
+        return shown
 
     def upgraded(self):
         """The upgrade, run to «Listo» and closed: the bootstrap restarts the Provisionador, which resumes the install
         by itself, and the wizard closes again."""
-        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(self.upgrade(), 0)
         self.start()
         self.browser = self.operator()
         self.assertEqual(self.until("done")["status"], "done")
@@ -1620,7 +1635,7 @@ class Upgrade(UpgradeTest):
         self.install()
         self.until_step(start.NAME, "running")
         self.suite.release.set()
-        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(self.upgrade(), 0)
         self.assertEqual(self.suite.stops, 0)  # nothing stops: the Provisionador carries the install on
         install = provisionador.State(self.state).read()["install"]
         self.assertNotIn("upgrade", install)  # and no reconcile was marked
@@ -1628,7 +1643,7 @@ class Upgrade(UpgradeTest):
     def test_the_upgrade_stops_the_suite_and_sets_every_step_but_the_people_to_run_again(self):
         self.installed()
         before = len(self.suite.commands)
-        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(self.upgrade(), 0)
         self.assertEqual(self.suite.stops, 1)
         state = provisionador.State(self.state).read()
         owned = {name for name, module in runner.STEPS.items() if getattr(module, "OWNED", False)}
@@ -1639,7 +1654,7 @@ class Upgrade(UpgradeTest):
         self.start()  # the bootstrap restarts the Provisionador; it resumes the install by itself
         self.browser = self.operator()
         install = self.until("done")
-        self.assertIn("Comienza la actualización a v1.1.0.", self.texts(install))
+        self.assertIn(f"Comienza la actualización a {RELEASE}.", self.texts(install))
         self.assertEqual(self.steps(install)[people.NAME], ("green", None))
         self.assertEqual(self.suite.starts, 2)
         self.assertIs(self.suite.automatic_updates, True)  # the release's backups step ran again
@@ -1650,30 +1665,30 @@ class Upgrade(UpgradeTest):
     def test_an_upgrade_keeps_the_people_with_their_users_page(self):
         self.installed()
         self.suite.users["ana"]["enabled"] = False  # an administrator disabled a person after the install
-        self.assertEqual(self.upgrade(), None)
+        self.assertEqual(self.upgrade(), 0)
         self.start()
         self.browser = self.operator()
         self.assertEqual(self.until("done")["status"], "done")
         self.assertFalse(self.suite.users["ana"]["enabled"], "the upgrade re-enabled a person the Users page disabled")
 
     def test_an_upgrade_loads_the_same_people_from_a_spreadsheet_an_earlier_release_kept_as_its_text(self):
-        self.installed()
-        before = provisionador.State(self.state).read()
+        before = self.installed()
         with provisionador.State(self.state).change() as s:
             s["spreadsheet"] = spreadsheet("ana;Ana;Rojas;;;sí")  # the one claim() uploads, kept as its text
-        self.assertEqual(self.upgrade(), None)
-        after = provisionador.State(self.state).read()
-        loaded = provisionador.plan(before)["people"]
-        self.assertEqual([person["user"] for person in loaded], ["ana"])
-        self.assertEqual((provisionador.plan(after)["people"], provisionador.plan(after)["errors"]), (loaded, []))
-        self.assertEqual(provisionador.declared(after), provisionador.declared(before))
+        self.assertEqual(self.upgrade(), 0)
+        self.start()
+        self.browser = self.operator()
+        after = self.browser.get("/api/state")[1]
+        self.assertEqual([person["user"] for person in before["people"]], ["ana"])
+        self.assertEqual((after["people"], after["errors"], after["retired"]),
+                         (before["people"], [], before["retired"]))
 
     def test_an_install_under_way_keeps_an_empty_spreadsheet_an_earlier_release_kept_as_no_spreadsheet(self):
         self.browser.request("POST", "/api/centre", {"code": "999001"})
         with provisionador.State(self.state).change() as s:
             s["spreadsheet"] = ""  # an empty upload, kept as its text
-        self.assertEqual(self.upgrade(), None)
-        self.assertEqual(provisionador.plan(provisionador.State(self.state).read())["errors"], [])
+        self.assertEqual(self.upgrade(), 0)
+        self.assertEqual(self.browser.get("/api/state")[1]["errors"], [])
 
 
 class StoreApps(unittest.TestCase):
@@ -1683,15 +1698,17 @@ class StoreApps(unittest.TestCase):
 
     def test_the_stores_apps_update_runs_nextclouds_own(self):
         suite = FakeSuite()
-        self.assertEqual(provisionador.update_apps(suite, wait=0), 0)
+        self.assertEqual(command(suite, "update-apps"), 0)
         self.assertEqual(suite.app_updates, 1)
 
     def test_it_waits_out_the_backup_window_and_leaves_a_note_when_the_suite_never_answers(self):
         suite = FakeSuite()
         suite.down = {"nextcloud"}
-        with mock.patch("provisionador.time.sleep") as sleep:
-            self.assertEqual(provisionador.update_apps(suite, wait=0.2, retry=5), 1)
-        self.assertGreaterEqual(sleep.call_count, 2, "it did not wait for the suite to answer")
+        slept = []  # the window passes as the command sleeps
+        with mock.patch("provisionador.time.sleep", side_effect=slept.append), \
+                mock.patch("provisionador.time.monotonic", side_effect=lambda: sum(slept)):
+            self.assertEqual(command(suite, "update-apps"), 1)
+        self.assertGreaterEqual(len(slept), 2, "it did not wait for the suite to answer")
 
 
 class Apps(InstallTest):
@@ -3074,11 +3091,14 @@ class LocalAI(InstallTest):
         self.on(memory_gib=12)
         self.assertEqual(self.browser.request("POST", "/api/close", {})[0], 200)
         self.stop()
-        self.assertIsNone(provisionador.upgrade(self.suite, provisionador.State(self.state), "v1.1.0"))
+        before = len(self.suite.commands)
+        self.assertEqual(self.upgrade(), 0)
         self.start()
         self.browser = self.operator()
         install = self.until("done")
         self.assertEqual(self.steps(install)["IA local"], ("green", None))
+        self.assertNotIn(("app:enable", "integration_openai"), self.suite.commands[before:],
+                         "the upgrade enabled the connector Nextcloud kept enabled again")
         self.assertEqual(self.suite.ollama, {"gpu": "dri", "memory_gib": 12 - bootstrap_floors()["memory_gib"]})
         self.assertEqual((self.suite.pulled, self.suite.pulls), ({PIN["model"]: PIN["digest"]}, [PIN["model"]]))
         self.assertEqual(self.suite.apps["integration_openai"]["default_completion_model_id"], PIN["model"])
@@ -3678,7 +3698,7 @@ class FilesDiskUpgrade(UpgradeTest):
         self.suite.found_disks.append(disk("data"))
         self.installed("data")
         self.suite.found_disks[-1]["mounted"] = "/srv/datos"  # an administrator mounted it there after «Listo»
-        self.assertIsNone(self.upgrade())
+        self.assertEqual(self.upgrade(), 0)
         self.start()
         self.browser = self.operator()
         install = self.until("failed")
@@ -3729,7 +3749,7 @@ class BackupUpgrade(UpgradeTest):
 
     def reopened(self):
         """The upgrade, its Provisionador restarted and the operator's browser on the reopened wizard."""
-        self.assertIsNone(self.upgrade())
+        self.assertEqual(self.upgrade(), 0)
         self.start()
         self.browser = self.operator()
 
