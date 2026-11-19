@@ -3,21 +3,28 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page, «Inicio», Files,
 Talk and the personal settings load the theme's stylesheet; on each, every Nextcloud variable of the variable map holds
-its brand role's value from the brand token file, each text colour it sets reads at 4.5:1 or more on the background it
-sits on, and each element colour at 3:1 or more on the main background; Nunito Sans is the font Nextcloud serves,
-and the login page names the establishment and shows the suite's motto after its name, with no console error and no
-content-security-policy violation. Its «¿Contraseña olvidada?» link opens the help page, which the server answers from
-the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
-no content-security-policy violation, and links back to the login page; Nextcloud's email reset is refused, so no screen
-says a message was sent. A staff member who logs in lands on «Inicio», the welcome page, the only home: Nextcloud's
-Dashboard is off, and its address does not open it. «Inicio» speaks IntraVox's own Spanish: its edit button says
-«Editar página», never «Edit page». No staff member sees «Nextcloud» or a link to nextcloud.com on the
-login page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. From
-601 px wide, the top bar names the establishment right of the logo; a narrower window shows the logo alone. The custom
-menu's stylesheet paints it in the token file's dark violet. The theme survives a restart of Nextcloud's container, and
-the support app stays off. Its start rebuilds the browser's Spanish of the apps the theme overrides texts of, after
-upstream's start updated them: Talk's, left stale before the restart, is its own Spanish as Nextcloud holds it with the
-theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh browser."""
+its brand role's value from the brand token file, the main background a solid colour, each text colour it sets reads at
+4.5:1 or more on the background it sits on, and each element colour at 3:1 or more on the main background; Nunito Sans
+is the font Nextcloud serves, at Nextcloud's own size and line height, and the first visible heading is in the display
+font with the brand manual's letter spacing, with no italic face of either. The logged-in top bar shows the gradient
+from dark violet to violet, and the login page's top area none. The login page names the establishment and shows the
+suite's motto after its name, with no console error and no content-security-policy violation. Its «¿Contraseña
+olvidada?» link opens the help page, which the server answers from the theme folder with 200 and which names the
+establishment in the brand token file's fonts, with no console error and no content-security-policy violation, and links
+back to the login page; Nextcloud's email reset is refused, so no screen says a message was sent. Tabbing to the login
+form gives the focused control the manual's ring: a 3 px outline in the primary element colour, wider when the system
+asks for more contrast, which also gives secondary text the ink and borders the muted colour; when the system asks for
+reduced motion, Nextcloud's animations take no time. In the top bar, the ring takes the backdrop's text colour, and in
+its menus' panels the primary element colour again. A staff member who logs in lands on «Inicio», the welcome page, the
+only home: Nextcloud's Dashboard is off, and its address does not open it. «Inicio» speaks IntraVox's own Spanish: its
+edit button says «Editar página», never «Edit page». No staff member sees «Nextcloud» or a link to nextcloud.com on the
+login page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. From 601
+px wide, the top bar names the establishment right of the logo; a narrower window shows the logo alone. The custom
+menu's stylesheet paints it in the token file's dark violet. The theme ships its fonts as WOFF2 only. It survives a
+restart of Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of the apps
+the theme overrides texts of, after upstream's start updated them: Talk's, left stale before the restart, is its own
+Spanish as Nextcloud holds it with the theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh
+browser."""
 
 import json
 import os
@@ -67,6 +74,7 @@ MEASURED = {
     "--color-primary": "--aps-violet", "--color-primary-element": "--aps-violet",
     "--color-primary-text": "--aps-paper", "--color-primary-element-text": "--aps-paper",
     "--color-main-background": "--aps-paper", "--color-background-plain": "--aps-violet-dark",
+    "--color-background-plain-text": "--aps-paper",
     "--color-primary-element-light": "--aps-violet-tint",
     "--color-primary-element-light-hover": "--aps-violet-tint-hover",
     "--color-primary-element-light-text": "--aps-violet-dark",
@@ -83,6 +91,17 @@ CONTRAST = [(text, background, 4.5) for text, background in (
 )] + [(element, "--color-main-background", 3) for element in (
     "--color-element-error", "--color-element-warning", "--color-element-success", "--color-element-info")]
 KEPT = ("--color-error", "--color-warning")  # Nextcloud's pale status backgrounds: measured for the text on them only
+# Nextcloud 34's type size and line height, which the manual keeps.
+NEXTCLOUD_TYPE = {"--default-font-size": "15px", "--default-line-height": "1.5"}
+LETTER_SPACING = -0.015  # em, the manual's for headings
+RING = 3  # px, the manual's focus ring
+# The variables a system preference changes, with the role or value each then takes.
+MORE_CONTRAST = {"--color-text-maxcontrast": "--aps-ink", "--color-text-maxcontrast-default": "--aps-ink",
+                 "--color-border": "--aps-muted"}
+REDUCED_MOTION = {"--animation-quick": "0s", "--animation-slow": "0s"}
+GRADIENT = ("--aps-violet-dark", "--aps-violet")  # the top bar's roles, from start to end
+TABS = 40  # the most Tab presses it takes to reach a place on a page
+FONT_FILES = (".ttf", ".otf", ".eot", ".woff", ".woff2")
 # What the page shows of the theme: its stylesheet and the establishment's name.
 THEMED = """() => {
   const headline = document.querySelector('.login-form__headline');
@@ -104,6 +123,37 @@ VARIABLES = """expected => {
     ([name, value]) => [name, [computed(body.getPropertyValue(name).trim()), computed(value)]]));
   probe.remove();
   return found;
+}"""
+# What the page shows of the brand's type and top bar: its first visible heading (else the layout's hidden h1, else
+# none: Talk replaces the layout's content), with its font and letter spacing in em, the body's font, the brand fonts
+# as the page computes them, the brand fonts' italic faces it declares, and the top bar's background image. Nextcloud
+# hides a heading in a 1 px box.
+TYPE_AND_TOP_BAR = """brand => {
+  const probe = document.body.appendChild(document.createElement('i'));
+  const family = value => (probe.style.fontFamily = value, getComputedStyle(probe).fontFamily);
+  const first = [...document.querySelectorAll('h1, h2, h3')].find(h => h.checkVisibility() && h.offsetWidth > 1)
+    || document.querySelector('h1');
+  const heading = first && getComputedStyle(first), header = document.getElementById('header');
+  const families = [brand.display, brand.text].map(fonts => fonts.split(',')[0].replaceAll('"', '').trim());
+  const shown = {
+    display: family(brand.display), text: family(brand.text), headingText: first?.textContent.trim().slice(0, 60),
+    heading: heading?.fontFamily,
+    spacing: heading && (parseFloat(heading.letterSpacing) / parseFloat(heading.fontSize) || null),
+    body: getComputedStyle(document.body).fontFamily,
+    italic: [...document.fonts].filter(face => families.includes(face.family.replaceAll('"', ''))
+                                        && face.style !== 'normal').map(face => `${face.family} ${face.style}`),
+    topBar: header ? getComputedStyle(header).backgroundImage : null,
+  };
+  probe.remove();
+  return shown;
+}"""
+# The element with focus: what it is, whether it sits in `place` (a selector), and its outline.
+FOCUSED = """place => {
+  const focused = document.activeElement, outline = getComputedStyle(focused);
+  return {name: focused.id || focused.getAttribute('aria-label') || focused.tagName.toLowerCase(),
+          inside: focused !== document.body && !!focused.closest(place),
+          style: outline.outlineStyle, width: parseFloat(outline.outlineWidth), colour: outline.outlineColor,
+          offset: parseFloat(outline.outlineOffset)};
 }"""
 # What the top bar shows after the logo: the logo link's generated content, and the room the link gives it right of
 # the logo, which sits in the link's start padding. A public share page's #nextcloud is no link.
@@ -159,22 +209,66 @@ def contrast(one, other):
     return (lighter + 0.05) / (darker + 0.05)
 
 
+def measure(page, values):
+    """Each variable's value on the page's body beside the value given for it, both as the browser computes them."""
+    return page.evaluate(VARIABLES, values)
+
+
+def off(found, label, expected):
+    """Where a measured variable does not hold the value expected of it."""
+    return [f"{label}'s {variable} is {found[variable][0]}, not {found[variable][1]}" for variable in expected
+            if found[variable][0] != found[variable][1]]
+
+
+def role_values(variables):
+    """Each variable with its role's value in the brand token file."""
+    return {variable: tokens[role] for variable, role in variables.items()}
+
+
 def mapped(page, label):
     """On the page's body, each variable of the variable map, and each that takes its role without it, holds the role's
-    value from the brand token file; the colours read at the contrast WCAG asks for, as the page computes them."""
-    expected = {**{variable: tokens[role] for variable, role in {**VARIABLE_MAP, **MEASURED}.items()},
-                "--border-radius": RADIUS}
-    found = page.evaluate(VARIABLES, {**expected, **dict.fromkeys(KEPT, "")})
-    wrong = [f"{label}'s {variable} is {found[variable][0]}, not {found[variable][1]}" for variable in expected
-             if found[variable][0] != found[variable][1]]
+    value from the brand token file, and Nextcloud's type keeps its own; the colours read at the contrast WCAG asks for,
+    as the page computes them."""
+    expected = {**role_values({**VARIABLE_MAP, **MEASURED}), "--border-radius": RADIUS, **NEXTCLOUD_TYPE}
+    found = measure(page, {**expected, **dict.fromkeys(KEPT, "")})
+    wrong = off(found, label, expected)
     unset = [variable for variable, (value, _) in found.items() if not value]
     if unset:
         return wrong + [f"{label} does not set {', '.join(unset)}"]
-    ratios ={(text, background): contrast(found[text][0], found[background][0]) for text, background, _ in CONTRAST}
+    ratios = {(text, background): contrast(found[text][0], found[background][0]) for text, background, _ in CONTRAST}
     wrong += [f"{label}'s {text} reads at {ratios[text, background]:.2f}:1 on {background}, below {least}:1"
               for text, background, least in CONTRAST if ratios[text, background] < least]
     print(f"{label}: {len(found)} variables measured; contrast "
           + ", ".join(f"{text} on {background} {ratio:.2f}" for (text, background), ratio in ratios.items()))
+    return wrong
+
+
+def type_and_top_bar(page, label):
+    """The page's first visible heading, when it shows one, is in the display font with the manual's letter spacing,
+    and its body in the body font, with no italic face of either; a logged-in page's top bar shows the gradient from
+    dark violet to violet, and the login page's top area none."""
+    fonts = {"display": tokens["--aps-font-display"], "text": tokens["--aps-font-body"]}
+    shown = page.evaluate(TYPE_AND_TOP_BAR, fonts)
+    print(f"{label}: {shown}")
+    wrong = []
+    if shown["heading"] is not None:
+        if shown["heading"] != shown["display"]:
+            wrong.append(f"{label}'s first heading is in {shown['heading']}")
+        spacing = shown["spacing"]
+        if spacing is None or abs(spacing - LETTER_SPACING) > 0.001:
+            spaced = "normally" if spacing is None else f"{spacing:.3f}em"
+            wrong.append(f"{label}'s first heading is spaced {spaced}, not {LETTER_SPACING}em")
+    if shown["body"] != shown["text"]:
+        wrong.append(f"{label}'s body is in {shown['body']}")
+    if shown["italic"]:
+        wrong.append(f"{label} declares italic faces: {shown['italic']}")
+    if label.startswith("login"):
+        return wrong + ([] if shown["topBar"] == "none" else [f"{label}'s top area shows {shown['topBar']}"])
+    found = measure(page, {role: tokens[role] for role in GRADIENT})
+    gradient = [found[role][1] for role in GRADIENT]
+    stops = re.findall(r"rgba?\([^)]*\)", shown["topBar"] or "")
+    if not (shown["topBar"] or "").startswith("linear-gradient(") or stops != gradient:
+        wrong.append(f"{label}'s top bar shows {shown['topBar']}, not a gradient through {gradient}")
     return wrong
 
 
@@ -183,6 +277,7 @@ def themed(page, label):
     found = page.evaluate(THEMED)
     print(f"{label}: {found}")
     wrong = ([] if found["stylesheet"] else [f"{label} does not load the theme's stylesheet"]) + mapped(page, label)
+    wrong += type_and_top_bar(page, label)
     if "Nunito Sans" not in fonts(page):
         wrong.append(f"{label} did not load Nunito Sans")
     if label.startswith("login") and found["establishment"] in NOTHING:
@@ -204,6 +299,74 @@ def names_the_establishment(page, label):
              and (top_bar["name"] != f'"{establishment}"' or top_bar["room"] <= 0)]
     return wrong + ([] if shown[NAMED_FROM - 1]["name"] in NOTHING else
                     [f"{label}'s top bar names the establishment at {NAMED_FROM - 1} px"])
+
+
+def tab_into(page, place):
+    """Press Tab until an element in `place` (a selector) has focus: false if TABS presses do not reach it."""
+    for _ in range(TABS):
+        page.keyboard.press("Tab")
+        if page.evaluate(FOCUSED, place)["inside"]:
+            return True
+    return False
+
+
+def ring(page, label, colour, wider=False):
+    """The focused element shows the manual's ring, a solid outline in the body's `colour` variable, RING wide or wider,
+    set off from it."""
+    focused = page.evaluate(FOCUSED, "body")
+    expected = measure(page, {colour: ""})[colour][0]
+    shows = (f"a {focused['width']}px {focused['style']} outline in {focused['colour']}, offset "
+             f"{focused['offset']}px")
+    print(f"{label}: {focused['name']} has focus, with {shows}")
+    wide = focused["width"] > RING if wider else focused["width"] == RING
+    if focused["style"] == "solid" and wide and focused["colour"] == expected and focused["offset"] > 0:
+        return []
+    return [f"{label}'s focused {focused['name']} has {shows}, not {'wider than ' if wider else ''}{RING}px solid "
+            f"{expected}, offset"]
+
+
+def accessible(page, label):
+    """Tabbing to the login form gives the focused control the manual's ring. When the system asks for more contrast,
+    secondary text takes the ink, borders the muted colour and the ring grows wider; when it asks for reduced motion,
+    Nextcloud's animations take no time."""
+    if not tab_into(page, "form"):
+        return [f"{TABS} tabs do not reach {label}'s form"]
+    wrong = ring(page, label, "--color-primary-element")
+    page.emulate_media(contrast="more")
+    contrasted = role_values(MORE_CONTRAST)
+    wrong += off(measure(page, contrasted), f"{label} with more contrast", contrasted)
+    wrong += ring(page, f"{label} with more contrast", "--color-primary-element", wider=True)
+    page.emulate_media(contrast="no-preference", reduced_motion="reduce")
+    wrong += off(measure(page, REDUCED_MOTION), f"{label} with reduced motion", REDUCED_MOTION)
+    page.emulate_media(reduced_motion="no-preference")
+    return wrong
+
+
+def top_bar_ring(page, label):
+    """Tabbing to the top bar's account menu gives its button the ring in the backdrop's text colour. Opened from the
+    keyboard and tabbed into, the menu's white panel gives its entry the ring in the primary element colour."""
+    if not tab_into(page, "#user-menu"):
+        return [f"{TABS} tabs do not reach {label}'s account menu"]
+    wrong = ring(page, f"{label}'s top bar", "--color-background-plain-text")
+    page.keyboard.press("Enter")
+    try:
+        page.locator("#user-menu .header-menu__wrapper").wait_for(state="visible", timeout=10_000)
+    except Error:
+        return wrong + [f"Enter on {label}'s account menu does not open it"]
+    if not tab_into(page, "#user-menu .header-menu__wrapper"):
+        return wrong + [f"{TABS} tabs do not reach the panel of {label}'s account menu, opened from the keyboard"]
+    wrong += ring(page, f"{label}'s account menu", "--color-primary-element")
+    page.keyboard.press("Escape")
+    return wrong
+
+
+def shipped_fonts():
+    """The theme folder's font files are WOFF2 only."""
+    placed = machine(f"{NEXTCLOUD} find {PLACED} -type f").split()
+    found = [path for path in placed if path.lower().endswith(FONT_FILES)]
+    print(f"the theme folder's fonts: {found}")
+    other = [path for path in found if not path.lower().endswith(".woff2")]
+    return [f"the theme folder ships fonts other than WOFF2: {other}"] if other else []
 
 
 def says_the_motto(page, label):
@@ -326,14 +489,14 @@ def stale_talk_texts():
 problems = []
 with chromium() as browser:
     page = browser.new_page(**WINDOW)
-    problems += login_page(page, "login") + email_reset_refused(page) + help_page(page)
+    problems += login_page(page, "login") + accessible(page, "login") + email_reset_refused(page) + help_page(page)
     log_in(page, suite, PERSON, password)
     problems += inicio_is_the_only_home(page)
     for label in PAGES:
         open_page(page, label)
         problems += themed(page, label)
         if label == "inicio":
-            problems += names_the_establishment(page, label) + inicio_in_spanish(page)
+            problems += names_the_establishment(page, label) + inicio_in_spanish(page) + top_bar_ring(page, label)
         problems += shows(page, label)
     if not page.locator(f'a[href="{SOURCE}"]').is_visible():
         problems.append("the personal settings do not link the source code")
@@ -362,6 +525,7 @@ with chromium() as browser:
     log_in(page, suite, PERSON, password)
     open_page(page, "talk")
     problems += shows(page, "talk-after-restart") + stale_talk_texts()
+    problems += shipped_fonts()
     support = occ("config:app:get support enabled")
     print(f"support app after the restart: {support.strip()}")
     if support.strip() != "no":
