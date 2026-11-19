@@ -10,7 +10,7 @@
 @import url("site.css");
 
 /* Nextcloud's font is its --font-face, which theming sets on body. Headings take the display font with the manual's
-   letter spacing, and Nextcloud keeps its own font size and line height. */
+   letter spacing. */
 body { --font-face: var(--aps-font-body) !important; }
 h1, h2, h3 { font-family: var(--aps-font-display); letter-spacing: -0.015em; }
 
@@ -19,13 +19,15 @@ h1, h2, h3 { font-family: var(--aps-font-display); letter-spacing: -0.015em; }
 #header:not(.header-guest) { background-image: linear-gradient(90deg, var(--aps-violet-dark), var(--aps-violet)); }
 
 /* The manual's focus ring on whatever has keyboard focus, over the rings Nextcloud and its components draw, some of
-   them !important: :not(#_) only gives the rule an id's weight. In the top bar it takes the backdrop's text colour, and
-   it widens when the system asks for more contrast. */
+   them !important: :not(#_) only gives the rule an id's weight. In the top bar it takes the backdrop's text colour, but
+   not in its menus' white panels, and it widens when the system asks for more contrast. */
 :focus-visible:not(#_) {
   outline: 3px solid var(--color-primary-element) !important;
   outline-offset: 2px !important;
 }
-#header:not(.header-guest) :focus-visible { outline-color: var(--color-background-plain-text) !important; }
+#header:not(.header-guest) :focus-visible:not(.header-menu__wrapper *) {
+  outline-color: var(--color-background-plain-text) !important;
+}
 @media (prefers-contrast: more) {
   :focus-visible:not(#_) { outline-width: 4px !important; }
 }
