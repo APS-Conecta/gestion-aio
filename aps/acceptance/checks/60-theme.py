@@ -344,15 +344,17 @@ def accessible(page, label):
 
 def top_bar_ring(page, label):
     """Tabbing to the top bar's account menu gives its button the ring in the backdrop's text colour. Opened from the
-    keyboard, the menu moves focus to its white panel, whose entry takes the ring in the primary element colour."""
+    keyboard and tabbed into, the menu's white panel gives its entry the ring in the primary element colour."""
     if not tab_into(page, "#user-menu"):
         return [f"{TABS} tabs do not reach {label}'s account menu"]
     wrong = ring(page, f"{label}'s top bar", "--color-background-plain-text")
     page.keyboard.press("Enter")
     try:
-        page.wait_for_function("() => !!document.activeElement.closest('.header-menu__wrapper')", timeout=10_000)
+        page.locator("#user-menu .header-menu__wrapper").wait_for(state="visible", timeout=10_000)
     except Error:
-        return wrong + [f"opening {label}'s account menu from the keyboard does not move focus into its panel"]
+        return wrong + [f"Enter on {label}'s account menu does not open it"]
+    if not tab_into(page, "#user-menu .header-menu__wrapper"):
+        return wrong + [f"{TABS} tabs do not reach the panel of {label}'s account menu, opened from the keyboard"]
     wrong += ring(page, f"{label}'s account menu", "--color-primary-element")
     page.keyboard.press("Escape")
     return wrong
