@@ -20,6 +20,5 @@ right calls and a p95 within 15 s on the 6 GB machine.
 
 ## Consequences
 
-- The bar no longer chooses the Model. The benchmark (`aps/benchmark`) measures the Model alone, at its pin, and
-  reports the bar; runs on the reference machines (#91) measure its speed there and gate nothing.
+- The bar no longer chooses the Model.
 - The wizard offers no model choice: «IA local» on serves `gemma4:e2b`.
