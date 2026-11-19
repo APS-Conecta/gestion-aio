@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 APS Conecta
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page and «Inicio»
-load the theme's stylesheet, theming's colours are the brand token file's, Nunito Sans is the font Nextcloud serves,
+"""Every page staff see wears the APS Conecta theme and says «APS Conecta Gestión». The login page, «Inicio», Files,
+Talk and the personal settings load the theme's stylesheet; on each, every Nextcloud variable of the variable map holds
+its brand role's value from the brand token file, each text colour it sets reads at 4.5:1 or more on the background it
+sits on, and each element colour at 3:1 or more on the main background; Nunito Sans is the font Nextcloud serves,
 and the login page names the establishment and shows the suite's motto after its name, with no console error and no
 content-security-policy violation. Its «¿Contraseña olvidada?» link opens the help page, which the server answers from
 the theme folder with 200 and which names the establishment in the brand token file's fonts, with no console error and
@@ -19,6 +21,7 @@ theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh br
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -43,16 +46,65 @@ SOURCE = "https://github.com/APS-Conecta/gestion-aio"
 PAGES = {"inicio": (f"/apps/{APP}/", f'#app-{APP} >> text="{GREETING}"'),
          "files": ("/apps/files/", "#app-navigation-vue"), "talk": ("/apps/spreed/", "#app-navigation-vue"),
          "settings": ("/settings/user", f'a[href="{SOURCE}"]')}
-# What the page shows of the theme: its stylesheet, theming's colours and the establishment's name.
+# The variable map: the brand role each Nextcloud 34 variable takes, which the theme sets.
+VARIABLE_MAP = {
+    "--color-primary-hover": "--aps-violet-hover", "--color-primary-element-hover": "--aps-violet-hover",
+    "--color-primary-light": "--aps-violet-tint", "--color-primary-light-hover": "--aps-violet-tint-hover",
+    "--color-primary-light-text": "--aps-violet-dark",
+    "--color-main-text": "--aps-ink",
+    "--color-text-maxcontrast": "--aps-muted", "--color-text-maxcontrast-default": "--aps-muted",
+    "--color-background-hover": "--aps-canvas", "--color-background-dark": "--aps-canvas",
+    "--color-background-darker": "--aps-border", "--color-border": "--aps-border",
+    "--color-element-error": "--aps-error", "--color-element-warning": "--aps-warning",
+    "--color-element-success": "--aps-success", "--color-element-info": "--aps-info",
+    "--color-text-error": "--aps-error-text", "--color-error-text": "--aps-error-text",
+    "--color-warning-text": "--aps-warning-text",
+}
+RADIUS = "6px"  # --border-radius, the manual's, which the map sets too
+# The variables that already take their role without the map: from theming, from Nextcloud 34, or as Nextcloud's
+# var() aliases of a mapped variable.
+MEASURED = {
+    "--color-primary": "--aps-violet", "--color-primary-element": "--aps-violet",
+    "--color-primary-text": "--aps-paper", "--color-primary-element-text": "--aps-paper",
+    "--color-main-background": "--aps-paper", "--color-background-plain": "--aps-violet-dark",
+    "--color-primary-element-light": "--aps-violet-tint",
+    "--color-primary-element-light-hover": "--aps-violet-tint-hover",
+    "--color-primary-element-light-text": "--aps-violet-dark",
+}
+# Text on the background it sits on needs 4.5:1, an element on the main background 3:1 (WCAG 2.2, 1.4.3 and 1.4.11).
+CONTRAST = [(text, background, 4.5) for text, background in (
+    ("--color-main-text", "--color-main-background"), ("--color-main-text", "--color-background-hover"),
+    ("--color-text-maxcontrast", "--color-main-background"), ("--color-text-maxcontrast", "--color-background-hover"),
+    ("--color-primary-element-text", "--color-primary-element-hover"),
+    ("--color-primary-light-text", "--color-primary-light"),
+    ("--color-primary-light-text", "--color-primary-light-hover"),
+    ("--color-text-error", "--color-main-background"), ("--color-error-text", "--color-error"),
+    ("--color-warning-text", "--color-warning"),
+)] + [(element, "--color-main-background", 3) for element in (
+    "--color-element-error", "--color-element-warning", "--color-element-success", "--color-element-info")]
+KEPT = ("--color-error", "--color-warning")  # Nextcloud's pale status backgrounds: measured for the text on them only
+# What the page shows of the theme: its stylesheet and the establishment's name.
 THEMED = """() => {
-  const style = getComputedStyle(document.body), headline = document.querySelector('.login-form__headline');
+  const headline = document.querySelector('.login-form__headline');
   return {
     stylesheet: [...document.styleSheets].some(s => (s.href || '').includes('/themes/%s/core/css/server.css')),
-    primary: style.getPropertyValue('--color-primary').trim().toLowerCase(),
-    backdrop: style.getPropertyValue('--color-background-plain').trim().toLowerCase(),
     establishment: headline ? getComputedStyle(headline, '::before').content : null,
   };
 }""" % THEME
+# Each variable's value on the body beside the value given for it, both as the browser computes a colour (rgb(…)), or
+# as written when it is no colour.
+VARIABLES = """expected => {
+  const body = getComputedStyle(document.body), probe = document.body.appendChild(document.createElement('i'));
+  const computed = value => {
+    probe.style.color = '';
+    probe.style.color = value;
+    return probe.style.color ? getComputedStyle(probe).color : value;
+  };
+  const found = Object.fromEntries(Object.entries(expected).map(
+    ([name, value]) => [name, [computed(body.getPropertyValue(name).trim()), computed(value)]]));
+  probe.remove();
+  return found;
+}"""
 # What the top bar shows after the logo: the logo link's generated content, and the room the link gives it right of
 # the logo, which sits in the link's start padding. A public share page's #nextcloud is no link.
 TOP_BAR = """() => {
@@ -95,13 +147,42 @@ def shows(page, label):
         [f"{label} links nextcloud.com: {links}"] if links else [])
 
 
+def luminance(colour):
+    """A computed rgb(…) colour's relative luminance (WCAG 2.2)."""
+    channels = [int(c) / 255 for c in re.findall(r"\d+", colour)[:3]]
+    r, g, b = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(one, other):
+    lighter, darker = sorted((luminance(one), luminance(other)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def mapped(page, label):
+    """On the page's body, each variable of the variable map, and each that takes its role without it, holds the role's
+    value from the brand token file; the colours read at the contrast WCAG asks for, as the page computes them."""
+    expected = {**{variable: tokens[role] for variable, role in {**VARIABLE_MAP, **MEASURED}.items()},
+                "--border-radius": RADIUS}
+    found = page.evaluate(VARIABLES, {**expected, **dict.fromkeys(KEPT, "")})
+    wrong = [f"{label}'s {variable} is {found[variable][0]}, not {found[variable][1]}" for variable in expected
+             if found[variable][0] != found[variable][1]]
+    unset = [variable for variable, (value, _) in found.items() if not value]
+    if unset:
+        return wrong + [f"{label} does not set {', '.join(unset)}"]
+    ratios ={(text, background): contrast(found[text][0], found[background][0]) for text, background, _ in CONTRAST}
+    wrong += [f"{label}'s {text} reads at {ratios[text, background]:.2f}:1 on {background}, below {least}:1"
+              for text, background, least in CONTRAST if ratios[text, background] < least]
+    print(f"{label}: {len(found)} variables measured; contrast "
+          + ", ".join(f"{text} on {background} {ratio:.2f}" for (text, background), ratio in ratios.items()))
+    return wrong
+
+
 def themed(page, label):
     """The page wears the theme in the brand token file's colours and fonts."""
     found = page.evaluate(THEMED)
     print(f"{label}: {found}")
-    wrong = [] if found["stylesheet"] else [f"{label} does not load the theme's stylesheet"]
-    if (found["primary"], found["backdrop"]) != (tokens["--aps-violet"], tokens["--aps-violet-dark"]):
-        wrong.append(f"{label}'s colours are not the brand token file's")
+    wrong = ([] if found["stylesheet"] else [f"{label} does not load the theme's stylesheet"]) + mapped(page, label)
     if "Nunito Sans" not in fonts(page):
         wrong.append(f"{label} did not load Nunito Sans")
     if label.startswith("login") and found["establishment"] in NOTHING:
@@ -250,8 +331,9 @@ with chromium() as browser:
     problems += inicio_is_the_only_home(page)
     for label in PAGES:
         open_page(page, label)
+        problems += themed(page, label)
         if label == "inicio":
-            problems += themed(page, label) + names_the_establishment(page, label) + inicio_in_spanish(page)
+            problems += names_the_establishment(page, label) + inicio_in_spanish(page)
         problems += shows(page, label)
     if not page.locator(f'a[href="{SOURCE}"]').is_visible():
         problems.append("the personal settings do not link the source code")
