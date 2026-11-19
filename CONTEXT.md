@@ -185,4 +185,14 @@ come with AIO's switches, and «IA local»'s connector with its step.
 The per-server record of the installed app tags.
 
 **Brand token file** (ficha de tokens de marca):
-The one committed source of the palette and the font pairing. No other file carries a brand colour.
+The one committed source of the palette and the font pairing, by role. No other file carries a brand colour; the theme
+maps its roles onto Nextcloud's variables, and no app reads it.
+
+**Brand manual** (manual de marca):
+The brand's rules, meaning the palette and where each colour may be used, the type and the logo, as the docs page
+«Marca» states them.
+_Avoid_: brandbook, kit
+
+**Variable map** (mapa de variables):
+Which brand role each Nextcloud theming variable takes. The theme sets it, and apps take the brand only through those
+variables.
