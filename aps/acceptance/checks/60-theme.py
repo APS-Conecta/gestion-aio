@@ -375,7 +375,8 @@ def maintenance_page(browser):
         sheets = page.evaluate(STYLESHEETS)
         print(f"maintenance page: {answer.status}, stylesheets {sheets}")
         guest = f"/themes/{THEME}/core/css/guest.css"
-        wrong = [] if any(guest in sheet for sheet in sheets) else [f"the maintenance page does not load {guest}"]
+        wrong = [] if answer.status == 503 else [f"the maintenance page answers {answer.status}, not 503"]
+        wrong += [] if any(guest in sheet for sheet in sheets) else [f"the maintenance page does not load {guest}"]
         expected = {**role_values(VARIABLE_MAP), "--border-radius": RADIUS}
         wrong += off(measure(page, expected), "the maintenance page", expected)
         text = page.title() + "\n" + page.inner_text("body")

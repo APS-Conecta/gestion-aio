@@ -629,7 +629,7 @@ class Suite:
         """The text of the file at `path` in the theme folder `name` in Nextcloud's themes folder: empty when there is
         none."""
         return self.execute(NEXTCLOUD, ("sh", "-c", 'cat "/var/www/html/themes/$1/$2" 2>/dev/null || true', "sh", name,
-                                        path), failed=THEME_FAILED)
+                                        path))
 
     def browser_texts(self):
         """The browser's texts of the apps Nextcloud holds now, as the image's browser-texts.php builds them from the

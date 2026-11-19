@@ -1505,7 +1505,7 @@ class StepRunner(InstallTest):
         self.until("done")
         self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
-    def test_the_end_of_install_check_flags_a_legacy_screens_defaults_that_differ_and_reintentar_places_them_again(self):
+    def test_the_end_of_install_check_flags_a_changed_defaults_php_and_reintentar_places_it_again(self):
         self.claim()
         self.suite.down = {"issuer"}
         self.install()
