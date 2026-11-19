@@ -167,7 +167,10 @@ def mapped(page, label):
     found = page.evaluate(VARIABLES, {**expected, **dict.fromkeys(KEPT, "")})
     wrong = [f"{label}'s {variable} is {found[variable][0]}, not {found[variable][1]}" for variable in expected
              if found[variable][0] != found[variable][1]]
-    ratios = {(text, background): contrast(found[text][0], found[background][0]) for text, background, _ in CONTRAST}
+    unset = [variable for variable, (value, _) in found.items() if not value]
+    if unset:
+        return wrong + [f"{label} does not set {', '.join(unset)}"]
+    ratios ={(text, background): contrast(found[text][0], found[background][0]) for text, background, _ in CONTRAST}
     wrong += [f"{label}'s {text} reads at {ratios[text, background]:.2f}:1 on {background}, below {least}:1"
               for text, background, least in CONTRAST if ratios[text, background] < least]
     print(f"{label}: {len(found)} variables measured; contrast "
