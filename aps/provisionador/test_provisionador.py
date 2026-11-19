@@ -1505,6 +1505,22 @@ class StepRunner(InstallTest):
         self.until("done")
         self.assertEqual(self.suite.apps["theming"]["slogan"], MOTTO)
 
+    def test_the_end_of_install_check_flags_a_changed_defaults_php_and_reintentar_places_it_again(self):
+        self.claim()
+        self.suite.down = {"issuer"}
+        self.install()
+        self.assertEqual(self.steps(self.until("failed"))[THEME], ("green", None))
+        placed = self.suite.themes["apsconecta"]["defaults.php"]
+        self.suite.themes["apsconecta"]["defaults.php"] = b"<?php // Nextcloud's own"
+        self.suite.down = set()
+        self.install()
+        status, reason = self.steps(self.until("failed"))[THEME]
+        self.assertEqual(status, "failed")
+        self.assertIn("defaults.php", reason)
+        self.install()
+        self.until("done")
+        self.assertEqual(self.suite.themes["apsconecta"]["defaults.php"], placed)
+
     def help_link_flagged_then_set_again(self, change):
         """The theme step green while the install failed elsewhere, `change` to Nextcloud's system settings: the
         end-of-install check flags the help link, and «Reintentar» sets it again."""
@@ -3440,6 +3456,12 @@ class Branding(InstallTest):
 
     def test_the_theme_carries_the_lost_password_help_page_naming_the_centre(self):
         self.assertIn("CESFAM Doctor Juan Pérez", self.theme[HELP_PAGE].decode())
+
+    def test_the_theme_names_the_suite_its_address_and_the_motto_on_nextclouds_legacy_screens(self):
+        defaults = self.theme["defaults.php"].decode()
+        for named in (SUITE, "https://apsconecta.cl", MOTTO):
+            self.assertIn(named, defaults)
+        self.assertNotIn("nextcloud.com", defaults)
 
     def test_lost_password_opens_the_help_page_on_the_suites_direccion(self):
         self.assertEqual(self.suite.system["lost_password_link"], HELP_LINK)

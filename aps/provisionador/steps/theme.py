@@ -3,7 +3,8 @@
 """The APS Conecta theme and branding. The theme folder (aps/theme/apsconecta) goes into Nextcloud's themes folder,
 which upstream's updates keep, with the brand folder (the brand token file, its fonts and the favicon), its art rendered
 in the tokens' colours, the establishment's name in site.css, which the login page and the top bar show, and in the
-lost-password help page, and the text overrides.
+lost-password help page, the suite's name, address and motto in defaults.php, which Nextcloud's legacy screens
+(maintenance, update and error) read as they skip the theming app, and the text overrides.
 Theming then says «APS Conecta Gestión» with the token file's colours, the theme's logo and the dark violet as backdrop,
 light only. Nextcloud's own voice goes quiet: its announcements, first-login slides, usage survey and support apps, its
 help links, its «get your own free account» link, its update banners and its iOS app banner are off, and a new person's
@@ -24,7 +25,7 @@ import json
 from pathlib import Path
 
 import brand
-from steps import differences
+from steps import DIFFERS, differences
 
 NAME = "Tema y marca"
 NEEDS = ("start",)
@@ -32,6 +33,7 @@ THEME = "apsconecta"
 SOURCE = Path(__file__).resolve().parents[2] / "theme"  # aps/theme, or theme/ in the bundle
 PLACED = f"/var/www/html/themes/{THEME}"
 HELP = "contrasena.html"  # the lost-password help page, in the theme folder
+DEFAULTS = "defaults.php"  # what Nextcloud's legacy screens call the suite
 SUITE = "APS Conecta Gestión"
 SITE = "https://apsconecta.cl"  # where the suite's name links on the login page
 OFF = ("nextcloud_announcements", "firstrunwizard", "survey_client", "support")
@@ -80,7 +82,21 @@ def files(context):
     placed["core/css/site.css"] = f':root {{ --aps-establishment: "{quoted}"; }}\n'.encode()
     named = html.escape(context.centre["short_name"])
     placed[HELP] = found[HELP].read_text(encoding="utf-8").replace("{establishment}", named).encode()
+    placed[DEFAULTS] = defaults().encode()
     return placed
+
+
+def defaults():
+    """The legacy screens' defaults.php, with the suite's name, its address and the motto written in."""
+    text = (SOURCE / THEME / DEFAULTS).read_text(encoding="utf-8")
+    for name, value in {"{suite}": SUITE, "{site}": SITE, "{motto}": brand.MOTTO}.items():
+        text = text.replace(name, php(value))
+    return text
+
+
+def php(text):
+    """`text` as a PHP single-quoted string's content."""
+    return text.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def run(context):
@@ -95,4 +111,8 @@ def run(context):
 
 
 def check(context):
-    return differences(context.suite, settings(context))
+    """What Nextcloud does not hold of the step's settings, and the legacy screens' defaults.php if the placed one
+    differs."""
+    placed = context.suite.theme_file(THEME, DEFAULTS)
+    return differences(context.suite, settings(context)) + (
+        [] if placed == defaults() else [DIFFERS.format(f"{THEME}/{DEFAULTS}")])

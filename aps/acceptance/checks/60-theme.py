@@ -20,11 +20,13 @@ only home: Nextcloud's Dashboard is off, and its address does not open it. «Ini
 edit button says «Editar página», never «Edit page». No staff member sees «Nextcloud» or a link to nextcloud.com on the
 login page, «Inicio», Files, Talk or the personal settings, which link the suite's source code and its licence. From 601
 px wide, the top bar names the establishment right of the logo; a narrower window shows the logo alone. The custom
-menu's stylesheet paints it in the token file's dark violet. The theme ships its fonts as WOFF2 only. It survives a
-restart of Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of the apps
-the theme overrides texts of, after upstream's start updated them: Talk's, left stale before the restart, is its own
-Spanish as Nextcloud holds it with the theme's overrides on top after it, and Talk names no «Nextcloud» in a fresh
-browser."""
+menu's stylesheet paints it in the token file's dark violet. With maintenance mode on, the maintenance page, one of
+Nextcloud's legacy screens, loads the theme's guest stylesheet, holds the variable map, names «APS Conecta Gestión» and
+the motto and shows no «Nextcloud»; maintenance mode is off again after. The theme ships its fonts as WOFF2 only. It
+survives a restart of Nextcloud's container, and the support app stays off. Its start rebuilds the browser's Spanish of
+the apps the theme overrides texts of, after upstream's start updated them: Talk's, left stale before the restart, is
+its own Spanish as Nextcloud holds it with the theme's overrides on top after it, and Talk names no «Nextcloud» in a
+fresh browser."""
 
 import json
 import os
@@ -155,6 +157,8 @@ FOCUSED = """place => {
           style: outline.outlineStyle, width: parseFloat(outline.outlineWidth), colour: outline.outlineColor,
           offset: parseFloat(outline.outlineOffset)};
 }"""
+# The stylesheets the page loads, by address.
+STYLESHEETS = "() => [...document.styleSheets].map(sheet => sheet.href).filter(Boolean)"
 # What the top bar shows after the logo: the logo link's generated content, and the room the link gives it right of
 # the logo, which sits in the link's start padding. A public share page's #nextcloud is no link.
 TOP_BAR = """() => {
@@ -360,6 +364,29 @@ def top_bar_ring(page, label):
     return wrong
 
 
+def maintenance_page(browser):
+    """With maintenance mode on, Nextcloud's maintenance page, which skips the theming app, loads the theme's guest
+    stylesheet, holds the variable map, names the suite and the motto, and shows no «Nextcloud»; maintenance mode is
+    off again after, whatever the page shows."""
+    occ("maintenance:mode --on")
+    try:
+        page = browser.new_page(**WINDOW)
+        answer = page.goto(f"{suite}/")
+        sheets = page.evaluate(STYLESHEETS)
+        print(f"maintenance page: {answer.status}, stylesheets {sheets}")
+        guest = f"/themes/{THEME}/core/css/guest.css"
+        wrong = [] if answer.status == 503 else [f"the maintenance page answers {answer.status}, not 503"]
+        wrong += [] if any(guest in sheet for sheet in sheets) else [f"the maintenance page does not load {guest}"]
+        expected = {**role_values(VARIABLE_MAP), "--border-radius": RADIUS}
+        wrong += off(measure(page, expected), "the maintenance page", expected)
+        text = page.title() + "\n" + page.inner_text("body")
+        wrong += [f"the maintenance page does not name «{named}»" for named in (SUITE, brand.MOTTO)
+                  if named not in text]
+        return wrong + shows(page, "maintenance")
+    finally:
+        occ("maintenance:mode --off")
+
+
 def shipped_fonts():
     """The theme folder's font files are WOFF2 only."""
     placed = machine(f"{NEXTCLOUD} find {PLACED} -type f").split()
@@ -505,6 +532,7 @@ with chromium() as browser:
     menu = page.evaluate(TEXT, f"{suite}/apps/side_menu/css/stylesheet")
     if f"--side-menu-background-color: {tokens['--aps-violet-dark']}" not in menu:
         problems.append("the custom menu's stylesheet does not paint it in the token file's dark violet")
+    problems += maintenance_page(browser)
 
     machine(f"{NEXTCLOUD} cp {TALK}.js {BROWSER}")  # a stale browser file for Talk: its own, naming «Nextcloud»
     page.goto(f"{suite}/status.php")  # a page with no script of its own to reload it while Nextcloud restarts
