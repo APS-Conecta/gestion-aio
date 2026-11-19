@@ -34,3 +34,12 @@ body {
 
   --border-radius: 6px !important;  /* the manual's small radius */
 }
+
+/* When the system asks for more contrast, secondary text takes the ink and borders the muted colour. */
+@media (prefers-contrast: more) {
+  body {
+    --color-text-maxcontrast: var(--aps-ink) !important;
+    --color-text-maxcontrast-default: var(--aps-ink) !important;
+    --color-border: var(--aps-muted) !important;
+  }
+}
