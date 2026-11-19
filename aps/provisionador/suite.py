@@ -625,6 +625,12 @@ class Suite:
         self.execute(NEXTCLOUD, ("sh", "-c", THEME, "sh", name), base64.b64encode(archive.getvalue()).decode(),
                      THEME_FAILED)
 
+    def theme_file(self, name, path):
+        """The text of the file at `path` in the theme folder `name` in Nextcloud's themes folder: empty when there is
+        none."""
+        return self.execute(NEXTCLOUD, ("sh", "-c", 'cat "/var/www/html/themes/$1/$2" 2>/dev/null || true', "sh", name,
+                                        path), failed=THEME_FAILED)
+
     def browser_texts(self):
         """The browser's texts of the apps Nextcloud holds now, as the image's browser-texts.php builds them from the
         theme folders."""
@@ -1369,6 +1375,10 @@ class FakeSuite:
     def theme(self, name, files):
         self._outage_guard("nextcloud")
         self.themes[name] = dict(files)
+
+    def theme_file(self, name, path):
+        self._outage_guard("nextcloud")
+        return self.themes.get(name, {}).get(path, b"").decode()
 
     def browser_texts(self):
         self._outage_guard("nextcloud")
