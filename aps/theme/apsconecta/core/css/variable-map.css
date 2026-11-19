@@ -1,0 +1,36 @@
+/* SPDX-FileCopyrightText: 2026 APS Conecta
+   SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* The variable map: the brand role each of Nextcloud 34's theming variables takes. Apps take the brand only through
+   these variables (ADR 0003, docs/adr). Nextcloud declares them on body for the active theme, so the map sets them
+   there, over its values. It sets only those whose Nextcloud value differs from the role: theming already gives the
+   primary colour, its element and text colours and the backdrop, and an alias Nextcloud writes as a var() of a mapped
+   variable (the primary element's light family) follows on its own. Nextcloud keeps its pale status backgrounds, its
+   success text, its input borders, its clickable area, its font size and line height, and its element, large and pill
+   radii. */
+body {
+  --color-primary-hover: var(--aps-violet-hover) !important;
+  --color-primary-element-hover: var(--aps-violet-hover) !important;
+  --color-primary-light: var(--aps-violet-tint) !important;
+  --color-primary-light-hover: var(--aps-violet-tint-hover) !important;
+  --color-primary-light-text: var(--aps-violet-dark) !important;
+
+  --color-main-text: var(--aps-ink) !important;
+  --color-text-maxcontrast: var(--aps-muted) !important;
+  --color-text-maxcontrast-default: var(--aps-muted) !important;
+
+  --color-background-hover: var(--aps-canvas) !important;
+  --color-background-dark: var(--aps-canvas) !important;
+  --color-background-darker: var(--aps-border) !important;
+  --color-border: var(--aps-border) !important;
+
+  --color-element-error: var(--aps-error) !important;
+  --color-element-warning: var(--aps-warning) !important;
+  --color-element-success: var(--aps-success) !important;
+  --color-element-info: var(--aps-info) !important;
+  --color-text-error: var(--aps-error-text) !important;
+  --color-error-text: var(--aps-error-text) !important;
+  --color-warning-text: var(--aps-warning-text) !important;
+
+  --border-radius: 6px !important;  /* the manual's small radius */
+}
