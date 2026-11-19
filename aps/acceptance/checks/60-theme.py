@@ -124,19 +124,21 @@ VARIABLES = """expected => {
   probe.remove();
   return found;
 }"""
-# What the page shows of the brand's type and top bar: its first visible heading (the layout's hidden h1 when it shows
-# none), with its font and letter spacing in em, the body's font, the brand fonts as the page computes them, the brand
-# fonts' italic faces it declares, and the top bar's background image. Nextcloud hides a heading in a 1 px box.
+# What the page shows of the brand's type and top bar: its first visible heading (else the layout's hidden h1, else
+# none: Talk replaces the layout's content), with its font and letter spacing in em, the body's font, the brand fonts
+# as the page computes them, the brand fonts' italic faces it declares, and the top bar's background image. Nextcloud
+# hides a heading in a 1 px box.
 TYPE_AND_TOP_BAR = """brand => {
   const probe = document.body.appendChild(document.createElement('i'));
   const family = value => (probe.style.fontFamily = value, getComputedStyle(probe).fontFamily);
   const first = [...document.querySelectorAll('h1, h2, h3')].find(h => h.checkVisibility() && h.offsetWidth > 1)
     || document.querySelector('h1');
-  const heading = getComputedStyle(first), header = document.getElementById('header');
+  const heading = first && getComputedStyle(first), header = document.getElementById('header');
   const families = [brand.display, brand.text].map(fonts => fonts.split(',')[0].replaceAll('"', '').trim());
   const shown = {
-    display: family(brand.display), text: family(brand.text), headingText: first.textContent.trim().slice(0, 60),
-    heading: heading.fontFamily, spacing: parseFloat(heading.letterSpacing) / parseFloat(heading.fontSize) || null,
+    display: family(brand.display), text: family(brand.text), headingText: first?.textContent.trim().slice(0, 60),
+    heading: heading?.fontFamily,
+    spacing: heading && (parseFloat(heading.letterSpacing) / parseFloat(heading.fontSize) || null),
     body: getComputedStyle(document.body).fontFamily,
     italic: [...document.fonts].filter(face => families.includes(face.family.replaceAll('"', ''))
                                         && face.style !== 'normal').map(face => `${face.family} ${face.style}`),
@@ -242,17 +244,20 @@ def mapped(page, label):
 
 
 def type_and_top_bar(page, label):
-    """The page's first visible heading is in the display font with the manual's letter spacing and its body in the
-    body font, with no italic face of either; a logged-in page's top bar shows the gradient from dark violet to violet,
-    and the login page's top area none."""
+    """The page's first visible heading, when it shows one, is in the display font with the manual's letter spacing,
+    and its body in the body font, with no italic face of either; a logged-in page's top bar shows the gradient from
+    dark violet to violet, and the login page's top area none."""
     fonts = {"display": tokens["--aps-font-display"], "text": tokens["--aps-font-body"]}
     shown = page.evaluate(TYPE_AND_TOP_BAR, fonts)
     print(f"{label}: {shown}")
-    wrong = [] if shown["heading"] == shown["display"] else [f"{label}'s first heading is in {shown['heading']}"]
-    spacing = shown["spacing"]
-    if spacing is None or abs(spacing - LETTER_SPACING) > 0.001:
-        spaced = "normally" if spacing is None else f"{spacing:.3f}em"
-        wrong.append(f"{label}'s first heading is spaced {spaced}, not {LETTER_SPACING}em")
+    wrong = []
+    if shown["heading"] is not None:
+        if shown["heading"] != shown["display"]:
+            wrong.append(f"{label}'s first heading is in {shown['heading']}")
+        spacing = shown["spacing"]
+        if spacing is None or abs(spacing - LETTER_SPACING) > 0.001:
+            spaced = "normally" if spacing is None else f"{spacing:.3f}em"
+            wrong.append(f"{label}'s first heading is spaced {spaced}, not {LETTER_SPACING}em")
     if shown["body"] != shown["text"]:
         wrong.append(f"{label}'s body is in {shown['body']}")
     if shown["italic"]:

@@ -9,9 +9,12 @@
 @import url("variable-map.css");
 @import url("site.css");
 
-/* Nextcloud's font is its --font-face, which theming sets on body. Headings take the display font with the manual's
-   letter spacing. */
-body { --font-face: var(--aps-font-body) !important; }
+/* Nextcloud's font is its --font-face, which theming sets on body, and which the guest pages' body passes over for a
+   system font list of its own. Headings take the display font with the manual's letter spacing. */
+body {
+  --font-face: var(--aps-font-body) !important;
+  font-family: var(--font-face) !important;
+}
 h1, h2, h3 { font-family: var(--aps-font-display); letter-spacing: -0.015em; }
 
 /* The logged-in top bar shows the brand's gradient. The guest pages' top area is a bare box, which it would paint as a
