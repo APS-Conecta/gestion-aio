@@ -1,0 +1,7 @@
+/* SPDX-FileCopyrightText: 2026 APS Conecta
+   SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* The APS Conecta theme on Nextcloud's guest pages, the legacy screens (maintenance, update and error) too, which skip
+   the theming app and load this stylesheet beside core's guest one. It brings the whole theme, written once in the main
+   stylesheet: the variable map, the brand fonts and the theme's rules. */
+@import url("server.css");
